@@ -41,7 +41,7 @@ interface KanbanCardProps {
   onEdit: () => void;
   onDelete: () => void;
   onViewOutput?: () => void;
-  onViewConversation?: () => void;
+  onOpenWeb?: () => void;
   onVerify?: () => void;
   onResume?: () => void;
   onForceStop?: () => void;
@@ -79,7 +79,7 @@ export const KanbanCard = memo(function KanbanCard({
   onEdit,
   onDelete,
   onViewOutput,
-  onViewConversation,
+  onOpenWeb,
   onVerify,
   onResume,
   onForceStop,
@@ -317,7 +317,7 @@ export const KanbanCard = memo(function KanbanCard({
           isSelectionMode={isSelectionMode}
           onEdit={onEdit}
           onViewOutput={onViewOutput}
-          onViewConversation={onViewConversation}
+          onOpenWeb={onOpenWeb}
           onVerify={onVerify}
           onResume={onResume}
           onForceStop={onForceStop}

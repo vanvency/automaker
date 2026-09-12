@@ -11,13 +11,7 @@
  */
 
 // Features
-export {
-  useFeatures,
-  useFeature,
-  useAgentOutput,
-  useFeatureConversation,
-  type FeatureConversationResult,
-} from './use-features';
+export { useFeatures, useFeature, useAgentOutput } from './use-features';
 
 // GitHub
 export {

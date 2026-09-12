@@ -14,7 +14,6 @@ import {
   ClipboardList,
   ChevronLeft,
   ChevronRight,
-  MessagesSquare,
   ExternalLink,
 } from 'lucide-react';
 import { Spinner } from '@/components/ui/spinner';
@@ -31,12 +30,7 @@ import {
   type PhaseSummaryEntry,
 } from '@/lib/log-parser';
 import { getFirstNonEmptySummary } from '@/lib/summary-selection';
-import {
-  useAgentOutput,
-  useFeature,
-  useFeatureConversation,
-  type FeatureConversationResult,
-} from '@/hooks/queries';
+import { useAgentOutput, useFeature } from '@/hooks/queries';
 import { cn } from '@/lib/utils';
 import { MODAL_CONSTANTS } from '@/components/views/board-view/dialogs/agent-output-modal.constants';
 import type { AutoModeEvent } from '@/types/electron';
@@ -56,105 +50,9 @@ interface AgentOutputModalProps {
   projectPath?: string;
   /** Branch name for the feature worktree - used when viewing changes */
   branchName?: string;
-  /** View to select when the modal opens */
-  initialViewMode?: ViewMode;
 }
 
 type ViewMode = (typeof MODAL_CONSTANTS.VIEW_MODES)[keyof typeof MODAL_CONSTANTS.VIEW_MODES];
-
-/**
- * Renders the provider's real conversation (messages, reasoning and tools).
- */
-function ConversationPanel({
-  conversation,
-  isLoading,
-  error,
-}: {
-  conversation?: FeatureConversationResult;
-  isLoading: boolean;
-  error: Error | null;
-}) {
-  if (isLoading && !conversation) {
-    return (
-      <div className="flex items-center justify-center h-full text-muted-foreground">
-        <Spinner size="lg" className="mr-2" />
-        Loading conversation...
-      </div>
-    );
-  }
-  if (error) {
-    return (
-      <div className="flex items-center justify-center h-full px-6 text-center text-sm text-muted-foreground">
-        {error.message}
-      </div>
-    );
-  }
-  const messages = conversation?.messages ?? [];
-  if (messages.length === 0) {
-    return (
-      <div className="flex items-center justify-center h-full px-6 text-center text-sm text-muted-foreground">
-        {conversation?.message || 'No provider conversation found for this worktree yet.'}
-      </div>
-    );
-  }
-  return (
-    <div className="flex-1 min-h-0 sm:min-h-[200px] sm:max-h-[60vh] overflow-y-auto scrollbar-visible space-y-3 p-1">
-      {messages.map((message, messageIndex) => (
-        <div
-          key={`${message.role}-${messageIndex}`}
-          className="rounded-lg border border-border/50 bg-card p-3"
-        >
-          <div className="mb-2 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
-            {message.role}
-          </div>
-          <div className="space-y-2">
-            {message.parts.map((part, partIndex) => {
-              if (part.type === 'text' && part.text) {
-                return (
-                  <div key={partIndex} className="whitespace-pre-wrap text-sm text-foreground/90">
-                    {part.text}
-                  </div>
-                );
-              }
-              if (part.type === 'reasoning' && part.text) {
-                return (
-                  <details key={partIndex} className="rounded-md bg-muted/50 p-2">
-                    <summary className="cursor-pointer text-xs text-muted-foreground">
-                      Thinking
-                    </summary>
-                    <div className="mt-2 whitespace-pre-wrap text-xs text-muted-foreground">
-                      {part.text}
-                    </div>
-                  </details>
-                );
-              }
-              if (part.type === 'tool') {
-                return (
-                  <div key={partIndex} className="rounded-md border border-border/50 p-2 text-xs">
-                    <div className="font-medium">Tool: {part.tool || 'unknown'}</div>
-                    {part.input != null && (
-                      <pre className="mt-1 overflow-x-auto whitespace-pre-wrap text-[11px] text-muted-foreground">
-                        {JSON.stringify(part.input, null, 2)}
-                      </pre>
-                    )}
-                    {part.output != null && (
-                      <pre className="mt-1 overflow-x-auto whitespace-pre-wrap text-[11px]">
-                        {typeof part.output === 'string'
-                          ? part.output
-                          : JSON.stringify(part.output, null, 2)}
-                      </pre>
-                    )}
-                  </div>
-                );
-              }
-              return null;
-            })}
-          </div>
-        </div>
-      ))}
-    </div>
-  );
-}
 
 /**
  * Renders a single phase entry card with header and content.
@@ -271,7 +169,6 @@ export function AgentOutputModal({
   onNumberKeyPress,
   projectPath: projectPathProp,
   branchName,
-  initialViewMode,
 }: AgentOutputModalProps) {
   const isBacklogPlan = featureId.startsWith('backlog-plan:');
 
@@ -307,9 +204,9 @@ export function AgentOutputModal({
   useEffect(() => {
     if (open) {
       setStreamedContent('');
-      setViewMode(initialViewMode ?? null);
+      setViewMode(null);
     }
-  }, [open, featureId, initialViewMode]);
+  }, [open, featureId]);
 
   // Combine initial output from query with streamed content from WebSocket
   const output = initialOutput + streamedContent;
@@ -343,14 +240,6 @@ export function AgentOutputModal({
   // Determine the effective view mode - default to summary if available, otherwise parsed
   const effectiveViewMode =
     viewMode ?? (summary ? MODAL_CONSTANTS.VIEW_MODES.SUMMARY : MODAL_CONSTANTS.VIEW_MODES.PARSED);
-  const {
-    data: conversation,
-    isLoading: isConversationLoading,
-    error: conversationError,
-  } = useFeatureConversation(resolvedProjectPath, featureId, {
-    enabled: open && viewMode === MODAL_CONSTANTS.VIEW_MODES.CONVERSATION && !isBacklogPlan,
-    pollingInterval: resolvedStatus === 'in_progress' ? 3000 : false,
-  });
 
   const handleOpenWeb = useCallback(async () => {
     if (!resolvedProjectPath) return;
@@ -707,18 +596,6 @@ export function AgentOutputModal({
                 Logs
               </button>
               <button
-                onClick={() => setViewMode('conversation')}
-                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium transition-all whitespace-nowrap ${
-                  effectiveViewMode === 'conversation'
-                    ? 'bg-primary/20 text-primary shadow-sm'
-                    : 'text-muted-foreground hover:text-foreground hover:bg-accent'
-                }`}
-                data-testid="view-mode-conversation"
-              >
-                <MessagesSquare className="w-3.5 h-3.5" />
-                Conversation
-              </button>
-              <button
                 onClick={() => setViewMode('changes')}
                 className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium transition-all whitespace-nowrap ${
                   effectiveViewMode === 'changes'
@@ -742,16 +619,14 @@ export function AgentOutputModal({
                 <FileText className="w-3.5 h-3.5" />
                 Raw
               </button>
-              {effectiveViewMode === 'conversation' && (
-                <button
-                  onClick={handleOpenWeb}
-                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium transition-all whitespace-nowrap text-muted-foreground hover:text-foreground hover:bg-accent"
-                  data-testid="open-opencode-web"
-                >
-                  <ExternalLink className="w-3.5 h-3.5" />
-                  Open Web
-                </button>
-              )}
+              <button
+                onClick={handleOpenWeb}
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium transition-all whitespace-nowrap text-muted-foreground hover:text-foreground hover:bg-accent"
+                data-testid="open-opencode-web"
+              >
+                <ExternalLink className="w-3.5 h-3.5" />
+                Open Web
+              </button>
             </div>
           </div>
           <DialogDescription
@@ -834,12 +709,6 @@ export function AgentOutputModal({
                 : 'Scroll to bottom to enable auto-scroll'}
             </div>
           </>
-        ) : effectiveViewMode === 'conversation' ? (
-          <ConversationPanel
-            conversation={conversation}
-            isLoading={isConversationLoading}
-            error={(conversationError as Error) ?? null}
-          />
         ) : (
           <>
             <div

@@ -193,7 +193,6 @@ export function BoardView({ initialFeatureId, initialProjectPath }: BoardViewPro
   const [isMounted, setIsMounted] = useState(false);
   const [showOutputModal, setShowOutputModal] = useState(false);
   const [outputFeature, setOutputFeature] = useState<Feature | null>(null);
-  const [outputViewMode, setOutputViewMode] = useState<'conversation' | null>(null);
   const [featuresWithContext, setFeaturesWithContext] = useState<Set<string>>(new Set());
   const [showArchiveAllVerifiedDialog, setShowArchiveAllVerifiedDialog] = useState(false);
   const [showBoardBackgroundModal, setShowBoardBackgroundModal] = useState(false);
@@ -948,20 +947,36 @@ export function BoardView({ initialFeatureId, initialProjectPath }: BoardViewPro
     stopFeature: autoMode.stopFeature,
   });
 
-  const openOutput = useCallback(
-    (feature: Feature) => {
-      setOutputViewMode(null);
-      handleViewOutput(feature);
+  // The conversation itself lives in the OpenCode web UI, so the card action
+  // deep-links straight to the feature's session instead of opening a modal.
+  const handleOpenOpencodeWeb = useCallback(
+    async (feature: Feature) => {
+      const projectPath = currentProject?.path;
+      if (!projectPath) return;
+      try {
+        const api = getElectronAPI();
+        const getOpencodeWeb = api.features?.getOpencodeWeb;
+        if (!getOpencodeWeb) throw new Error('OpenCode Web is not supported by this client');
+        const result = await getOpencodeWeb(projectPath, feature.id);
+        if (!result?.success || !result.url) {
+          throw new Error(result?.error || 'No OpenCode session found for this worktree yet');
+        }
+        window.open(result.url, '_blank', 'noopener,noreferrer');
+        if (result.password) {
+          try {
+            await navigator.clipboard.writeText(result.password);
+            toast.success('OpenCode 密码已复制，请在浏览器认证框粘贴');
+          } catch {
+            toast.message('OpenCode 需要登录', {
+              description: `用户名 ${result.username || 'opencode'}，密码见 /etc/opencode/server.env`,
+            });
+          }
+        }
+      } catch (error) {
+        toast.error(error instanceof Error ? error.message : 'Open OpenCode Web failed');
+      }
     },
-    [handleViewOutput]
-  );
-
-  const openConversation = useCallback(
-    (feature: Feature) => {
-      setOutputViewMode('conversation');
-      handleViewOutput(feature);
-    },
-    [handleViewOutput]
+    [currentProject?.path]
   );
 
   // Handler for bulk updating multiple features
@@ -1621,7 +1636,7 @@ export function BoardView({ initialFeatureId, initialProjectPath }: BoardViewPro
     runningAutoTasks,
     onAddFeature: () => setShowAddDialog(true),
     onStartNextFeatures: handleStartNextFeatures,
-    onViewOutput: openOutput,
+    onViewOutput: handleViewOutput,
   });
 
   // Use drag and drop hook
@@ -1995,7 +2010,7 @@ export function BoardView({ initialFeatureId, initialProjectPath }: BoardViewPro
                 actionHandlers={{
                   onEdit: (feature) => setEditingFeature(feature),
                   onDelete: (featureId) => handleDeleteFeature(featureId),
-                  onViewOutput: openOutput,
+                  onViewOutput: handleViewOutput,
                   onVerify: handleVerifyFeature,
                   onResume: handleResumeFeature,
                   onForceStop: handleForceStopFeature,
@@ -2029,7 +2044,7 @@ export function BoardView({ initialFeatureId, initialProjectPath }: BoardViewPro
                   if (isBacklogLikeStatus(feature.status) && !isRunning) {
                     setEditingFeature(feature);
                   } else {
-                    openOutput(feature);
+                    handleViewOutput(feature);
                   }
                 }}
                 sortNewestCardOnTop={defaultSortNewestCardOnTop}
@@ -2043,8 +2058,8 @@ export function BoardView({ initialFeatureId, initialProjectPath }: BoardViewPro
                 backgroundSettings={backgroundSettings}
                 onEdit={(feature) => setEditingFeature(feature)}
                 onDelete={(featureId) => handleDeleteFeature(featureId)}
-                onViewOutput={openOutput}
-                onViewConversation={openConversation}
+                onViewOutput={handleViewOutput}
+                onOpenWeb={handleOpenOpencodeWeb}
                 onVerify={handleVerifyFeature}
                 onResume={handleResumeFeature}
                 onForceStop={handleForceStopFeature}
@@ -2223,7 +2238,6 @@ export function BoardView({ initialFeatureId, initialProjectPath }: BoardViewPro
         featureDescription={outputFeature?.description || ''}
         featureId={outputFeature?.id || ''}
         featureStatus={outputFeature?.status}
-        initialViewMode={outputViewMode ?? undefined}
         onNumberKeyPress={handleOutputModalNumberKeyPress}
         branchName={outputFeature?.branchName}
       />

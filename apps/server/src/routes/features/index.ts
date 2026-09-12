@@ -16,7 +16,6 @@ import { createBulkUpdateHandler } from './routes/bulk-update.js';
 import { createBulkDeleteHandler } from './routes/bulk-delete.js';
 import { createDeleteHandler } from './routes/delete.js';
 import { createAgentOutputHandler, createRawOutputHandler } from './routes/agent-output.js';
-import { createConversationHandler } from './routes/conversation.js';
 import { createOpenCodeWebHandler } from './routes/opencode-web.js';
 import { createGenerateTitleHandler } from './routes/generate-title.js';
 import { createExportHandler } from './routes/export.js';
@@ -68,7 +67,6 @@ export function createFeaturesRoutes(
   );
   router.post('/delete', validatePathParams('projectPath'), createDeleteHandler(featureLoader));
   router.post('/agent-output', createAgentOutputHandler(featureLoader));
-  router.post('/conversation', createConversationHandler(featureLoader));
   router.post('/opencode-web', createOpenCodeWebHandler(featureLoader));
   router.post('/raw-output', createRawOutputHandler(featureLoader));
   router.post('/generate-title', createGenerateTitleHandler(settingsService));

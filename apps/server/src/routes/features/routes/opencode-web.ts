@@ -7,8 +7,28 @@
 
 import type { Request, Response } from 'express';
 import { FeatureLoader } from '../../../services/feature-loader.js';
-import { findOpenCodeSession, resolveFeatureWorkDir } from './conversation.js';
+import { findOpenCodeSession, resolveFeatureWorkDir } from './opencode-session.js';
 import { getErrorMessage, logError } from '../common.js';
+
+/**
+ * Host used in the returned web URL.
+ *
+ * The OpenCode server is machine-wide while requests reach this API over
+ * loopback, so an explicit OPENCODE_WEB_HOST (the LAN address a browser can
+ * reach) wins; otherwise fall back to the configured server host or the Host
+ * header of the request.
+ */
+function resolveWebHost(req: Request, serverUrl: URL): string {
+  const configured = process.env.OPENCODE_WEB_HOST?.trim();
+  if (configured) return configured;
+
+  const serverHost = serverUrl.hostname;
+  if (serverHost && !['127.0.0.1', 'localhost', '::1', '0.0.0.0'].includes(serverHost)) {
+    return serverHost;
+  }
+
+  return (req.headers.host || '').split(':')[0] || '127.0.0.1';
+}
 
 async function fetchSessionSlug(sessionId: string): Promise<string | null> {
   const serverUrl = process.env.OPENCODE_SERVER_URL;
@@ -66,7 +86,7 @@ export function createOpenCodeWebHandler(featureLoader: FeatureLoader) {
 
       const serverUrl = process.env.OPENCODE_SERVER_URL || 'http://127.0.0.1:4096';
       const parsed = new URL(serverUrl);
-      const host = (req.headers.host || '').split(':')[0] || '127.0.0.1';
+      const host = resolveWebHost(req, parsed);
       const port = parsed.port || (parsed.protocol === 'https:' ? '443' : '80');
       const slug = session.slug || (await fetchSessionSlug(session.id));
       const dir = slug || session.id;

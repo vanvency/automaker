@@ -12,7 +12,7 @@ import {
   Eye,
   Wand2,
   Archive,
-  MessagesSquare,
+  ExternalLink,
 } from 'lucide-react';
 
 interface CardActionsProps {
@@ -54,7 +54,7 @@ export const CardActions = memo(function CardActions({
   onComplete,
   onViewPlan,
   onApprovePlan,
-  onViewConversation,
+  onOpenWeb,
 }: CardActionsProps) {
   const showBacklogLogsButton = hasContext && !!onViewOutput;
 
@@ -472,20 +472,20 @@ export const CardActions = memo(function CardActions({
             )}
           </>
         )}
-      {onViewConversation && (
+      {onOpenWeb && (
         <Button
           variant="secondary"
           size="sm"
           className="h-7 text-[11px] px-2 shrink-0"
           onClick={(e) => {
             e.stopPropagation();
-            onViewConversation();
+            onOpenWeb();
           }}
           onPointerDown={(e) => e.stopPropagation()}
-          data-testid={`view-conversation-${feature.id}`}
-          title="Conversation"
+          data-testid={`open-opencode-web-${feature.id}`}
+          title="Open OpenCode Web"
         >
-          <MessagesSquare className="w-3 h-3" />
+          <ExternalLink className="w-3 h-3" />
         </Button>
       )}
     </div>

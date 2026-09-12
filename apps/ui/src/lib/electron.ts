@@ -519,17 +519,6 @@ export interface FeaturesAPI {
     projectPath: string,
     featureId: string
   ) => Promise<{ success: boolean; content?: string | null; error?: string }>;
-  getFeatureConversation?: (
-    projectPath: string,
-    featureId: string
-  ) => Promise<{
-    success: boolean;
-    provider?: string;
-    sessionId?: string | null;
-    messages?: Array<{ role: string; parts: Array<Record<string, unknown>> }>;
-    message?: string;
-    error?: string;
-  }>;
   getOpencodeWeb?: (
     projectPath: string,
     featureId: string
