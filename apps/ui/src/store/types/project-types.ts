@@ -41,6 +41,7 @@ export interface Feature extends Omit<
   planSpec?: PlanSpec; // Explicit planSpec type to override BaseFeature's index signature
   dependencies?: string[]; // Explicit type to override BaseFeature's index signature
   model?: string; // Explicit type to override BaseFeature's index signature
+  error?: string; // Explicit type to override BaseFeature's index signature
   branchName?: string; // Explicit type to override BaseFeature's index signature
   thinkingLevel?: ThinkingLevel; // Explicit type to override BaseFeature's index signature
   reasoningEffort?: ReasoningEffort; // Explicit type to override BaseFeature's index signature

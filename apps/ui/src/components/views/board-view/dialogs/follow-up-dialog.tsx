@@ -89,6 +89,14 @@ export function FollowUpDialog({
           </DialogDescription>
         </DialogHeader>
         <div className="space-y-4 py-4 overflow-y-auto flex-1 min-h-0">
+          {feature?.error && (
+            <div className="rounded-md border border-[var(--status-warning)]/40 bg-[var(--status-warning-bg)] p-3">
+              <p className="text-sm font-medium text-[var(--status-warning)]">
+                Agent is waiting for your confirmation
+              </p>
+              <p className="mt-1 whitespace-pre-wrap text-sm">{feature.error}</p>
+            </div>
+          )}
           <div className="space-y-2">
             <div className="flex items-center justify-between">
               <Label htmlFor="follow-up-prompt">Instructions</Label>
@@ -107,7 +115,11 @@ export function FollowUpDialog({
               onChange={onPromptChange}
               images={imagePaths}
               onImagesChange={onImagePathsChange}
-              placeholder="Describe what needs to be fixed or changed..."
+              placeholder={
+                feature?.error
+                  ? 'Reply to the confirmation request above...'
+                  : 'Describe what needs to be fixed or changed...'
+              }
               previewMap={previewMap}
               onPreviewMapChange={onPreviewMapChange}
             />
