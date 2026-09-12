@@ -12,7 +12,8 @@ import {
   Eye,
   Wand2,
   Archive,
-  ExternalLink,
+  MessageSquareReply,
+  MessagesSquare,
 } from 'lucide-react';
 
 interface CardActionsProps {
@@ -296,23 +297,22 @@ export const CardActions = memo(function CardActions({
       )}
       {!isCurrentAutoTask && feature.status === 'waiting_approval' && (
         <>
-          {/* Waiting for approval means the user has to read what the agent did
-              and answer it, so the only action opens the model output. The
-              reply itself is offered inside that modal. */}
-          {onViewOutput && (
+          {/* Waiting for approval means the user has to answer the agent (or
+              confirm a plan), so the primary action opens the reply input. */}
+          {onFollowUp && (
             <Button
               variant="default"
               size="sm"
-              className="flex-1 h-7 text-[11px]"
+              className="flex-1 h-7 text-[11px] min-w-0"
               onClick={(e) => {
                 e.stopPropagation();
-                onViewOutput();
+                onFollowUp();
               }}
               onPointerDown={(e) => e.stopPropagation()}
-              data-testid={`review-output-${feature.id}`}
+              data-testid={`reply-${feature.id}`}
             >
-              <FileText className="w-3 h-3 mr-1 shrink-0" />
-              <span className="truncate">Open Output</span>
+              <MessageSquareReply className="w-3 h-3 mr-1 shrink-0" />
+              <span className="truncate">Reply</span>
               {shortcutKey && (
                 <span
                   className="ml-1.5 px-1 py-0.5 text-[9px] font-mono rounded bg-foreground/10"
@@ -450,9 +450,8 @@ export const CardActions = memo(function CardActions({
             )}
           </>
         )}
-      {/* Waiting-for-approval cards keep a single action: the output modal
-          offers both the OpenCode web session and the reply. */}
-      {onOpenWeb && feature.status !== 'waiting_approval' && (
+      {/* Every card can jump to its OpenCode web session (the real conversation) */}
+      {onOpenWeb && (
         <Button
           variant="secondary"
           size="sm"
@@ -463,9 +462,9 @@ export const CardActions = memo(function CardActions({
           }}
           onPointerDown={(e) => e.stopPropagation()}
           data-testid={`open-opencode-web-${feature.id}`}
-          title="Open OpenCode Web"
+          title="Open conversation"
         >
-          <ExternalLink className="w-3 h-3" />
+          <MessagesSquare className="w-3 h-3" />
         </Button>
       )}
     </div>
