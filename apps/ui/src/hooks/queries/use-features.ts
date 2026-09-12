@@ -293,6 +293,67 @@ export function useFeatures(projectPath: string | undefined) {
   });
 }
 
+export interface FeatureConversationPart {
+  type?: string;
+  text?: string;
+  tool?: string;
+  input?: unknown;
+  output?: unknown;
+  status?: string;
+}
+
+export interface FeatureConversationMessage {
+  role: string;
+  parts: FeatureConversationPart[];
+}
+
+export interface FeatureConversationResult {
+  success: boolean;
+  provider?: string;
+  sessionId?: string | null;
+  messages?: FeatureConversationMessage[];
+  message?: string;
+  error?: string;
+}
+
+interface UseFeatureConversationOptions {
+  enabled?: boolean;
+  pollingInterval?: number | false;
+}
+
+/**
+ * Fetch the provider's real conversation for a feature (currently OpenCode).
+ */
+export function useFeatureConversation(
+  projectPath: string | undefined,
+  featureId: string | undefined,
+  options: UseFeatureConversationOptions = {}
+) {
+  const { enabled = true, pollingInterval } = options;
+
+  return useQuery({
+    queryKey: ['features', 'conversation', projectPath ?? '', featureId ?? ''],
+    queryFn: async (): Promise<FeatureConversationResult> => {
+      if (!projectPath || !featureId) throw new Error('Missing project path or feature ID');
+      const api = getElectronAPI();
+      const getConversation = api.features?.getFeatureConversation;
+      if (!getConversation) {
+        throw new Error('Conversation view is not supported by this client');
+      }
+      const result = await getConversation(projectPath, featureId);
+      if (!result?.success) {
+        throw new Error(result?.error || 'Failed to fetch conversation');
+      }
+      return result as FeatureConversationResult;
+    },
+    enabled: !!projectPath && !!featureId && enabled,
+    staleTime: 0,
+    refetchInterval: pollingInterval !== undefined ? pollingInterval : false,
+    refetchOnWindowFocus: false,
+    refetchOnReconnect: false,
+  });
+}
+
 interface UseFeatureOptions {
   enabled?: boolean;
   /** Override polling interval (ms). Use false to disable polling. */

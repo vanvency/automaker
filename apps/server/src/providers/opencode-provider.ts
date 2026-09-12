@@ -372,6 +372,18 @@ export class OpencodeProvider extends CliProvider {
       args.push('--model', cliModel);
     }
 
+    // When a machine-wide server is configured, attach the run client to it so
+    // the session is owned by the persistent server and can also be opened in
+    // the opencode web UI. The password is read from OPENCODE_SERVER_PASSWORD,
+    // which the CLI inherits from the server process environment.
+    const serveUrl = process.env.OPENCODE_SERVER_URL;
+    if (serveUrl) {
+      args.push('--attach', serveUrl);
+      if (options.cwd) {
+        args.push('--dir', options.cwd);
+      }
+    }
+
     // Note: OpenCode reads from stdin automatically when input is piped
     // No '-' argument needed
 

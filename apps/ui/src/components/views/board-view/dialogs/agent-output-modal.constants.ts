@@ -29,6 +29,7 @@ export const MODAL_CONSTANTS = {
   VIEW_MODES: {
     SUMMARY: 'summary',
     PARSED: 'parsed',
+    CONVERSATION: 'conversation',
     RAW: 'raw',
     CHANGES: 'changes',
   } as const,

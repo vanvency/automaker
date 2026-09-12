@@ -2048,6 +2048,10 @@ export class HttpApiClient implements ElectronAPI {
       this.post('/api/features/delete', { projectPath, featureId }),
     getAgentOutput: (projectPath: string, featureId: string) =>
       this.post('/api/features/agent-output', { projectPath, featureId }),
+    getFeatureConversation: (projectPath: string, featureId: string) =>
+      this.post('/api/features/conversation', { projectPath, featureId }),
+    getOpencodeWeb: (projectPath: string, featureId: string) =>
+      this.post('/api/features/opencode-web', { projectPath, featureId }),
     generateTitle: (description: string, projectPath?: string) =>
       this.post('/api/features/generate-title', { description, projectPath }),
     bulkUpdate: (projectPath: string, featureIds: string[], updates: Partial<Feature>) =>

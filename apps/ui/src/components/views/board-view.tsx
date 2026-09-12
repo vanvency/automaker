@@ -193,6 +193,7 @@ export function BoardView({ initialFeatureId, initialProjectPath }: BoardViewPro
   const [isMounted, setIsMounted] = useState(false);
   const [showOutputModal, setShowOutputModal] = useState(false);
   const [outputFeature, setOutputFeature] = useState<Feature | null>(null);
+  const [outputViewMode, setOutputViewMode] = useState<'conversation' | null>(null);
   const [featuresWithContext, setFeaturesWithContext] = useState<Set<string>>(new Set());
   const [showArchiveAllVerifiedDialog, setShowArchiveAllVerifiedDialog] = useState(false);
   const [showBoardBackgroundModal, setShowBoardBackgroundModal] = useState(false);
@@ -947,6 +948,22 @@ export function BoardView({ initialFeatureId, initialProjectPath }: BoardViewPro
     stopFeature: autoMode.stopFeature,
   });
 
+  const openOutput = useCallback(
+    (feature: Feature) => {
+      setOutputViewMode(null);
+      handleViewOutput(feature);
+    },
+    [handleViewOutput]
+  );
+
+  const openConversation = useCallback(
+    (feature: Feature) => {
+      setOutputViewMode('conversation');
+      handleViewOutput(feature);
+    },
+    [handleViewOutput]
+  );
+
   // Handler for bulk updating multiple features
   const handleBulkUpdate = useCallback(
     async (updates: Partial<Feature>, workMode: 'current' | 'auto' | 'custom') => {
@@ -1604,7 +1621,7 @@ export function BoardView({ initialFeatureId, initialProjectPath }: BoardViewPro
     runningAutoTasks,
     onAddFeature: () => setShowAddDialog(true),
     onStartNextFeatures: handleStartNextFeatures,
-    onViewOutput: handleViewOutput,
+    onViewOutput: openOutput,
   });
 
   // Use drag and drop hook
@@ -1978,7 +1995,7 @@ export function BoardView({ initialFeatureId, initialProjectPath }: BoardViewPro
                 actionHandlers={{
                   onEdit: (feature) => setEditingFeature(feature),
                   onDelete: (featureId) => handleDeleteFeature(featureId),
-                  onViewOutput: handleViewOutput,
+                  onViewOutput: openOutput,
                   onVerify: handleVerifyFeature,
                   onResume: handleResumeFeature,
                   onForceStop: handleForceStopFeature,
@@ -2012,7 +2029,7 @@ export function BoardView({ initialFeatureId, initialProjectPath }: BoardViewPro
                   if (isBacklogLikeStatus(feature.status) && !isRunning) {
                     setEditingFeature(feature);
                   } else {
-                    handleViewOutput(feature);
+                    openOutput(feature);
                   }
                 }}
                 sortNewestCardOnTop={defaultSortNewestCardOnTop}
@@ -2026,7 +2043,8 @@ export function BoardView({ initialFeatureId, initialProjectPath }: BoardViewPro
                 backgroundSettings={backgroundSettings}
                 onEdit={(feature) => setEditingFeature(feature)}
                 onDelete={(featureId) => handleDeleteFeature(featureId)}
-                onViewOutput={handleViewOutput}
+                onViewOutput={openOutput}
+                onViewConversation={openConversation}
                 onVerify={handleVerifyFeature}
                 onResume={handleResumeFeature}
                 onForceStop={handleForceStopFeature}
@@ -2205,6 +2223,7 @@ export function BoardView({ initialFeatureId, initialProjectPath }: BoardViewPro
         featureDescription={outputFeature?.description || ''}
         featureId={outputFeature?.id || ''}
         featureStatus={outputFeature?.status}
+        initialViewMode={outputViewMode ?? undefined}
         onNumberKeyPress={handleOutputModalNumberKeyPress}
         branchName={outputFeature?.branchName}
       />

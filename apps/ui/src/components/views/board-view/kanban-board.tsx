@@ -45,6 +45,7 @@ interface KanbanBoardProps {
   onEdit: (feature: Feature) => void;
   onDelete: (featureId: string) => void;
   onViewOutput: (feature: Feature) => void;
+  onViewConversation: (feature: Feature) => void;
   onVerify: (feature: Feature) => void;
   onResume: (feature: Feature) => void;
   onForceStop: (feature: Feature) => void;
@@ -293,6 +294,7 @@ export const KanbanBoard = memo(function KanbanBoard({
   onEdit,
   onDelete,
   onViewOutput,
+  onViewConversation,
   onVerify,
   onResume,
   onForceStop,
@@ -594,6 +596,7 @@ export const KanbanBoard = memo(function KanbanBoard({
                                       onEdit={() => onEdit(feature)}
                                       onDelete={() => onDelete(feature.id)}
                                       onViewOutput={() => onViewOutput(feature)}
+                                      onViewConversation={() => onViewConversation(feature)}
                                       onVerify={() => onVerify(feature)}
                                       onResume={() => onResume(feature)}
                                       onForceStop={() => onForceStop(feature)}
@@ -643,6 +646,7 @@ export const KanbanBoard = memo(function KanbanBoard({
                                 onEdit={() => onEdit(feature)}
                                 onDelete={() => onDelete(feature.id)}
                                 onViewOutput={() => onViewOutput(feature)}
+                                onViewConversation={() => onViewConversation(feature)}
                                 onVerify={() => onVerify(feature)}
                                 onResume={() => onResume(feature)}
                                 onForceStop={() => onForceStop(feature)}
