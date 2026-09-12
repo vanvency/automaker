@@ -1,0 +1,17 @@
+[Unit]
+Description=Automaker Web UI
+Wants=automaker-server.service
+After=automaker-server.service
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/workspace/automaker/apps/ui
+Environment=NODE_ENV=production
+Environment=VITE_SKIP_ELECTRON=true
+ExecStart=/usr/bin/node /workspace/automaker/node_modules/vite/bin/vite.js preview --host 0.0.0.0 --port 3007 --strictPort
+Restart=on-failure
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target

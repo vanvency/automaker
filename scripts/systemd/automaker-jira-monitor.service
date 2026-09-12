@@ -1,0 +1,15 @@
+[Unit]
+Description=Poll Jira AIP kaka and dispatch Automaker Codex development
+Wants=network-online.target automaker-server.service
+After=network-online.target automaker-server.service
+
+[Service]
+Type=oneshot
+User=root
+WorkingDirectory=/workspace/automaker
+Environment=PYTHONDONTWRITEBYTECODE=1
+Environment="PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+ExecStartPre=/usr/bin/curl --fail --silent --show-error --retry 15 --retry-connrefused --retry-delay 2 --retry-max-time 40 --output /dev/null http://127.0.0.1:3008/api/health
+ExecStart=/usr/bin/python3 /workspace/automaker/scripts/jira-monitor.py --config /workspace/automaker/data/jira-monitor/config.json
+TimeoutStartSec=300
+UMask=0077

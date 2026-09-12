@@ -114,3 +114,7 @@ data/
 .mcp.json
 .planning
 .bg-shell/
+
+# Python
+__pycache__/
+*.py[cod]

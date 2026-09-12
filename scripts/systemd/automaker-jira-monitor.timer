@@ -1,0 +1,11 @@
+[Unit]
+Description=Check Jira AIP kaka every five minutes
+
+[Timer]
+OnBootSec=2min
+OnUnitActiveSec=5min
+AccuracySec=10s
+Unit=automaker-jira-monitor.service
+
+[Install]
+WantedBy=timers.target

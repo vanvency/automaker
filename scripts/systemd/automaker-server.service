@@ -1,0 +1,23 @@
+[Unit]
+Description=Automaker API server
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/workspace/automaker/apps/server
+Environment=NODE_ENV=production
+Environment=AUTOMAKER_HIDE_API_KEY=true
+Environment=DATA_DIR=/workspace/automaker/data
+Environment=PORT=3008
+Environment=HOST=0.0.0.0
+Environment="PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+Environment="GIT_SSH_COMMAND=ssh -F /dev/null -o BatchMode=yes -o ConnectTimeout=15"
+ExecStart=/usr/bin/node dist/index.js
+Restart=on-failure
+RestartSec=10
+TimeoutStopSec=60
+
+[Install]
+WantedBy=multi-user.target
