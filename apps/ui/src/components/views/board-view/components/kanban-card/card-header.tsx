@@ -2,7 +2,7 @@ import { memo, useState, useMemo } from 'react';
 import type { DraggableAttributes, DraggableSyntheticListeners } from '@dnd-kit/core';
 import { Feature } from '@/store/app-store';
 import { cn } from '@/lib/utils';
-import { CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { CardDescription, CardHeader } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import {
   DropdownMenu,
@@ -507,16 +507,6 @@ export const CardHeaderSection = memo(function CardHeaderSection({
           </div>
         )}
         <div className="flex-1 min-w-0 overflow-hidden">
-          {feature.titleGenerating && !feature.title ? (
-            <div className="flex items-center gap-1.5 mb-1">
-              <Spinner size="xs" />
-              <span className="text-xs text-muted-foreground italic">Generating title...</span>
-            </div>
-          ) : feature.title ? (
-            <CardTitle className="text-sm font-semibold text-foreground mb-1 line-clamp-2">
-              {feature.title}
-            </CardTitle>
-          ) : null}
           <CardDescription
             className={cn(
               'text-xs leading-snug break-words hyphens-auto overflow-hidden text-muted-foreground',

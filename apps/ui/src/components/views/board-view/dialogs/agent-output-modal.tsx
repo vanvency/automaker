@@ -15,6 +15,7 @@ import {
   ChevronLeft,
   ChevronRight,
   ExternalLink,
+  MessageSquare,
 } from 'lucide-react';
 import { Spinner } from '@/components/ui/spinner';
 import { getElectronAPI } from '@/lib/electron';
@@ -50,6 +51,8 @@ interface AgentOutputModalProps {
   projectPath?: string;
   /** Branch name for the feature worktree - used when viewing changes */
   branchName?: string;
+  /** Open the follow-up dialog so the user can answer a waiting agent */
+  onReply?: () => void;
 }
 
 type ViewMode = (typeof MODAL_CONSTANTS.VIEW_MODES)[keyof typeof MODAL_CONSTANTS.VIEW_MODES];
@@ -169,6 +172,7 @@ export function AgentOutputModal({
   onNumberKeyPress,
   projectPath: projectPathProp,
   branchName,
+  onReply,
 }: AgentOutputModalProps) {
   const isBacklogPlan = featureId.startsWith('backlog-plan:');
 
@@ -627,6 +631,16 @@ export function AgentOutputModal({
                 <ExternalLink className="w-3.5 h-3.5" />
                 Open Web
               </button>
+              {onReply && featureStatus === 'waiting_approval' && (
+                <button
+                  onClick={onReply}
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium transition-all whitespace-nowrap bg-primary text-primary-foreground hover:bg-primary/90"
+                  data-testid="reply-to-agent"
+                >
+                  <MessageSquare className="w-3.5 h-3.5" />
+                  Reply
+                </button>
+              )}
             </div>
           </div>
           <DialogDescription

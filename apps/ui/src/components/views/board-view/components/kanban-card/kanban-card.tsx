@@ -2,10 +2,11 @@
 import React, { memo, useLayoutEffect, useState, useCallback } from 'react';
 import { useDraggable, useDroppable } from '@dnd-kit/core';
 import { cn } from '@/lib/utils';
-import { Card, CardContent } from '@/components/ui/card';
+import { Card, CardContent, CardTitle } from '@/components/ui/card';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Feature, useAppStore } from '@/store/app-store';
 import { useShallow } from 'zustand/react/shallow';
+import { ExternalLink } from 'lucide-react';
 import { CardBadges, PriorityBadges } from './card-badges';
 import { CardHeaderSection } from './card-header';
 import { CardContentSections } from './card-content-sections';
@@ -214,6 +215,14 @@ export const KanbanCard = memo(function KanbanCard({
   const isInteractive = !isDragging && !isOverlay;
   const hasError = feature.error && !isCurrentAutoTask;
 
+  // Jira links come from the dispatched feature (jiraKey/jiraUrl); fall back to
+  // the default Jira host when only the issue key is present.
+  const jiraKey = typeof feature.jiraKey === 'string' ? feature.jiraKey : undefined;
+  const jiraLabel = typeof feature.jiraKey === 'string' ? feature.jiraKey : feature.id;
+  const jiraHref =
+    (typeof feature.jiraUrl === 'string' && feature.jiraUrl) ||
+    (jiraKey ? `https://jira.transwarp.io/browse/${jiraKey}` : undefined);
+
   const innerCardClasses = cn(
     'kanban-card-content h-full relative',
     reduceEffects ? 'shadow-none' : 'shadow-sm',
@@ -257,20 +266,40 @@ export const KanbanCard = memo(function KanbanCard({
         />
       )}
 
-      {/* Status Badges Row */}
-      <CardBadges feature={feature} />
-
-      {/* Category row with selection checkbox */}
-      <div className="px-3 pt-3 flex items-center gap-2">
+      {/* Status icon and title share the top row */}
+      <div className="px-3 pt-3 flex items-start gap-2">
+        <CardBadges feature={feature} />
         {isSelectable && !isOverlay && (
           <Checkbox
             checked={isSelected}
             onCheckedChange={() => onToggleSelect?.()}
-            className="h-4 w-4 border-2 data-[state=checked]:bg-brand-500 data-[state=checked]:border-brand-500 shrink-0"
+            className="h-4 w-4 mt-0.5 border-2 data-[state=checked]:bg-brand-500 data-[state=checked]:border-brand-500 shrink-0"
             onClick={(e) => e.stopPropagation()}
           />
         )}
+        <CardTitle className="flex-1 min-w-0 text-sm font-semibold text-foreground line-clamp-2">
+          {feature.title || feature.description || feature.id}
+        </CardTitle>
+      </div>
+
+      {/* Category row with Jira link */}
+      <div className="px-3 pt-1.5 flex items-center gap-2 flex-wrap">
         <span className="text-[11px] text-muted-foreground/70 font-medium">{feature.category}</span>
+        {jiraHref && (
+          <a
+            href={jiraHref}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="inline-flex items-center gap-1 text-[11px] font-medium text-brand-500 hover:underline"
+            onClick={(e) => e.stopPropagation()}
+            onPointerDown={(e) => e.stopPropagation()}
+            data-testid={`jira-link-${feature.id}`}
+            title={`Open ${jiraLabel} in Jira`}
+          >
+            {jiraLabel}
+            <ExternalLink className="w-3 h-3" />
+          </a>
+        )}
       </div>
 
       {/* Priority and Manual Verification badges */}

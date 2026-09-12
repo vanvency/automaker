@@ -2240,6 +2240,7 @@ export function BoardView({ initialFeatureId, initialProjectPath }: BoardViewPro
         featureStatus={outputFeature?.status}
         onNumberKeyPress={handleOutputModalNumberKeyPress}
         branchName={outputFeature?.branchName}
+        onReply={outputFeature ? () => handleOpenFollowUp(outputFeature) : undefined}
       />
 
       {/* Duplicate as Child Multiple Times Dialog */}

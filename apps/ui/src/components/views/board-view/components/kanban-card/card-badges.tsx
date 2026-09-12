@@ -61,7 +61,7 @@ export const CardBadges = memo(function CardBadges({ feature }: CardBadgesProps)
 
       {/* Error badge */}
       {feature.error && (
-        <div className="flex flex-wrap items-center gap-1.5 px-3 pt-1.5 min-h-[24px]">
+        <div className="flex shrink-0 items-center gap-1.5 pt-0.5">
           <Tooltip>
             <TooltipTrigger asChild>
               <div

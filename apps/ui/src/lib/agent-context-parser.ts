@@ -94,6 +94,7 @@ export function formatModelName(model: string, options?: FormatModelNameOptions)
   if (model.startsWith('cursor-grok')) return 'Cursor Grok';
 
   // OpenCode static models (canonical opencode- prefix)
+  if (model === 'opencode-litellm/auto' || model === 'litellm/auto') return 'Auto';
   if (model === 'opencode-big-pickle') return 'Big Pickle';
   if (model === 'opencode-glm-5-free') return 'GLM 5 Free';
   if (model === 'opencode-gpt-5-nano') return 'GPT-5 Nano';

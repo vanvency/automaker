@@ -95,6 +95,16 @@ export interface OpencodeModelConfig {
  * All IDs use 'opencode-' prefix for consistent provider routing.
  */
 export const OPENCODE_MODELS: OpencodeModelConfig[] = [
+  // Local LiteLLM gateway (see /etc/litellm/config.yaml) - listed first so it
+  // is the default choice for dispatched work.
+  {
+    id: 'opencode-litellm/auto',
+    label: 'Auto',
+    description: 'LiteLLM gateway: Kimi K3, falls back to DeepSeek Flash',
+    supportsVision: false,
+    provider: 'opencode',
+    tier: 'standard',
+  },
   // OpenCode Free Tier Models
   {
     id: 'opencode-big-pickle',
@@ -135,15 +145,6 @@ export const OPENCODE_MODELS: OpencodeModelConfig[] = [
     supportsVision: false,
     provider: 'opencode',
     tier: 'free',
-  },
-  // Local LiteLLM gateway (see /etc/litellm/config.yaml)
-  {
-    id: 'opencode-litellm/auto',
-    label: 'LiteLLM Auto',
-    description: 'Local LiteLLM gateway - Kimi K3 with automatic fallback to DeepSeek Flash',
-    supportsVision: false,
-    provider: 'opencode',
-    tier: 'standard',
   },
 ];
 

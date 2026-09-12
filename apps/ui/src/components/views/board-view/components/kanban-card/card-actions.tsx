@@ -296,55 +296,33 @@ export const CardActions = memo(function CardActions({
       )}
       {!isCurrentAutoTask && feature.status === 'waiting_approval' && (
         <>
-          {/* Refine prompt button */}
-          {onFollowUp && (
+          {/* Waiting for approval means the user has to read what the agent did
+              and answer it, so the only action opens the model output. The
+              reply itself is offered inside that modal. */}
+          {onViewOutput && (
             <Button
-              variant="secondary"
+              variant="default"
               size="sm"
-              className="flex-1 h-7 text-[11px] min-w-0"
+              className="flex-1 h-7 text-[11px]"
               onClick={(e) => {
                 e.stopPropagation();
-                onFollowUp();
+                onViewOutput();
               }}
               onPointerDown={(e) => e.stopPropagation()}
-              data-testid={`follow-up-${feature.id}`}
+              data-testid={`review-output-${feature.id}`}
             >
-              <Wand2 className="w-3 h-3 mr-1 shrink-0" />
-              <span className="truncate">Refine</span>
+              <FileText className="w-3 h-3 mr-1 shrink-0" />
+              <span className="truncate">Open Output</span>
+              {shortcutKey && (
+                <span
+                  className="ml-1.5 px-1 py-0.5 text-[9px] font-mono rounded bg-foreground/10"
+                  data-testid={`shortcut-key-${feature.id}`}
+                >
+                  {shortcutKey}
+                </span>
+              )}
             </Button>
           )}
-          {/* Show Verify button if PR was created (changes are committed), otherwise show Mark as Verified button */}
-          {feature.prUrl && onManualVerify ? (
-            <Button
-              variant="default"
-              size="sm"
-              className="flex-1 h-7 text-[11px]"
-              onClick={(e) => {
-                e.stopPropagation();
-                onManualVerify();
-              }}
-              onPointerDown={(e) => e.stopPropagation()}
-              data-testid={`verify-${feature.id}`}
-            >
-              <CheckCircle2 className="w-3 h-3 mr-1" />
-              Verify
-            </Button>
-          ) : onManualVerify ? (
-            <Button
-              variant="default"
-              size="sm"
-              className="flex-1 h-7 text-[11px]"
-              onClick={(e) => {
-                e.stopPropagation();
-                onManualVerify();
-              }}
-              onPointerDown={(e) => e.stopPropagation()}
-              data-testid={`mark-as-verified-${feature.id}`}
-            >
-              <CheckCircle2 className="w-3 h-3 mr-1" />
-              Mark as Verified
-            </Button>
-          ) : null}
         </>
       )}
       {/* Running task with stale status: feature is tracked as running but status hasn't updated yet.
@@ -472,7 +450,9 @@ export const CardActions = memo(function CardActions({
             )}
           </>
         )}
-      {onOpenWeb && (
+      {/* Waiting-for-approval cards keep a single action: the output modal
+          offers both the OpenCode web session and the reply. */}
+      {onOpenWeb && feature.status !== 'waiting_approval' && (
         <Button
           variant="secondary"
           size="sm"
