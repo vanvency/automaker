@@ -11,7 +11,9 @@ export type OpencodeModelId =
   | 'opencode-glm-5-free'
   | 'opencode-gpt-5-nano'
   | 'opencode-kimi-k2.5-free'
-  | 'opencode-minimax-m2.5-free';
+  | 'opencode-minimax-m2.5-free'
+  // Local LiteLLM gateway (OpenCode provider id 'litellm')
+  | 'opencode-litellm/auto';
 
 /**
  * Legacy OpenCode model IDs (with slash format) for migration support
@@ -133,6 +135,15 @@ export const OPENCODE_MODELS: OpencodeModelConfig[] = [
     supportsVision: false,
     provider: 'opencode',
     tier: 'free',
+  },
+  // Local LiteLLM gateway (see /etc/litellm/config.yaml)
+  {
+    id: 'opencode-litellm/auto',
+    label: 'LiteLLM Auto',
+    description: 'Local LiteLLM gateway - Kimi K3 with automatic fallback to DeepSeek Flash',
+    supportsVision: false,
+    provider: 'opencode',
+    tier: 'standard',
   },
 ];
 
