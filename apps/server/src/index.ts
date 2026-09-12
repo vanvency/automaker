@@ -31,6 +31,7 @@ const LOG_LEVEL_MAP: Record<string, LogLevel> = {
   debug: LogLevel.DEBUG,
 };
 import { authMiddleware, validateWsConnectionToken, checkRawAuthentication } from './lib/auth.js';
+import { beginShutdown } from './lib/shutdown-state.js';
 import { requireJsonContentType } from './middleware/require-json-content-type.js';
 import { createAuthRoutes } from './routes/auth/index.js';
 import { createFsRoutes } from './routes/fs/index.js';
@@ -950,6 +951,7 @@ const SHUTDOWN_TIMEOUT_MS = 30000;
 // Graceful shutdown helper
 const gracefulShutdown = async (signal: string) => {
   logger.info(`${signal} received, shutting down...`);
+  beginShutdown();
 
   // Set up a force-exit timeout to prevent hanging
   const forceExitTimeout = setTimeout(() => {
@@ -957,10 +959,9 @@ const gracefulShutdown = async (signal: string) => {
     process.exit(1);
   }, SHUTDOWN_TIMEOUT_MS);
 
-  // Mark all running features as interrupted before shutdown
-  // This ensures they can be resumed when the server restarts
-  // Note: markAllRunningFeaturesInterrupted handles errors internally and never rejects
-  await autoModeService.markAllRunningFeaturesInterrupted(`${signal} signal received`);
+  // Persist, mark interrupted and abort all running features so they can be
+  // resumed automatically on the next server start.
+  await autoModeService.prepareForShutdown(`${signal} signal received`);
 
   terminalService.cleanup();
   server.close(() => {

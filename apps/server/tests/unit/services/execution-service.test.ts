@@ -1367,10 +1367,13 @@ describe('execution-service.ts', () => {
       expect(mockSaveExecutionStateFn).toHaveBeenCalledTimes(2);
     });
 
-    it('does not save execution state when isAutoMode is false', async () => {
+    it('saves execution state for manual starts so they resume after restart', async () => {
       await service.executeFeature('/test/project', 'feature-1', false, false);
 
-      expect(mockSaveExecutionStateFn).not.toHaveBeenCalled();
+      // Start and completion must both be persisted so a server restart can
+      // recover a manually started feature instead of resetting it to backlog.
+      expect(mockSaveExecutionStateFn).toHaveBeenCalledTimes(2);
+      expect(mockSaveExecutionStateFn).toHaveBeenCalledWith('/test/project');
     });
   });
 

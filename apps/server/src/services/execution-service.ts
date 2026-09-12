@@ -7,6 +7,7 @@ import type { Feature } from '@automaker/types';
 import { createLogger, classifyError, loadContextFiles, recordMemoryUsage } from '@automaker/utils';
 import { resolveModelString, DEFAULT_MODELS } from '@automaker/model-resolver';
 import { getFeatureDir } from '@automaker/platform';
+import { isShuttingDown } from '../lib/shutdown-state.js';
 import { ProviderFactory } from '../providers/provider-factory.js';
 import * as secureFs from '../lib/secure-fs.js';
 import {
@@ -177,7 +178,10 @@ ${feature.spec}
       allowReuse: options?._calledInternally,
     });
     const abortController = tempRunningFeature.abortController;
-    if (isAutoMode) await this.saveExecutionStateFn(projectPath);
+    // Persist running features for every execution, not just auto-mode.
+    // Manual starts (including Jira-dispatched tasks) would otherwise be reset
+    // to backlog on restart and never resumed.
+    await this.saveExecutionStateFn(projectPath);
     let feature: Feature | null = null;
     let pipelineCompleted = false;
 
@@ -440,6 +444,16 @@ Please continue from where you left off and complete all remaining tasks. Use th
         }
       }
 
+      // A shutdown can end the provider stream without an abort error. Keep the
+      // feature interrupted so the next start resumes it instead of marking it done.
+      if (isShuttingDown()) {
+        await this.updateFeatureStatusFn(projectPath, featureId, 'interrupted');
+        logger.info(
+          `[executeFeature] Feature ${featureId} interrupted by server shutdown; resume on next start`
+        );
+        return;
+      }
+
       // Read agent output before determining final status.
       // CLI-based providers (Cursor, Codex, etc.) may exit quickly without doing
       // meaningful work. Check output to avoid prematurely marking as 'verified'.
@@ -581,7 +595,9 @@ Please continue from where you left off and complete all remaining tasks. Use th
       }
     } finally {
       this.releaseRunningFeature(featureId);
-      if (isAutoMode && projectPath) await this.saveExecutionStateFn(projectPath);
+      // During shutdown the recovery snapshot is written by the graceful
+      // shutdown path. Saving here after release would erase the running ids.
+      if (projectPath && !isShuttingDown()) await this.saveExecutionStateFn(projectPath);
     }
   }
 

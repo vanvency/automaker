@@ -10,8 +10,11 @@
  */
 
 import path from 'path';
+import { DEFAULT_MAX_CONCURRENCY } from '@automaker/types';
+import { ensureAutomakerDir, getExecutionStatePath } from '@automaker/platform';
 import { createLogger } from '@automaker/utils';
 import type { EventEmitter } from '../../lib/events.js';
+import * as secureFs from '../../lib/secure-fs.js';
 import { TypedEventBus } from '../typed-event-bus.js';
 import { ConcurrencyManager } from '../concurrency-manager.js';
 import { WorktreeResolver } from '../worktree-resolver.js';
@@ -202,6 +205,54 @@ export class GlobalAutoModeService {
       logger.info(
         `Marked ${allRunning.length} running feature(s) as interrupted: ${reason || 'no reason provided'}`
       );
+    }
+  }
+
+  /**
+   * Persist running features, mark them interrupted, then abort them.
+   *
+   * This runs during graceful shutdown. The next server start reconciles the
+   * interrupted statuses and resumes the persisted running feature ids.
+   */
+  async prepareForShutdown(reason?: string): Promise<void> {
+    const allRunning = this.concurrencyManager.getAllRunning();
+    const byProject = new Map<string, string[]>();
+
+    for (const rf of allRunning) {
+      await this.featureStateManager.markFeatureInterrupted(rf.projectPath, rf.featureId, reason);
+      const ids = byProject.get(rf.projectPath) ?? [];
+      ids.push(rf.featureId);
+      byProject.set(rf.projectPath, ids);
+    }
+
+    for (const [projectPath, runningFeatureIds] of byProject) {
+      try {
+        await ensureAutomakerDir(projectPath);
+        const state = {
+          version: 1 as const,
+          autoLoopWasRunning: true,
+          maxConcurrency: DEFAULT_MAX_CONCURRENCY,
+          projectPath,
+          branchName: null,
+          runningFeatureIds,
+          savedAt: new Date().toISOString(),
+        };
+        await secureFs.writeFile(
+          getExecutionStatePath(projectPath),
+          JSON.stringify(state, null, 2),
+          'utf-8'
+        );
+      } catch (error) {
+        logger.warn(`Failed to persist shutdown state for ${projectPath}:`, error);
+      }
+    }
+
+    for (const rf of allRunning) {
+      rf.abortController.abort();
+    }
+
+    if (allRunning.length > 0) {
+      logger.info(`Prepared ${allRunning.length} running feature(s) for restart resume`);
     }
   }
 

@@ -88,6 +88,10 @@ export class AutoModeServiceCompat {
     return this.globalService.markAllRunningFeaturesInterrupted(reason);
   }
 
+  async prepareForShutdown(reason?: string): Promise<void> {
+    return this.globalService.prepareForShutdown(reason);
+  }
+
   async reconcileFeatureStates(projectPath: string): Promise<number> {
     return this.globalService.reconcileFeatureStates(projectPath);
   }

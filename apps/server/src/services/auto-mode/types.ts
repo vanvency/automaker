@@ -145,4 +145,6 @@ export interface GlobalAutoModeOperations {
   getRunningAgents(): Promise<RunningAgentInfo[]>;
   /** Mark all running features as interrupted (for graceful shutdown) */
   markAllRunningFeaturesInterrupted(reason?: string): Promise<void>;
+  /** Persist running features for resume, then abort them during shutdown */
+  prepareForShutdown(reason?: string): Promise<void>;
 }
