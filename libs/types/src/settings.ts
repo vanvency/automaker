@@ -15,6 +15,8 @@ import type { GeminiModelId } from './gemini-models.js';
 import { getAllGeminiModelIds, DEFAULT_GEMINI_MODEL } from './gemini-models.js';
 import type { CopilotModelId } from './copilot-models.js';
 import { getAllCopilotModelIds, DEFAULT_COPILOT_MODEL } from './copilot-models.js';
+import type { PiModelId } from './pi-models.js';
+import { getAllPiModelIds, DEFAULT_PI_MODEL } from './pi-models.js';
 import type { PromptCustomization } from './prompts.js';
 import type { CodexSandboxMode, CodexApprovalPolicy } from './codex.js';
 import type { ReasoningEffort } from './provider.js';
@@ -385,7 +387,14 @@ export function getDefaultThinkingLevel(model: string): ThinkingLevel {
 }
 
 /** ModelProvider - AI model provider for credentials and API key management */
-export type ModelProvider = 'claude' | 'cursor' | 'codex' | 'opencode' | 'gemini' | 'copilot';
+export type ModelProvider =
+  | 'claude'
+  | 'cursor'
+  | 'codex'
+  | 'opencode'
+  | 'gemini'
+  | 'copilot'
+  | 'pi';
 
 // ============================================================================
 // Claude-Compatible Providers - Configuration for Claude-compatible API endpoints
@@ -983,6 +992,10 @@ export interface PhaseModelConfig {
   /** Model for extracting learnings from completed agent sessions */
   memoryExtractionModel: PhaseModelEntry;
 
+  // Maintenance tasks - keep a running card in sync with its source of truth
+  /** Model that summarises Jira requirement edits for a task that is running */
+  jiraChangeSummaryModel: PhaseModelEntry;
+
   // Quick tasks - commit messages
   /** Model for generating git commit messages from diffs */
   commitMessageModel: PhaseModelEntry;
@@ -1019,6 +1032,7 @@ export interface WindowBounds {
  * (e.g., "Ctrl+K", "Alt+N", "Shift+P")
  */
 export interface KeyboardShortcuts {
+  workBoard: string;
   /** Open board view */
   board: string;
   /** Open agent panel */
@@ -1364,6 +1378,12 @@ export interface GlobalSettings {
   /** Default Copilot model selection when switching to Copilot CLI */
   copilotDefaultModel?: CopilotModelId;
 
+  // Pi CLI Settings (global)
+  /** Which Pi models are available in feature modal (empty = all) */
+  enabledPiModels?: PiModelId[];
+  /** Default Pi model selection when switching to Pi CLI */
+  piDefaultModel?: PiModelId;
+
   // Provider Visibility Settings
   /** Providers that are disabled and should not appear in model dropdowns */
   disabledProviders?: ModelProvider[];
@@ -1612,6 +1632,8 @@ export interface WorktreeInfo {
  * All fields are optional - missing values fall back to global settings.
  */
 export interface ProjectSettings {
+  /** Project-level Jira polling. Credentials remain in server-owned storage. */
+  jiraSync?: import('./jira-sync.js').JiraSyncConfig;
   /** Version number for schema migration */
   version: number;
 
@@ -1791,28 +1813,29 @@ export interface ProjectSettings {
  * Uses canonical prefixed model IDs for consistent routing.
  */
 export const DEFAULT_PHASE_MODELS: PhaseModelConfig = {
-  // Quick tasks - use fast models for speed and cost
-  enhancementModel: { model: 'claude-sonnet' },
-  fileDescriptionModel: { model: 'claude-haiku' },
-  imageDescriptionModel: { model: 'claude-haiku' },
+  // Pi via the local LiteLLM gateway is the default agent:
+  // leader plans/coordinates, worker executes coding work, auto covers the
+  // general-purpose calls.
+  enhancementModel: { model: 'pi:litellm/auto' },
+  fileDescriptionModel: { model: 'pi:litellm/auto' },
+  imageDescriptionModel: { model: 'pi:litellm/auto' },
 
-  // Validation - use smart models for accuracy
-  validationModel: { model: 'claude-sonnet' },
+  // Validation runs inside the coding loop
+  validationModel: { model: 'pi:litellm/worker' },
 
-  // Generation - use powerful models for quality
-  specGenerationModel: { model: 'claude-opus', thinkingLevel: 'adaptive' },
-  featureGenerationModel: { model: 'claude-sonnet' },
-  backlogPlanningModel: { model: 'claude-sonnet' },
-  projectAnalysisModel: { model: 'claude-sonnet' },
-  ideationModel: { model: 'claude-sonnet' },
+  // Generation/planning - coordinator model
+  specGenerationModel: { model: 'pi:litellm/leader' },
+  featureGenerationModel: { model: 'pi:litellm/leader' },
+  backlogPlanningModel: { model: 'pi:litellm/leader' },
+  projectAnalysisModel: { model: 'pi:litellm/leader' },
+  ideationModel: { model: 'pi:litellm/auto' },
 
-  // Memory - use fast model for learning extraction (cost-effective)
-  memoryExtractionModel: { model: 'claude-haiku' },
-
-  // Commit messages - use fast model for speed
-  commitMessageModel: { model: 'claude-haiku' },
-  // PR descriptions - use balanced model for better quality descriptions
-  prDescriptionModel: { model: 'claude-sonnet' },
+  // Memory, commit messages and PR descriptions - general-purpose calls
+  memoryExtractionModel: { model: 'pi:litellm/auto' },
+  // Summarises Jira requirement edits delivered to a running task
+  jiraChangeSummaryModel: { model: 'pi:litellm/auto' },
+  commitMessageModel: { model: 'pi:litellm/auto' },
+  prDescriptionModel: { model: 'pi:litellm/auto' },
 };
 
 /** Current version of the global settings schema */
@@ -1827,6 +1850,7 @@ export const DEFAULT_MAX_CONCURRENCY = 1;
 
 /** Default keyboard shortcut bindings */
 export const DEFAULT_KEYBOARD_SHORTCUTS: KeyboardShortcuts = {
+  workBoard: 'W',
   board: 'K',
   agent: 'A',
   spec: 'D',
@@ -1868,7 +1892,8 @@ export const DEFAULT_GLOBAL_SETTINGS: GlobalSettings = {
   useWorktrees: true,
   defaultPlanningMode: 'skip',
   defaultRequirePlanApproval: false,
-  defaultFeatureModel: { model: 'claude-opus', thinkingLevel: 'adaptive' }, // Use canonical ID with adaptive thinking
+  // Default agent for new tasks: Pi (LiteLLM worker chain) executes the coding work
+  defaultFeatureModel: { model: 'pi:litellm/worker', reasoningEffort: 'medium' },
   muteDoneSound: false,
   disableSplashScreen: false,
   defaultSortNewestCardOnTop: false,
@@ -1883,7 +1908,7 @@ export const DEFAULT_GLOBAL_SETTINGS: GlobalSettings = {
   enhancementModel: 'sonnet', // Legacy alias still supported
   validationModel: 'opus', // Legacy alias still supported
   enabledCursorModels: getAllCursorModelIds(), // Returns prefixed IDs
-  cursorDefaultModel: 'cursor-auto', // Use canonical prefixed ID
+  cursorDefaultModel: 'cursor:auto', // Use canonical prefixed ID
   enabledOpencodeModels: getAllOpencodeModelIds(), // Returns prefixed IDs
   opencodeDefaultModel: DEFAULT_OPENCODE_MODEL, // Already prefixed
   enabledDynamicModelIds: [],
@@ -1892,6 +1917,8 @@ export const DEFAULT_GLOBAL_SETTINGS: GlobalSettings = {
   geminiDefaultModel: DEFAULT_GEMINI_MODEL, // Already prefixed
   enabledCopilotModels: getAllCopilotModelIds(), // Returns prefixed IDs
   copilotDefaultModel: DEFAULT_COPILOT_MODEL, // Already prefixed
+  enabledPiModels: getAllPiModelIds(), // Returns prefixed IDs
+  piDefaultModel: DEFAULT_PI_MODEL, // Already prefixed
   disabledProviders: [],
   keyboardShortcuts: DEFAULT_KEYBOARD_SHORTCUTS,
   projects: [],

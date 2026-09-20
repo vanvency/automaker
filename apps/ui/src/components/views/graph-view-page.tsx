@@ -1,3 +1,4 @@
+import { ArchiveTaskDialog } from './board-view/dialogs/archive-task-dialog';
 import { useState, useCallback, useMemo, useEffect, useRef } from 'react';
 import { useAppStore, Feature, FeatureImagePath } from '@/store/app-store';
 import { useShallow } from 'zustand/react/shallow';
@@ -428,6 +429,8 @@ export function GraphViewPage() {
     handleAddFeature,
     handleUpdateFeature,
     handleDeleteFeature,
+    archiveFeatureIds,
+    setArchiveFeatureIds,
     handleStartImplementation,
     handleResumeFeature,
     handleViewOutput,
@@ -567,6 +570,18 @@ export function GraphViewPage() {
       className="flex-1 flex flex-col overflow-hidden content-bg relative"
       data-testid="graph-view-page"
     >
+      {archiveFeatureIds.length > 0 && currentProject && (
+        <ArchiveTaskDialog
+          key={archiveFeatureIds.join('|')}
+          projectPath={currentProject.path}
+          featureIds={archiveFeatureIds}
+          features={hookFeatures}
+          onClose={() => setArchiveFeatureIds([])}
+          onArchived={() => {
+            void loadFeatures();
+          }}
+        />
+      )}
       {/* Graph View Content */}
       <GraphView
         features={hookFeatures}
@@ -644,7 +659,6 @@ export function GraphViewPage() {
       <AgentOutputModal
         open={showOutputModal}
         onClose={() => setShowOutputModal(false)}
-        featureDescription={outputFeature?.description || ''}
         featureId={outputFeature?.id || ''}
         featureStatus={outputFeature?.status}
         onNumberKeyPress={handleOutputModalNumberKeyPress}

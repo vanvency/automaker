@@ -24,12 +24,9 @@ const getEdgeColor = (sourceStatus?: Feature['status'], targetStatus?: Feature['
   if (targetStatus === 'in_progress') {
     return 'var(--status-in-progress)';
   }
-  // If target is blocked (in backlog with incomplete deps)
-  if (targetStatus === 'backlog') {
-    return 'var(--border)';
-  }
-  // Default
-  return 'var(--border)';
+  // Pending dependencies use a stronger accent than the layout border. The old
+  // var(--border) token was nearly invisible in light themes (oklch ~0.92).
+  return 'var(--muted-foreground)';
 };
 
 export const DependencyEdge = memo(function DependencyEdge(props: EdgeProps) {
@@ -69,7 +66,7 @@ export const DependencyEdge = memo(function DependencyEdge(props: EdgeProps) {
     ? 'var(--brand-500)'
     : edgeData
       ? getEdgeColor(edgeData.sourceStatus, edgeData.targetStatus)
-      : 'var(--border)';
+      : 'var(--muted-foreground)';
 
   const isCompleted =
     edgeData?.sourceStatus === 'completed' || edgeData?.sourceStatus === 'verified';
@@ -97,7 +94,7 @@ export const DependencyEdge = memo(function DependencyEdge(props: EdgeProps) {
           path={edgePath}
           className={cn('transition-opacity duration-200', isDimmed && 'graph-edge-dimmed')}
           style={{
-            strokeWidth: selected ? 2 : 1.5,
+            strokeWidth: selected ? 2.5 : 2,
             stroke: selected ? 'var(--status-error)' : edgeColor,
             strokeDasharray: isCompleted ? 'none' : '5 5',
             opacity: isDimmed ? 0.2 : 1,
@@ -170,7 +167,7 @@ export const DependencyEdge = memo(function DependencyEdge(props: EdgeProps) {
           isDimmed && 'graph-edge-dimmed'
         )}
         style={{
-          strokeWidth: isHighlighted ? 4 : isHovered || selected ? 3 : isDimmed ? 1 : 2,
+          strokeWidth: isHighlighted ? 4 : isHovered || selected ? 3 : isDimmed ? 1 : 2.25,
           stroke: isHovered || selected ? 'var(--status-error)' : edgeColor,
           strokeDasharray: isCompleted ? 'none' : '5 5',
           filter: isHighlighted

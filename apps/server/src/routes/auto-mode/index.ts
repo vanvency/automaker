@@ -7,6 +7,7 @@
 
 import { Router } from 'express';
 import type { AutoModeServiceCompat } from '../../services/auto-mode/index.js';
+import type { FeatureLoader } from '../../services/feature-loader.js';
 import { validatePathParams } from '../../middleware/validate-paths.js';
 import { createStopFeatureHandler } from './routes/stop-feature.js';
 import { createStatusHandler } from './routes/status.js';
@@ -28,8 +29,39 @@ import { createReconcileHandler } from './routes/reconcile.js';
  *
  * @param autoModeService - AutoModeServiceCompat instance
  */
-export function createAutoModeRoutes(autoModeService: AutoModeServiceCompat): Router {
+export function createAutoModeRoutes(
+  autoModeService: AutoModeServiceCompat,
+  featureLoader?: FeatureLoader
+): Router {
   const router = Router();
+  router.use(
+    [
+      '/run-feature',
+      '/resume-feature',
+      '/follow-up-feature',
+      '/verify-feature',
+      '/approve-plan',
+      '/commit-feature',
+    ],
+    validatePathParams('projectPath'),
+    async (req, res, next) => {
+      try {
+        const { projectPath, featureId } = req.body ?? {};
+        if (featureLoader && typeof projectPath === 'string' && typeof featureId === 'string') {
+          const feature = await featureLoader.get(projectPath, featureId);
+          if (feature?.archive || feature?.supersededBy || feature?.consolidationPlanId) {
+            res
+              .status(409)
+              .json({ success: false, error: '任务已被覆盖或正在整合，请到相似任务页面查看记录' });
+            return;
+          }
+        }
+        next();
+      } catch (error) {
+        next(error);
+      }
+    }
+  );
 
   // Auto loop control routes
   router.post('/start', validatePathParams('projectPath'), createStartHandler(autoModeService));
@@ -75,7 +107,7 @@ export function createAutoModeRoutes(autoModeService: AutoModeServiceCompat): Ro
   router.post(
     '/approve-plan',
     validatePathParams('projectPath'),
-    createApprovePlanHandler(autoModeService)
+    createApprovePlanHandler(autoModeService, featureLoader)
   );
   router.post(
     '/resume-interrupted',

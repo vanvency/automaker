@@ -250,27 +250,27 @@ describe('agent-context-parser.ts', () => {
 
     describe('Codex/GPT model formatting', () => {
       it('should format codex-gpt-5.3-codex as GPT-5.3 Codex', () => {
-        expect(formatModelName('codex-gpt-5.3-codex')).toBe('GPT-5.3 Codex');
+        expect(formatModelName('codex:gpt-5.3-codex')).toBe('GPT-5.3 Codex');
       });
 
       it('should format codex-gpt-5.2-codex as GPT-5.2 Codex', () => {
-        expect(formatModelName('codex-gpt-5.2-codex')).toBe('GPT-5.2 Codex');
+        expect(formatModelName('codex:gpt-5.2-codex')).toBe('GPT-5.2 Codex');
       });
 
       it('should format codex-gpt-5.2 as GPT-5.2', () => {
-        expect(formatModelName('codex-gpt-5.2')).toBe('GPT-5.2');
+        expect(formatModelName('codex:gpt-5.2')).toBe('GPT-5.2');
       });
 
       it('should format codex-gpt-5.1-codex-max as GPT-5.1 Max', () => {
-        expect(formatModelName('codex-gpt-5.1-codex-max')).toBe('GPT-5.1 Max');
+        expect(formatModelName('codex:gpt-5.1-codex-max')).toBe('GPT-5.1 Max');
       });
 
       it('should format codex-gpt-5.1-codex-mini as GPT-5.1 Mini', () => {
-        expect(formatModelName('codex-gpt-5.1-codex-mini')).toBe('GPT-5.1 Mini');
+        expect(formatModelName('codex:gpt-5.1-codex-mini')).toBe('GPT-5.1 Mini');
       });
 
       it('should format codex-gpt-5.1 as GPT-5.1', () => {
-        expect(formatModelName('codex-gpt-5.1')).toBe('GPT-5.1');
+        expect(formatModelName('codex:gpt-5.1')).toBe('GPT-5.1');
       });
 
       it('should format gpt- prefixed models in uppercase', () => {
@@ -287,7 +287,7 @@ describe('agent-context-parser.ts', () => {
 
     describe('Cursor model formatting', () => {
       it('should format cursor-auto as Cursor Auto', () => {
-        expect(formatModelName('cursor-auto')).toBe('Cursor Auto');
+        expect(formatModelName('cursor:auto')).toBe('Cursor Auto');
       });
 
       it('should format auto as Cursor Auto', () => {
@@ -295,7 +295,7 @@ describe('agent-context-parser.ts', () => {
       });
 
       it('should format cursor-composer-1 as Composer 1', () => {
-        expect(formatModelName('cursor-composer-1')).toBe('Composer 1');
+        expect(formatModelName('cursor:composer-1')).toBe('Composer 1');
       });
 
       it('should format composer-1 as Composer 1', () => {
@@ -304,32 +304,32 @@ describe('agent-context-parser.ts', () => {
 
       it('should format cursor-sonnet (but falls through to Sonnet due to earlier check)', () => {
         // Note: The earlier 'sonnet' check in the function matches first
-        expect(formatModelName('cursor-sonnet')).toBe('Sonnet 4.5');
-        expect(formatModelName('cursor-sonnet-4-5')).toBe('Sonnet 4.5');
+        expect(formatModelName('cursor:sonnet')).toBe('Sonnet 4.5');
+        expect(formatModelName('cursor:sonnet-4-5')).toBe('Sonnet 4.5');
       });
 
       it('should format cursor-opus (but falls through to Opus due to earlier check)', () => {
         // Note: The earlier 'opus' check in the function matches first
-        expect(formatModelName('cursor-opus')).toBe('Opus 4.5');
-        expect(formatModelName('cursor-opus-4-6')).toBe('Opus 4.6');
+        expect(formatModelName('cursor:opus')).toBe('Opus 4.5');
+        expect(formatModelName('cursor:opus-4-6')).toBe('Opus 4.6');
       });
 
       it('should format cursor-gpt models', () => {
         // cursor-gpt-4 becomes gpt-4 then GPT-4 (case preserved)
-        expect(formatModelName('cursor-gpt-4')).toBe('GPT-4');
+        expect(formatModelName('cursor:gpt-4')).toBe('GPT-4');
         // cursor-gpt-4o becomes gpt-4o then GPT-4o (not uppercase o)
-        expect(formatModelName('cursor-gpt-4o')).toBe('GPT-4o');
+        expect(formatModelName('cursor:gpt-4o')).toBe('GPT-4o');
       });
 
       it('should format cursor-gemini models', () => {
-        // cursor-gemini-pro -> Cursor gemini-pro -> Cursor Gemini-pro
-        expect(formatModelName('cursor-gemini-pro')).toBe('Cursor Gemini-pro');
-        // cursor-gemini-2 -> Cursor gemini-2 -> Cursor Gemini-2
-        expect(formatModelName('cursor-gemini-2')).toBe('Cursor Gemini-2');
+        expect(formatModelName('cursor:gemini-pro')).toBe('Cursor Gemini Pro');
+        expect(formatModelName('cursor:gemini-3-pro')).toBe('Cursor Gemini 3 Pro');
+        // legacy dash form still formats
+        expect(formatModelName('cursor-gemini-3-pro')).toBe('Cursor Gemini 3 Pro');
       });
 
       it('should format cursor-grok as Cursor Grok', () => {
-        expect(formatModelName('cursor-grok')).toBe('Cursor Grok');
+        expect(formatModelName('cursor:grok')).toBe('Cursor Grok');
       });
     });
 

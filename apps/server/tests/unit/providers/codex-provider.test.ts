@@ -179,7 +179,7 @@ describe('codex-provider.ts', () => {
           prompt: 'Continue',
           model: 'gpt-5.2',
           cwd: '/tmp',
-          sdkSessionId: 'codex-session-123',
+          sdkSessionId: 'codex:session-123',
           outputFormat: { type: 'json_schema', schema: { type: 'object', properties: {} } },
           codexSettings: { additionalDirs: ['/extra/dir'] },
         })
@@ -188,7 +188,7 @@ describe('codex-provider.ts', () => {
       const call = vi.mocked(spawnJSONLProcess).mock.calls[0][0];
       expect(call.args[0]).toBe('exec');
       expect(call.args[1]).toBe('resume');
-      expect(call.args).toContain('codex-session-123');
+      expect(call.args).toContain('codex:session-123');
       expect(call.args).toContain('--json');
       // Resume queries must not include --output-schema or --add-dir
       expect(call.args).not.toContain('--output-schema');
@@ -459,16 +459,16 @@ describe('codex-provider.ts', () => {
 
   describe('validateBareModelId integration', () => {
     it('should allow codex- prefixed models for Codex provider with expectedProvider="codex"', () => {
-      expect(() => validateBareModelId('codex-gpt-4', 'CodexProvider', 'codex')).not.toThrow();
+      expect(() => validateBareModelId('codex:gpt-4', 'CodexProvider', 'codex')).not.toThrow();
       expect(() =>
-        validateBareModelId('codex-gpt-5.1-codex-max', 'CodexProvider', 'codex')
+        validateBareModelId('codex:gpt-5.1-codex-max', 'CodexProvider', 'codex')
       ).not.toThrow();
     });
 
     it('should reject other provider prefixes for Codex provider', () => {
-      expect(() => validateBareModelId('cursor-gpt-4', 'CodexProvider', 'codex')).toThrow();
-      expect(() => validateBareModelId('gemini-2.5-flash', 'CodexProvider', 'codex')).toThrow();
-      expect(() => validateBareModelId('copilot-gpt-4', 'CodexProvider', 'codex')).toThrow();
+      expect(() => validateBareModelId('cursor:gpt-4', 'CodexProvider', 'codex')).toThrow();
+      expect(() => validateBareModelId('gemini:2.5-flash', 'CodexProvider', 'codex')).toThrow();
+      expect(() => validateBareModelId('copilot:gpt-4', 'CodexProvider', 'codex')).toThrow();
     });
   });
 });

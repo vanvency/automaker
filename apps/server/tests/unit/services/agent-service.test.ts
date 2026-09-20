@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { AgentService } from '@/services/agent-service.js';
+import path from 'path';
+import { AgentService, featureConversationSessionId } from '@/services/agent-service.js';
 import { ProviderFactory } from '@/providers/provider-factory.js';
 import * as fs from 'fs/promises';
 import * as imageHandler from '@automaker/utils';
@@ -446,7 +447,7 @@ describe('agent-service.ts', () => {
       await service.sendMessage({
         sessionId: 'session-1',
         message: 'Hello',
-        model: 'gemini-2.5-flash',
+        model: 'gemini:2.5-flash',
       });
 
       expect(contextLoader.loadContextFiles).toHaveBeenCalled();
@@ -851,6 +852,154 @@ describe('agent-service.ts', () => {
 
       expect(sessions[0].id).toBe('session-2');
       expect(sessions[1].id).toBe('session-1');
+    });
+  });
+
+  describe('feature conversation mirroring', () => {
+    /** In-memory stand-in for data/sessions-metadata.json */
+    let metadataStore: Record<string, Record<string, unknown>>;
+
+    const startOptions = {
+      featureId: 'aip-114878-child-9',
+      name: 'AIP-114878 child 9',
+      projectPath: '/test/project',
+      workingDirectory: '/test/project/.worktrees/aip-114878',
+      prompt: 'Implement the knowledge base question answering',
+      model: 'pi:litellm/worker',
+      provider: 'pi',
+    };
+
+    beforeEach(() => {
+      metadataStore = {};
+      vi.mocked(fs.readFile).mockImplementation(async (filePath: any) => {
+        if (String(filePath).includes('sessions-metadata.json')) {
+          return JSON.stringify(metadataStore);
+        }
+        const error: any = new Error('ENOENT');
+        error.code = 'ENOENT';
+        throw error;
+      });
+      vi.mocked(fs.writeFile).mockImplementation(async (filePath: any, data: any) => {
+        if (String(filePath).includes('sessions-metadata.json')) {
+          metadataStore = JSON.parse(String(data));
+        }
+      });
+      vi.mocked(fs.mkdir).mockResolvedValue(undefined);
+    });
+
+    it('derives a stable session id from the feature id', () => {
+      expect(featureConversationSessionId('aip-114878-child-9')).toBe('feature-aip-114878-child-9');
+      expect(featureConversationSessionId('backlog-plan:123/abc')).toBe(
+        'feature-backlog-plan-123-abc'
+      );
+    });
+
+    it('registers the run as a running session with the prompt as first message', async () => {
+      const { sessionId } = await service.startFeatureConversation(startOptions);
+
+      expect(sessionId).toBe('feature-aip-114878-child-9');
+
+      const history = await service.getHistory(sessionId);
+      expect(history.success).toBe(true);
+      expect(history.isRunning).toBe(true);
+      expect(history.messages).toHaveLength(1);
+      expect(history.messages[0]).toMatchObject({
+        role: 'user',
+        content: startOptions.prompt,
+      });
+
+      expect(metadataStore[sessionId]).toMatchObject({
+        name: 'AIP-114878 child 9',
+        projectPath: '/test/project',
+        workingDirectory: path.resolve(startOptions.workingDirectory),
+        featureId: 'aip-114878-child-9',
+        model: 'pi:litellm/worker',
+        provider: 'pi',
+        archived: false,
+      });
+    });
+
+    it('keeps one assistant message that follows the latest transcript', async () => {
+      await service.startFeatureConversation(startOptions);
+
+      await service.updateFeatureConversation(startOptions.featureId, 'first chunk');
+      await service.updateFeatureConversation(startOptions.featureId, 'first chunk\nsecond chunk');
+
+      const history = await service.getHistory('feature-aip-114878-child-9');
+      expect(history.messages).toHaveLength(2);
+      expect(history.messages[1]).toMatchObject({
+        role: 'assistant',
+        content: 'first chunk\nsecond chunk',
+      });
+    });
+
+    it('marks the session finished and archived when the run ends', async () => {
+      await service.startFeatureConversation(startOptions);
+      await service.updateFeatureConversation(startOptions.featureId, 'done');
+
+      await service.finishFeatureConversation(startOptions.featureId);
+
+      const history = await service.getHistory('feature-aip-114878-child-9');
+      expect(history.isRunning).toBe(false);
+      expect(history.messages).toHaveLength(2);
+
+      expect(metadataStore['feature-aip-114878-child-9'].archived).toBe(true);
+    });
+
+    it('reports failures on the conversation and stops tracking the run', async () => {
+      await service.startFeatureConversation(startOptions);
+      await service.finishFeatureConversation(startOptions.featureId, {
+        error: 'provider exploded',
+      });
+
+      const history = await service.getHistory('feature-aip-114878-child-9');
+      expect(history.isRunning).toBe(false);
+      expect(history.messages.at(-1)).toMatchObject({
+        role: 'assistant',
+        content: 'Error: provider exploded',
+        isError: true,
+      });
+
+      // Further output is ignored once the run is closed
+      await service.updateFeatureConversation(startOptions.featureId, 'late output');
+      const after = await service.getHistory('feature-aip-114878-child-9');
+      expect(after.messages).toHaveLength(history.messages.length);
+    });
+
+    it('prunes old finished feature mirrors but keeps chat sessions', async () => {
+      metadataStore['msg_manual_chat'] = {
+        id: 'msg_manual_chat',
+        name: 'Manual chat',
+        workingDirectory: '/test/project',
+        createdAt: '2024-01-01T00:00:00.000Z',
+        updatedAt: '2024-01-01T00:00:00.000Z',
+        archived: true,
+      };
+      for (let i = 0; i < 26; i++) {
+        const stamp = `2024-01-01T00:00:${String(i).padStart(2, '0')}.000Z`;
+        metadataStore[`feature-old-${i}`] = {
+          id: `feature-old-${i}`,
+          name: `Old feature ${i}`,
+          workingDirectory: '/test/project',
+          createdAt: stamp,
+          updatedAt: stamp,
+          archived: true,
+          featureId: `old-${i}`,
+        };
+      }
+
+      await service.startFeatureConversation(startOptions);
+      await service.finishFeatureConversation(startOptions.featureId);
+
+      const finishedFeatures = Object.values(metadataStore).filter(
+        (session: any) => session.featureId && session.archived
+      );
+      // 26 stale mirrors + the run that just finished, capped at 25
+      expect(finishedFeatures).toHaveLength(25);
+      expect(metadataStore['feature-old-0']).toBeUndefined();
+      expect(metadataStore[featureConversationSessionId(startOptions.featureId)]).toBeDefined();
+      // Chat sessions are never pruned
+      expect(metadataStore['msg_manual_chat']).toBeDefined();
     });
   });
 

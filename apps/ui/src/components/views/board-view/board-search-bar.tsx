@@ -1,7 +1,8 @@
-import { useRef, useEffect } from 'react';
+import { useRef, useEffect, useState } from 'react';
 import { Input } from '@/components/ui/input';
-import { Search, X } from 'lucide-react';
+import { History, Search, X } from 'lucide-react';
 import { Spinner } from '@/components/ui/spinner';
+import { ConversationSearchDialog } from './dialogs/conversation-search-dialog';
 
 interface BoardSearchBarProps {
   searchQuery: string;
@@ -19,6 +20,7 @@ export function BoardSearchBar({
   currentProjectPath,
 }: BoardSearchBarProps) {
   const searchInputRef = useRef<HTMLInputElement>(null);
+  const [conversationSearchOpen, setConversationSearchOpen] = useState(false);
 
   // Focus search input when "/" is pressed
   useEffect(() => {
@@ -69,6 +71,22 @@ export function BoardSearchBar({
           </span>
         )}
       </div>
+      {/* Conversations are searched on the server: a card's transcript outlives
+          its herdr tab and its worktree, so the board's own filter cannot see it. */}
+      <button
+        onClick={() => setConversationSearchOpen(true)}
+        className="flex items-center gap-1.5 px-2 py-1.5 rounded-md border border-border text-xs text-muted-foreground hover:text-foreground hover:bg-accent transition-colors shrink-0"
+        title="Search all task conversations"
+        data-testid="conversation-search-trigger"
+      >
+        <History className="w-3.5 h-3.5" />
+        Conversations
+      </button>
+      <ConversationSearchDialog
+        open={conversationSearchOpen}
+        onOpenChange={setConversationSearchOpen}
+        projectPath={currentProjectPath}
+      />
       {/* Spec Creation Loading Badge */}
       {isCreatingSpec && currentProjectPath === creatingSpecProjectPath && (
         <div

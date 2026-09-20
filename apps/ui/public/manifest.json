@@ -1,7 +1,7 @@
 {
-  "name": "Automaker - Autonomous AI Development Studio",
+  "name": "Automaker - AI Delivery Workspace",
   "short_name": "Automaker",
-  "description": "Build software autonomously with AI agents",
+  "description": "Coordinate Jira tasks, AI agent sessions and worktree delivery",
   "start_url": "/",
   "display": "standalone",
   "background_color": "#09090b",

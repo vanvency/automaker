@@ -65,7 +65,7 @@ export async function gotoWithAuth(page: Page, url: string): Promise<void> {
 
 /** Selector matching any top-level app view by data-testid, used to detect that the app has loaded. */
 const APP_CONTENT_SELECTOR =
-  '[data-testid="welcome-view"], [data-testid="dashboard-view"], [data-testid="board-view"], [data-testid="context-view"], [data-testid="agent-view"], [data-testid="overview-view"]';
+  '[data-testid="welcome-view"], [data-testid="dashboard-view"], [data-testid="board-view"], [data-testid="context-view"], [data-testid="herdr-agent-preview"], [data-testid="overview-view"]';
 
 /**
  * Handle login screen if it appears after navigation

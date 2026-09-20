@@ -251,8 +251,12 @@ export class GeminiProvider extends CliProvider {
     // Unlike Cursor CLI where 'cursor-' is just a routing prefix, for Gemini CLI
     // the 'gemini-' is part of the actual model name Google expects
     if (bareModel && bareModel !== 'auto') {
-      // Add gemini- prefix if not already present (handles edge cases)
-      const cliModel = bareModel.startsWith('gemini-') ? bareModel : `gemini-${bareModel}`;
+      // Accept the canonical `gemini:` routing prefix, then make sure the model
+      // carries the `gemini-` form the CLI actually expects.
+      const candidate = bareModel.startsWith('gemini:')
+        ? bareModel.slice('gemini:'.length)
+        : bareModel;
+      const cliModel = candidate.startsWith('gemini-') ? candidate : `gemini-${candidate}`;
       cliArgs.push('--model', cliModel);
     }
 

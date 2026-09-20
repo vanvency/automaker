@@ -23,7 +23,6 @@ import {
 import { SIDEBAR_FEATURE_FLAGS } from './constants';
 import {
   useSidebarAutoCollapse,
-  useRunningAgents,
   useSpecRegeneration,
   useNavigation,
   useProjectCreation,
@@ -75,8 +74,7 @@ export function Sidebar() {
   const isCompact = useIsCompact();
 
   // Environment variable flags for hiding sidebar items
-  const { hideTerminal, hideRunningAgents, hideContext, hideSpecEditor, hideWiki } =
-    SIDEBAR_FEATURE_FLAGS;
+  const { hideTerminal, hideContext, hideSpecEditor, hideWiki } = SIDEBAR_FEATURE_FLAGS;
 
   // Get customizable keyboard shortcuts
   const shortcuts = useKeyboardShortcutsConfig();
@@ -152,9 +150,6 @@ export function Sidebar() {
 
   // Auto-collapse sidebar on small screens
   useSidebarAutoCollapse({ sidebarOpen, toggleSidebar });
-
-  // Running agents count
-  const { runningAgentsCount } = useRunningAgents();
 
   // Unviewed validations count
   const { count: unviewedValidationsCount } = useUnviewedValidations(currentProject);
@@ -459,9 +454,7 @@ export function Sidebar() {
           sidebarOpen={sidebarOpen}
           isActiveRoute={isActiveRoute}
           navigate={navigate}
-          hideRunningAgents={hideRunningAgents}
           hideWiki={hideWiki}
-          runningAgentsCount={runningAgentsCount}
           shortcuts={{ settings: shortcuts.settings }}
         />
 

@@ -199,7 +199,6 @@ export class ClaudeProvider extends BaseProvider {
       maxTurns = 1000,
       allowedTools,
       abortController,
-      conversationHistory,
       sdkSessionId,
       thinkingLevel,
       claudeApiProfile,
@@ -235,10 +234,11 @@ export class ClaudeProvider extends BaseProvider {
       permissionMode: 'bypassPermissions',
       allowDangerouslySkipPermissions: true,
       abortController,
-      // Resume existing SDK session if we have a session ID
-      ...(sdkSessionId && conversationHistory && conversationHistory.length > 0
-        ? { resume: sdkSessionId }
-        : {}),
+      // Resume the existing SDK session whenever a session id is present. The
+      // SDK already owns the transcript, so requiring a locally supplied
+      // `conversationHistory` here used to silently start a fresh session for
+      // feature runs (which build their own prompts and pass no history).
+      ...(sdkSessionId ? { resume: sdkSessionId } : {}),
       // Forward settingSources for CLAUDE.md file loading
       ...(options.settingSources && { settingSources: options.settingSources }),
       // Forward MCP servers configuration

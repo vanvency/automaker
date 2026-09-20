@@ -1,0 +1,24 @@
+[Unit]
+Description=Pi Web UI (web frontend for the pi coding agent)
+Wants=network-online.target
+After=network-online.target litellm.service
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/root
+Environment=HOME=/root
+Environment=PI_WEB_NO_OPEN=1
+# Keep the server alive for Automaker cards instead of shutting down when idle
+Environment=PI_WEB_IDLE_TIMEOUT_MS=0
+Environment=PI_WEB_SKIP_VERSION_CHECK=1
+Environment="PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+# Optional: PI_WEB_PASSWORD / PI_WEB_ALLOWED_HOSTS / PI_WEB_HOSTNAME
+EnvironmentFile=-/etc/pi-web/pi-web.env
+ExecStart=/usr/bin/pi-web --port 30141 --hostname 0.0.0.0
+Restart=on-failure
+RestartSec=5
+TimeoutStopSec=30
+
+[Install]
+WantedBy=multi-user.target

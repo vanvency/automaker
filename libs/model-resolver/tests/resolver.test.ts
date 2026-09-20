@@ -116,52 +116,52 @@ describe('model-resolver', () => {
       it('should pass through cursor-prefixed model unchanged', () => {
         const result = resolveModelString('cursor-composer-1');
 
-        expect(result).toBe('cursor-composer-1');
+        expect(result).toBe('cursor:composer-1');
         expect(consoleLogSpy).toHaveBeenCalledWith(expect.stringContaining('Using Cursor model'));
       });
 
       it('should handle cursor-auto model', () => {
         const result = resolveModelString('cursor-auto');
 
-        expect(result).toBe('cursor-auto');
+        expect(result).toBe('cursor:auto');
       });
 
       it('should handle cursor-gpt-4o model', () => {
         const result = resolveModelString('cursor-gpt-4o');
 
-        expect(result).toBe('cursor-gpt-4o');
+        expect(result).toBe('cursor:gpt-4o');
       });
 
-      it('should add cursor- prefix to bare Cursor model IDs', () => {
+      it('should add cursor: prefix to bare Cursor model IDs', () => {
         const result = resolveModelString('composer-1');
 
-        expect(result).toBe('cursor-composer-1');
+        expect(result).toBe('cursor:composer-1');
         // Legacy bare IDs are migrated to canonical prefixed format
         expect(consoleLogSpy).toHaveBeenCalledWith(
-          expect.stringContaining('Migrated legacy ID: "composer-1" -> "cursor-composer-1"')
+          expect.stringContaining('Migrated legacy ID: "composer-1" -> "cursor:composer-1"')
         );
       });
 
-      it('should add cursor- prefix to auto model', () => {
+      it('should add cursor: prefix to auto model', () => {
         const result = resolveModelString('auto');
 
-        expect(result).toBe('cursor-auto');
+        expect(result).toBe('cursor:auto');
       });
 
       it('should pass through unknown cursor-prefixed models', () => {
         const result = resolveModelString('cursor-unknown-future-model');
 
-        expect(result).toBe('cursor-unknown-future-model');
+        expect(result).toBe('cursor:unknown-future-model');
         // Unknown cursor-prefixed models pass through as Cursor models
         expect(consoleLogSpy).toHaveBeenCalledWith(expect.stringContaining('Using Cursor model'));
       });
 
       it('should handle all known Cursor model IDs', () => {
-        // CURSOR_MODEL_MAP now uses prefixed keys (e.g., 'cursor-auto')
+        // CURSOR_MODEL_MAP now uses prefixed keys (e.g., 'cursor:auto')
         const cursorModelIds = Object.keys(CURSOR_MODEL_MAP);
 
         for (const modelId of cursorModelIds) {
-          // modelId is already prefixed (e.g., 'cursor-auto')
+          // modelId is already prefixed (e.g., 'cursor:auto')
           const result = resolveModelString(modelId);
           expect(result).toBe(modelId);
         }
@@ -428,7 +428,7 @@ describe('model-resolver', () => {
       it('should handle Cursor model string', () => {
         const result = resolvePhaseModel('cursor-auto');
 
-        expect(result.model).toBe('cursor-auto');
+        expect(result.model).toBe('cursor:auto');
         expect(result.thinkingLevel).toBeUndefined();
       });
     });
@@ -499,7 +499,7 @@ describe('model-resolver', () => {
         const entry: PhaseModelEntry = { model: 'auto' };
         const result = resolvePhaseModel(entry);
 
-        expect(result.model).toBe('cursor-auto');
+        expect(result.model).toBe('cursor:auto');
         expect(result.thinkingLevel).toBeUndefined();
       });
 
@@ -509,7 +509,7 @@ describe('model-resolver', () => {
         const entry: PhaseModelEntry = { model: 'composer-1', thinkingLevel: 'high' };
         const result = resolvePhaseModel(entry);
 
-        expect(result.model).toBe('cursor-composer-1');
+        expect(result.model).toBe('cursor:composer-1');
         expect(result.thinkingLevel).toBe('high');
       });
 
@@ -517,7 +517,7 @@ describe('model-resolver', () => {
         const entry: PhaseModelEntry = { model: 'cursor-gpt-4o' as any };
         const result = resolvePhaseModel(entry);
 
-        expect(result.model).toBe('cursor-gpt-4o');
+        expect(result.model).toBe('cursor:gpt-4o');
       });
     });
 

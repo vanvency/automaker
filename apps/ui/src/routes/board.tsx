@@ -5,6 +5,8 @@ import { z } from 'zod';
 const boardSearchSchema = z.object({
   featureId: z.string().optional(),
   projectPath: z.string().optional(),
+  // Branch name of the selected worktree, so a URL can point at one work line.
+  worktree: z.string().optional(),
 });
 
 // Component is lazy-loaded via board.lazy.tsx for code splitting.

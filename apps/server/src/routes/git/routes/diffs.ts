@@ -23,6 +23,10 @@ export function createDiffsHandler() {
           diff: result.diff,
           files: result.files,
           hasChanges: result.hasChanges,
+          // Submodule gitlink moves expanded into the submodule's real changes
+          ...(result.submodules && result.submodules.length > 0
+            ? { submodules: result.submodules }
+            : {}),
           ...(result.mergeState ? { mergeState: result.mergeState } : {}),
         });
       } catch (innerError) {

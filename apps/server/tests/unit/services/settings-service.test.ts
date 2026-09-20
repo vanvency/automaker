@@ -14,6 +14,7 @@ import {
   type Credentials,
   type ProjectSettings,
 } from '@/types/settings.js';
+import * as automakerUtils from '@automaker/utils';
 import type { NtfyEndpointConfig } from '@automaker/types';
 
 describe('settings-service.ts', () => {
@@ -817,31 +818,29 @@ describe('settings-service.ts', () => {
       expect(result.errors.length).toBeGreaterThan(0);
     });
 
-    // Skip on Windows as chmod doesn't work the same way (CI runs on Linux)
-    it.skipIf(process.platform === 'win32')(
-      'should handle migration errors gracefully',
-      async () => {
-        // Create a read-only directory to cause write errors
-        const readOnlyDir = path.join(os.tmpdir(), `readonly-${Date.now()}`);
-        await fs.mkdir(readOnlyDir, { recursive: true });
-        await fs.chmod(readOnlyDir, 0o444);
+    it('should handle migration errors gracefully', async () => {
+      // Create a read-only directory to cause write errors
+      const readOnlyDir = path.join(os.tmpdir(), `readonly-${Date.now()}`);
+      await fs.mkdir(readOnlyDir, { recursive: true });
+      const writeFailure = vi
+        .spyOn(automakerUtils, 'atomicWriteJson')
+        .mockRejectedValue(Object.assign(new Error('Permission denied'), { code: 'EACCES' }));
 
-        const readOnlyService = new SettingsService(readOnlyDir);
-        const localStorageData = {
-          'automaker-storage': JSON.stringify({
-            state: { theme: 'light' },
-          }),
-        };
+      const readOnlyService = new SettingsService(readOnlyDir);
+      const localStorageData = {
+        'automaker-storage': JSON.stringify({
+          state: { theme: 'light' },
+        }),
+      };
 
-        const result = await readOnlyService.migrateFromLocalStorage(localStorageData);
+      const result = await readOnlyService.migrateFromLocalStorage(localStorageData);
 
-        expect(result.success).toBe(false);
-        expect(result.errors.length).toBeGreaterThan(0);
+      expect(result.success).toBe(false);
+      expect(result.errors.length).toBeGreaterThan(0);
 
-        await fs.chmod(readOnlyDir, 0o755);
-        await fs.rm(readOnlyDir, { recursive: true, force: true });
-      }
-    );
+      writeFailure.mockRestore();
+      await fs.rm(readOnlyDir, { recursive: true, force: true });
+    });
   });
 
   describe('getDataDir', () => {
@@ -968,10 +967,7 @@ describe('settings-service.ts', () => {
       expect(settings.phaseModels.enhancementModel).toEqual({ model: 'claude-haiku' });
       expect(settings.phaseModels.validationModel).toEqual({ model: 'claude-opus' });
       // Other fields should use defaults (canonical IDs) - specGenerationModel includes thinkingLevel from DEFAULT_PHASE_MODELS
-      expect(settings.phaseModels.specGenerationModel).toEqual({
-        model: 'claude-opus',
-        thinkingLevel: 'adaptive',
-      });
+      expect(settings.phaseModels.specGenerationModel).toEqual({ model: 'pi:litellm/leader' });
     });
 
     it('should use default phase models when none are configured', async () => {
@@ -986,12 +982,9 @@ describe('settings-service.ts', () => {
       const settings = await settingsService.getGlobalSettings();
 
       // Should use DEFAULT_PHASE_MODELS (with canonical IDs) - specGenerationModel includes thinkingLevel from DEFAULT_PHASE_MODELS
-      expect(settings.phaseModels.enhancementModel).toEqual({ model: 'claude-sonnet' });
-      expect(settings.phaseModels.fileDescriptionModel).toEqual({ model: 'claude-haiku' });
-      expect(settings.phaseModels.specGenerationModel).toEqual({
-        model: 'claude-opus',
-        thinkingLevel: 'adaptive',
-      });
+      expect(settings.phaseModels.enhancementModel).toEqual({ model: 'pi:litellm/auto' });
+      expect(settings.phaseModels.fileDescriptionModel).toEqual({ model: 'pi:litellm/auto' });
+      expect(settings.phaseModels.specGenerationModel).toEqual({ model: 'pi:litellm/leader' });
     });
 
     it('should deep merge phaseModels on update', async () => {
@@ -1024,22 +1017,20 @@ describe('settings-service.ts', () => {
   });
 
   describe('atomicWriteJson', () => {
-    // Skip on Windows as chmod doesn't work the same way (CI runs on Linux)
-    it.skipIf(process.platform === 'win32')(
-      'should handle write errors and clean up temp file',
-      async () => {
-        // Create a read-only directory to cause write errors
-        const readOnlyDir = path.join(os.tmpdir(), `readonly-${Date.now()}`);
-        await fs.mkdir(readOnlyDir, { recursive: true });
-        await fs.chmod(readOnlyDir, 0o444);
+    it('should handle write errors and clean up temp file', async () => {
+      // Create a read-only directory to cause write errors
+      const readOnlyDir = path.join(os.tmpdir(), `readonly-${Date.now()}`);
+      await fs.mkdir(readOnlyDir, { recursive: true });
+      const writeFailure = vi
+        .spyOn(automakerUtils, 'atomicWriteJson')
+        .mockRejectedValue(Object.assign(new Error('Permission denied'), { code: 'EACCES' }));
 
-        const readOnlyService = new SettingsService(readOnlyDir);
+      const readOnlyService = new SettingsService(readOnlyDir);
 
-        await expect(readOnlyService.updateGlobalSettings({ theme: 'light' })).rejects.toThrow();
+      await expect(readOnlyService.updateGlobalSettings({ theme: 'light' })).rejects.toThrow();
 
-        await fs.chmod(readOnlyDir, 0o755);
-        await fs.rm(readOnlyDir, { recursive: true, force: true });
-      }
-    );
+      writeFailure.mockRestore();
+      await fs.rm(readOnlyDir, { recursive: true, force: true });
+    });
   });
 });

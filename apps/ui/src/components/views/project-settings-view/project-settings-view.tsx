@@ -7,6 +7,7 @@ import { ProjectThemeSection } from './project-theme-section';
 import { WorktreePreferencesSection } from './worktree-preferences-section';
 import { CommandsAndScriptsSection } from './commands-and-scripts-section';
 import { ProjectModelsSection } from './project-models-section';
+import { JiraSyncSection } from './jira-sync-section';
 import { DataManagementSection } from './data-management-section';
 import { OrphanedFeaturesSection } from './orphaned-features-section';
 import { DangerZoneSection } from '../settings-view/danger-zone/danger-zone-section';
@@ -96,6 +97,8 @@ export function ProjectSettingsView() {
     if (!currentProject) return null;
 
     switch (activeView) {
+      case 'jira':
+        return <JiraSyncSection key={currentProject.path} project={currentProject} />;
       case 'identity':
         return <ProjectIdentitySection project={currentProject} />;
       case 'theme':

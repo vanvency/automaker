@@ -32,6 +32,8 @@ import type {
   NotificationsAPI,
   EventHistoryAPI,
   CreatePROptions,
+  PiStatusResponse,
+  ConversationSearchMatch,
 } from './electron';
 import type {
   IdeationContextSources,
@@ -1433,6 +1435,7 @@ export class HttpApiClient implements ElectronAPI {
 
   // Setup API
   setup = {
+    getPiStatus: (): Promise<PiStatusResponse> => this.get('/api/setup/pi-status'),
     getClaudeStatus: (): Promise<{
       success: boolean;
       status?: string;
@@ -2050,6 +2053,58 @@ export class HttpApiClient implements ElectronAPI {
       this.post('/api/features/agent-output', { projectPath, featureId }),
     getOpencodeWeb: (projectPath: string, featureId: string) =>
       this.post('/api/features/opencode-web', { projectPath, featureId }),
+    getPiWeb: (projectPath: string, featureId: string) =>
+      this.post('/api/features/pi-web', { projectPath, featureId }),
+    getHerdrWeb: (projectPath: string, featureId: string) =>
+      this.post('/api/features/herdr-web', { projectPath, featureId }),
+    getHerdrTask: (projectPath: string, featureId: string) =>
+      this.get(
+        `/api/features/herdr-task?projectPath=${encodeURIComponent(projectPath)}&featureId=${encodeURIComponent(featureId)}`
+      ),
+    /** Resident sessions + one-shot calls that ran for this card */
+    timeline: (
+      projectPath: string,
+      featureId: string
+    ): Promise<{
+      success: boolean;
+      workDir?: string;
+      entries?: Array<{
+        id: string;
+        kind: 'session' | 'one-shot' | 'lifecycle' | 'jira';
+        at: string;
+        endedAt?: string | null;
+        title: string;
+        detail?: string;
+        model?: string;
+        turns?: number;
+        status?: 'ok' | 'error';
+      }>;
+      error?: string;
+    }> => this.post('/api/features/timeline', { projectPath, featureId }),
+    /** Keyword search across every task transcript of the project */
+    searchConversations: (
+      projectPath: string,
+      query: string,
+      limit?: number
+    ): Promise<{
+      success: boolean;
+      error?: string;
+      data?: {
+        matches: ConversationSearchMatch[];
+        scannedSessions: number;
+        truncated: boolean;
+      };
+    }> => this.post('/api/features/conversation-search', { projectPath, query, limit }),
+    dispatchHerdr: (projectPath: string, featureId: string, workDir?: string) =>
+      this.post('/api/features/herdr-dispatch', { projectPath, featureId, workDir }),
+    /** Delivery merge requests GitLab reports as conflicting for this card */
+    getMergeConflicts: (projectPath: string, featureId: string) =>
+      this.post('/api/features/mr-conflicts', { projectPath, featureId }),
+    /** Hand the conflicted repositories to the agents of the tasks that own them */
+    resolveConflicts: (projectPath: string, featureId: string) =>
+      this.post('/api/features/resolve-conflicts', { projectPath, featureId }),
+    collectAcceptanceEvidence: (projectPath: string, featureId: string) =>
+      this.post('/api/features/acceptance-evidence', { projectPath, featureId }),
     generateTitle: (description: string, projectPath?: string) =>
       this.post('/api/features/generate-title', { description, projectPath }),
     bulkUpdate: (projectPath: string, featureIds: string[], updates: Partial<Feature>) =>
@@ -2248,6 +2303,12 @@ export class HttpApiClient implements ElectronAPI {
 
   // Worktree API
   worktree: WorktreeAPI = {
+    previewStatus: (projectPath, worktreePath) =>
+      this.post('/api/worktree/preview-status', { projectPath, worktreePath }),
+    previewStart: (projectPath, worktreePath) =>
+      this.post('/api/worktree/preview-start', { projectPath, worktreePath }),
+    previewStop: (projectPath, worktreePath) =>
+      this.post('/api/worktree/preview-stop', { projectPath, worktreePath }),
     mergeFeature: (
       projectPath: string,
       branchName: string,
@@ -2267,6 +2328,10 @@ export class HttpApiClient implements ElectronAPI {
     getStatus: (projectPath: string, featureId: string) =>
       this.post('/api/worktree/status', { projectPath, featureId }),
     list: (projectPath: string) => this.post('/api/worktree/list', { projectPath }),
+    progress: (
+      projectPath: string,
+      options?: { baseBranch?: string; includeGitDetails?: boolean }
+    ) => this.post('/api/worktree/progress', { projectPath, ...options }),
     listAll: (projectPath: string, includeDetails?: boolean, forceRefreshGitHub?: boolean) =>
       this.post('/api/worktree/list', { projectPath, includeDetails, forceRefreshGitHub }),
     create: (projectPath: string, branchName: string, baseBranch?: string) =>
@@ -2319,8 +2384,11 @@ export class HttpApiClient implements ElectronAPI {
       this.post('/api/worktree/create-pr', { worktreePath, ...options }),
     updatePRNumber: (worktreePath: string, prNumber: number, projectPath?: string) =>
       this.post('/api/worktree/update-pr-number', { worktreePath, prNumber, projectPath }),
-    getDiffs: (projectPath: string, featureId: string) =>
-      this.post('/api/worktree/diffs', { projectPath, featureId }),
+    getDiffs: (
+      projectPath: string,
+      featureId: string,
+      options?: { taskScope?: 'auto' | 'branch' }
+    ) => this.post('/api/worktree/diffs', { projectPath, featureId, ...options }),
     getFileDiff: (projectPath: string, featureId: string, filePath: string) =>
       this.post('/api/worktree/file-diff', {
         projectPath,
@@ -2608,6 +2676,42 @@ export class HttpApiClient implements ElectronAPI {
       directories?: Array<{ name: string; path: string }>;
       error?: string;
     }> => this.get('/api/workspace/directories'),
+  };
+
+  // Herdr API - live workspace preview used by the Agent sidebar entry
+  herdr = {
+    getStatus: (): Promise<{
+      success: boolean;
+      status?: {
+        available: boolean;
+        version: string | null;
+        sessionName: string;
+        sessionRunning: boolean;
+        piIntegrationReady: boolean;
+        problems: string[];
+      };
+      error?: string;
+    }> => this.get('/api/herdr/status'),
+
+    getPreview: (
+      projectPath: string,
+      workDir?: string,
+      cols?: number,
+      rows?: number
+    ): Promise<{
+      success: boolean;
+      sessionName?: string;
+      terminalSessionId?: string;
+      workDir?: string;
+      reused?: boolean;
+      error?: string;
+    }> =>
+      this.post('/api/herdr/preview', {
+        projectPath,
+        workDir,
+        cols,
+        rows,
+      }),
   };
 
   // Agent API

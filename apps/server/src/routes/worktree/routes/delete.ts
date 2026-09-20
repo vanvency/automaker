@@ -12,6 +12,7 @@ import { execGitCommand } from '../../../lib/git.js';
 import { createLogger } from '@automaker/utils';
 import type { FeatureLoader } from '../../../services/feature-loader.js';
 import type { EventEmitter } from '../../../lib/events.js';
+import { worktreePreviewService } from '../../../services/worktree-preview-service.js';
 
 const execAsync = promisify(exec);
 const logger = createLogger('Worktree');
@@ -40,6 +41,9 @@ export function createDeleteHandler(events: EventEmitter, featureLoader?: Featur
         });
         return;
       }
+
+      // Do not orphan cluster resources when deleting a worktree.
+      await worktreePreviewService.stop(projectPath, worktreePath);
 
       // Get branch name before removing worktree
       let branchName: string | null = null;

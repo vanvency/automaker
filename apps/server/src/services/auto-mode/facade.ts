@@ -45,7 +45,13 @@ import { PipelineOrchestrator } from '../pipeline-orchestrator.js';
 import { AgentExecutor } from '../agent-executor.js';
 import { TestRunnerService } from '../test-runner-service.js';
 import { ProviderFactory } from '../../providers/provider-factory.js';
+import { HerdrFeaturePiProvider } from '../../providers/herdr-feature-pi-provider.js';
 import { FeatureLoader } from '../feature-loader.js';
+import {
+  featurePromptBlock,
+  hasProviderSession,
+  previousContextBlock,
+} from '../continuation-prompt.js';
 import type { SettingsService } from '../settings-service.js';
 import type { EventEmitter } from '../../lib/events.js';
 import type {
@@ -97,6 +103,7 @@ export class AutoModeServiceFacade {
     branchName: string | null,
     primaryBranch: string | null
   ): boolean {
+    if (feature.archive || feature.supersededBy || feature.consolidationPlanId) return false;
     const isEligibleStatus =
       feature.status === 'backlog' ||
       feature.status === 'ready' ||
@@ -166,6 +173,7 @@ export class AutoModeServiceFacade {
       settingsService = null,
       featureLoader = new FeatureLoader(),
       sharedServices,
+      featureConversations,
     } = options;
 
     // Use shared services if provided, otherwise create new ones
@@ -252,12 +260,22 @@ export class AutoModeServiceFacade {
           thinkingLevel?: ThinkingLevel;
           reasoningEffort?: ReasoningEffort;
           branchName?: string | null;
+          sdkSessionId?: string;
           status?: string; // Feature status for pipeline summary check
           [key: string]: unknown;
         }
       ): Promise<void> => {
         const resolvedModel = resolveModelString(model, DEFAULT_MODELS.claude);
-        const provider = ProviderFactory.getProviderForModel(resolvedModel);
+        let provider = ProviderFactory.getProviderForModel(resolvedModel);
+        if (provider.getName() === 'pi') {
+          const feature = await featureStateManager.loadFeature(pPath, featureId);
+          if (!feature) throw new Error(`Feature ${featureId} not found`);
+          provider = new HerdrFeaturePiProvider({
+            projectPath: pPath,
+            feature,
+            persist: (fields) => featureStateManager.updateFeatureFields(pPath, featureId, fields),
+          });
+        }
         const effectiveBareModel = stripProviderPrefix(resolvedModel);
 
         // Resolve custom provider (GLM, MiniMax, etc.) for baseUrl and credentials
@@ -345,6 +363,7 @@ export class AutoModeServiceFacade {
             thinkingLevel: opts?.thinkingLevel as ThinkingLevel | undefined,
             reasoningEffort: opts?.reasoningEffort as ReasoningEffort | undefined,
             branchName: opts?.branchName as string | null | undefined,
+            sdkSessionId: opts?.sdkSessionId as string | undefined,
             status: opts?.status as string | undefined,
             provider,
             effectiveBareModel,
@@ -428,9 +447,10 @@ export class AutoModeServiceFacade {
       (pPath, branchName) => getFacade().clearExecutionState(branchName),
       (pPath) => featureStateManager.resetStuckFeatures(pPath),
       (feature) =>
-        feature.status === 'completed' ||
-        feature.status === 'verified' ||
-        feature.status === 'waiting_approval',
+        !feature.archive &&
+        (feature.status === 'completed' ||
+          feature.status === 'verified' ||
+          feature.status === 'waiting_approval'),
       (featureId) => concurrencyManager.isRunning(featureId),
       async (pPath) => featureLoader.getAll(pPath)
     );
@@ -523,7 +543,9 @@ export class AutoModeServiceFacade {
         );
       },
       (_pPath) => getFacade().saveExecutionState(),
-      loadContextFiles
+      loadContextFiles,
+      featureStateManager,
+      featureConversations ?? undefined
     );
 
     // RecoveryService
@@ -728,15 +750,18 @@ export class AutoModeServiceFacade {
         // No previous context available - that's OK
       }
 
-      // Build the feature prompt section
-      const featurePrompt = `## Feature Implementation Task\n\n**Feature ID:** ${feature.id}\n**Title:** ${feature.title || 'Untitled Feature'}\n**Description:** ${feature.description}\n`;
+      // Once the feature has a provider session, the conversation already
+      // contains the description and the previous work; repeating both on every
+      // follow-up would duplicate the transcript (tens of KB for Jira tasks).
+      const continuing = hasProviderSession(feature);
+      const featurePrompt = featurePromptBlock(feature, { continuing });
 
       // Get the follow-up prompt template and build the continuation prompt
       const prompts = await getPromptCustomization(this.settingsService, '[Facade]');
       let continuationPrompt = prompts.autoMode.followUpPromptTemplate;
       continuationPrompt = continuationPrompt
         .replace(/\{\{featurePrompt\}\}/g, featurePrompt)
-        .replace(/\{\{previousContext\}\}/g, previousContext)
+        .replace(/\{\{previousContext\}\}/g, previousContextBlock(previousContext, { continuing }))
         .replace(/\{\{followUpInstructions\}\}/g, prompt);
 
       // Store image paths on the feature so executeFeature can pick them up

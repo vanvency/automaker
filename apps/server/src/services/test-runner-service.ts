@@ -231,6 +231,7 @@ class TestRunnerService {
     options: {
       command: string;
       testFile?: string;
+      previewUrl?: string;
     }
   ): Promise<TestRunResult> {
     const { command, testFile } = options;
@@ -299,6 +300,8 @@ class TestRunnerService {
       COLORTERM: 'truecolor',
       TERM: 'xterm-256color',
       CI: 'true', // Helps some test runners format output better
+      // Empty when no preview exists, so an inherited URL cannot target another worktree.
+      AUTOMAKER_PREVIEW_URL: options.previewUrl ?? '',
     };
 
     const testProcess = spawn(finalCommand, [], {

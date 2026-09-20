@@ -6,17 +6,17 @@
  * IMPORTANT: All Codex models use 'codex-' prefix to distinguish from Cursor CLI models
  */
 export type CodexModelId =
-  | 'codex-gpt-5.3-codex'
-  | 'codex-gpt-5.3-codex-spark'
-  | 'codex-gpt-5.2-codex'
-  | 'codex-gpt-5.1-codex-max'
-  | 'codex-gpt-5.1-codex-mini'
-  | 'codex-gpt-5.1-codex'
-  | 'codex-gpt-5-codex'
-  | 'codex-gpt-5-codex-mini'
-  | 'codex-gpt-5.2'
-  | 'codex-gpt-5.1'
-  | 'codex-gpt-5';
+  | 'codex:gpt-5.3-codex'
+  | 'codex:gpt-5.3-codex-spark'
+  | 'codex:gpt-5.2-codex'
+  | 'codex:gpt-5.1-codex-max'
+  | 'codex:gpt-5.1-codex-mini'
+  | 'codex:gpt-5.1-codex'
+  | 'codex:gpt-5-codex'
+  | 'codex:gpt-5-codex-mini'
+  | 'codex:gpt-5.2'
+  | 'codex:gpt-5.1'
+  | 'codex:gpt-5';
 
 /**
  * Codex model metadata
@@ -35,78 +35,78 @@ export interface CodexModelConfig {
  * All keys use 'codex-' prefix to distinguish from Cursor CLI models
  */
 export const CODEX_MODEL_CONFIG_MAP: Record<CodexModelId, CodexModelConfig> = {
-  'codex-gpt-5.3-codex': {
-    id: 'codex-gpt-5.3-codex',
+  'codex:gpt-5.3-codex': {
+    id: 'codex:gpt-5.3-codex',
     label: 'GPT-5.3-Codex',
     description: 'Latest frontier agentic coding model',
     hasThinking: true,
     supportsVision: true,
   },
-  'codex-gpt-5.3-codex-spark': {
-    id: 'codex-gpt-5.3-codex-spark',
+  'codex:gpt-5.3-codex-spark': {
+    id: 'codex:gpt-5.3-codex-spark',
     label: 'GPT-5.3-Codex-Spark',
     description: 'Near-instant real-time coding model, 1000+ tokens/sec',
     hasThinking: true,
     supportsVision: true,
   },
-  'codex-gpt-5.2-codex': {
-    id: 'codex-gpt-5.2-codex',
+  'codex:gpt-5.2-codex': {
+    id: 'codex:gpt-5.2-codex',
     label: 'GPT-5.2-Codex',
     description: 'Frontier agentic coding model',
     hasThinking: true,
     supportsVision: true,
   },
-  'codex-gpt-5.1-codex-max': {
-    id: 'codex-gpt-5.1-codex-max',
+  'codex:gpt-5.1-codex-max': {
+    id: 'codex:gpt-5.1-codex-max',
     label: 'GPT-5.1-Codex-Max',
     description: 'Codex-optimized flagship for deep and fast reasoning',
     hasThinking: true,
     supportsVision: true,
   },
-  'codex-gpt-5.1-codex-mini': {
-    id: 'codex-gpt-5.1-codex-mini',
+  'codex:gpt-5.1-codex-mini': {
+    id: 'codex:gpt-5.1-codex-mini',
     label: 'GPT-5.1-Codex-Mini',
     description: 'Optimized for codex. Cheaper, faster, but less capable',
     hasThinking: false,
     supportsVision: true,
   },
-  'codex-gpt-5.1-codex': {
-    id: 'codex-gpt-5.1-codex',
+  'codex:gpt-5.1-codex': {
+    id: 'codex:gpt-5.1-codex',
     label: 'GPT-5.1-Codex',
     description: 'Original GPT-5.1 Codex agentic coding model',
     hasThinking: true,
     supportsVision: true,
   },
-  'codex-gpt-5-codex': {
-    id: 'codex-gpt-5-codex',
+  'codex:gpt-5-codex': {
+    id: 'codex:gpt-5-codex',
     label: 'GPT-5-Codex',
     description: 'Original GPT-5 Codex model',
     hasThinking: true,
     supportsVision: true,
   },
-  'codex-gpt-5-codex-mini': {
-    id: 'codex-gpt-5-codex-mini',
+  'codex:gpt-5-codex-mini': {
+    id: 'codex:gpt-5-codex-mini',
     label: 'GPT-5-Codex-Mini',
     description: 'Smaller, cheaper GPT-5 Codex variant',
     hasThinking: false,
     supportsVision: true,
   },
-  'codex-gpt-5.2': {
-    id: 'codex-gpt-5.2',
+  'codex:gpt-5.2': {
+    id: 'codex:gpt-5.2',
     label: 'GPT-5.2 (Codex)',
     description: 'Latest frontier model with improvements across knowledge, reasoning and coding',
     hasThinking: true,
     supportsVision: true,
   },
-  'codex-gpt-5.1': {
-    id: 'codex-gpt-5.1',
+  'codex:gpt-5.1': {
+    id: 'codex:gpt-5.1',
     label: 'GPT-5.1 (Codex)',
     description: 'Great for coding and agentic tasks across domains via Codex',
     hasThinking: true,
     supportsVision: true,
   },
-  'codex-gpt-5': {
-    id: 'codex-gpt-5',
+  'codex:gpt-5': {
+    id: 'codex:gpt-5',
     label: 'GPT-5 (Codex)',
     description: 'Base GPT-5 model via Codex',
     hasThinking: true,

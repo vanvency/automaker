@@ -210,6 +210,11 @@ export class AgentExecutor {
       if (rawWriteTimeout) clearTimeout(rawWriteTimeout);
       await writeToFile();
 
+      // Persist the provider-native conversation id on the feature. This is the
+      // authoritative link for deep-linking OpenCode Web when several features
+      // share one parent worktree.
+      await this.persistProviderSessionId(projectPath, featureId, options.sdkSessionId);
+
       // Extract and save summary from the new content generated in this session
       await this.extractAndSaveSessionSummary(
         projectPath,
@@ -365,7 +370,33 @@ export class AgentExecutor {
       status
     );
 
+    // Record the provider conversation id for every run, not just planned ones,
+    // so a later follow-up/resume continues this same session.
+    await this.persistProviderSessionId(projectPath, featureId, options.sdkSessionId);
+
     return { responseText, specDetected, tasksCompleted, aborted };
+  }
+
+  /**
+   * Store the provider-native conversation id on the feature.
+   *
+   * The feature is the unit of work for the board, so one feature owns exactly
+   * one provider session; follow-up runs pass this id back to the provider to
+   * continue the conversation instead of starting a fresh one.
+   */
+  private async persistProviderSessionId(
+    projectPath: string,
+    featureId: string,
+    sdkSessionId: string | undefined
+  ): Promise<void> {
+    if (!sdkSessionId) return;
+    try {
+      await this.featureStateManager.updateFeatureFields(projectPath, featureId, {
+        providerSessionId: sdkSessionId,
+      });
+    } catch (error) {
+      logger.warn(`Failed to persist provider session id for feature ${featureId}:`, error);
+    }
   }
 
   /**

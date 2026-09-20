@@ -68,6 +68,15 @@ if ('serviceWorker' in navigator && !window.location.protocol.startsWith('file')
       // tell it to activate now. This is safe because the page is freshly loaded
       // and won't flash. This ensures updates are picked up within one page visit.
       if (registration.waiting) {
+        // Activating the worker alone leaves this document running cached JS.
+        // Reload once it controls the page so the new HTML/bundles are loaded.
+        navigator.serviceWorker.addEventListener(
+          'controllerchange',
+          () => {
+            window.location.reload();
+          },
+          { once: true }
+        );
         registration.waiting.postMessage({ type: 'SKIP_WAITING' });
       }
 

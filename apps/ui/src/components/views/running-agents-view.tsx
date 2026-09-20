@@ -143,7 +143,7 @@ export function RunningAgentsView() {
           <h2 className="text-lg font-medium mb-2">No Running Agents</h2>
           <p className="text-muted-foreground max-w-md">
             Agents will appear here when they are actively working on features. Start an agent from
-            the Kanban board by dragging a feature to "In Progress".
+            the Task Kanban by dragging a feature to "In Progress".
           </p>
         </div>
       ) : (
@@ -241,9 +241,6 @@ export function RunningAgentsView() {
           open={true}
           onClose={() => setSelectedAgent(null)}
           projectPath={selectedAgent.projectPath}
-          featureDescription={
-            selectedAgent.description || selectedAgent.title || selectedAgent.featureId
-          }
           featureId={selectedAgent.featureId}
           featureStatus="running"
           branchName={selectedAgent.branchName}

@@ -4,6 +4,7 @@ import { Check, CircleDot, Globe, GitPullRequest, FlaskConical, AlertTriangle } 
 import { Spinner } from '@/components/ui/spinner';
 import { cn } from '@/lib/utils';
 import type { WorktreeInfo, DevServerInfo, TestSessionInfo } from '../types';
+import { JiraTypeBadge } from '../../components/jira-type-badge';
 import {
   truncateBranchName,
   getPRBadgeStyles,
@@ -29,6 +30,8 @@ export interface WorktreeDropdownItemProps {
   isRunning: boolean;
   /** Number of cards associated with this worktree's branch */
   cardCount?: number;
+  /** Normalized Jira work type of the cards on this worktree (epic/story/task/...) */
+  jiraType?: string;
   /** Whether the dev server is running for this worktree */
   devServerRunning?: boolean;
   /** Whether the dev server is starting for this worktree */
@@ -65,6 +68,7 @@ export function WorktreeDropdownItem({
   isSelected,
   isRunning,
   cardCount,
+  jiraType,
   devServerRunning,
   devServerStarting,
   devServerInfo,
@@ -103,6 +107,9 @@ export function WorktreeDropdownItem({
 
         {/* Running indicator */}
         {isRunning && <Spinner size="xs" className="shrink-0" />}
+
+        {/* Jira work type of the cards on this worktree, before the branch name */}
+        <JiraTypeBadge type={jiraType} data-testid={`worktree-jira-type-${worktree.branch}`} />
 
         {/* Branch name with optional tooltip */}
         {isBranchNameTruncated ? (

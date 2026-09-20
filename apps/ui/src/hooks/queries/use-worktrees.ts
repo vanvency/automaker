@@ -9,10 +9,12 @@ import { getElectronAPI } from '@/lib/electron';
 import { queryKeys } from '@/lib/query-keys';
 import { STALE_TIMES } from '@/lib/query-client';
 import { createSmartPollingInterval } from '@/hooks/use-event-recency';
+import type { WorktreeProgressItem } from '@automaker/types';
 
 const WORKTREE_REFETCH_ON_FOCUS = false;
 const WORKTREE_REFETCH_ON_RECONNECT = false;
 const WORKTREES_POLLING_INTERVAL = 30000;
+const WORKTREE_PROGRESS_POLLING_INTERVAL = 30000;
 
 interface WorktreeInfo {
   path: string;
@@ -146,16 +148,24 @@ export function useWorktreeStatus(projectPath: string | undefined, featureId: st
  * @param featureId - ID of the feature
  * @returns Query result with files and diff content
  */
-export function useWorktreeDiffs(projectPath: string | undefined, featureId: string | undefined) {
+export function useWorktreeDiffs(
+  projectPath: string | undefined,
+  featureId: string | undefined,
+  options?: { taskScope?: 'auto' | 'branch' }
+) {
+  const taskScope = options?.taskScope ?? 'auto';
   return useQuery({
-    queryKey: queryKeys.worktrees.diffs(projectPath ?? '', featureId ?? ''),
+    queryKey: [
+      ...queryKeys.worktrees.diffs(projectPath ?? '', featureId ?? ''),
+      { taskScope },
+    ] as const,
     queryFn: async () => {
       if (!projectPath || !featureId) throw new Error('Missing project path or feature ID');
       const api = getElectronAPI();
       if (!api.worktree) {
         throw new Error('Worktree API not available');
       }
-      const result = await api.worktree.getDiffs(projectPath, featureId);
+      const result = await api.worktree.getDiffs(projectPath, featureId, { taskScope });
       if (!result.success) {
         throw new Error(result.error || 'Failed to fetch diffs');
       }
@@ -163,6 +173,10 @@ export function useWorktreeDiffs(projectPath: string | undefined, featureId: str
         files: result.files ?? [],
         diff: result.diff ?? '',
         ...(result.mergeState ? { mergeState: result.mergeState } : {}),
+        ...(result.submodules && result.submodules.length > 0
+          ? { submodules: result.submodules }
+          : {}),
+        ...(result.scope ? { scope: result.scope } : {}),
       };
     },
     enabled: !!projectPath && !!featureId,
@@ -311,6 +325,120 @@ export function useAvailableEditors() {
       return result.result?.editors ?? [];
     },
     staleTime: STALE_TIMES.CLI_STATUS,
+    refetchOnWindowFocus: WORKTREE_REFETCH_ON_FOCUS,
+    refetchOnReconnect: WORKTREE_REFETCH_ON_RECONNECT,
+  });
+}
+
+/** A progress row tagged with the project it belongs to (the view spans projects). */
+export interface WorktreeProgressRow extends WorktreeProgressItem {
+  projectPath: string;
+  projectName: string;
+}
+
+/** Per-project metadata of a progress query, used to show the reference branch. */
+export interface WorktreeProgressProjectInfo {
+  projectPath: string;
+  projectName: string;
+  baseBranch: string | null;
+  generatedAt: string | null;
+  error?: string;
+}
+
+export interface WorktreeProgressData {
+  rows: WorktreeProgressRow[];
+  projects: WorktreeProgressProjectInfo[];
+}
+
+export interface WorktreeProgressProject {
+  path: string;
+  name: string;
+}
+
+/**
+ * Fetch aggregated worktree progress for one or more projects.
+ *
+ * Each project is fetched in parallel and rows are merged into a single list so
+ * the view can show every worktree at once. A project that fails (for example a
+ * folder that is no longer a git repository) only adds an `error` entry.
+ *
+ * @param projects - Projects to include
+ * @param enabled - Set to false to skip fetching (e.g. no project selected)
+ *
+ * @example
+ * ```tsx
+ * const { data, isLoading } = useWorktreeProgress(projects);
+ * const rows = data?.rows ?? [];
+ * ```
+ */
+export function useWorktreeProgress(projects: WorktreeProgressProject[], enabled = true) {
+  const paths = projects.map((project) => project.path).filter(Boolean);
+  const names = new Map(projects.map((project) => [project.path, project.name]));
+
+  return useQuery({
+    queryKey: queryKeys.worktrees.progress(paths.join('|')),
+    queryFn: async (): Promise<WorktreeProgressData> => {
+      const api = getElectronAPI();
+      if (!api.worktree?.progress) {
+        throw new Error('Worktree progress API not available');
+      }
+
+      const results = await Promise.all(
+        paths.map(async (projectPath) => {
+          const projectName = names.get(projectPath) ?? projectPath;
+          try {
+            const result = await api.worktree!.progress!(projectPath);
+            if (!result.success) {
+              return { projectPath, projectName, error: result.error ?? 'Request failed' } as const;
+            }
+            return {
+              projectPath,
+              projectName,
+              baseBranch: result.baseBranch ?? null,
+              generatedAt: result.generatedAt ?? null,
+              worktrees: result.worktrees ?? [],
+              error: undefined,
+            } as const;
+          } catch (error) {
+            return {
+              projectPath,
+              projectName,
+              error: error instanceof Error ? error.message : String(error),
+            } as const;
+          }
+        })
+      );
+
+      if (results.every((result) => result.error)) {
+        throw new Error(results[0]?.error ?? 'Failed to load worktree progress');
+      }
+
+      const rows: WorktreeProgressRow[] = [];
+      for (const result of results) {
+        if (result.error) continue;
+        for (const worktree of result.worktrees ?? []) {
+          rows.push({
+            ...worktree,
+            projectPath: result.projectPath,
+            projectName: result.projectName,
+          });
+        }
+      }
+
+      return {
+        rows,
+        projects: results.map((result) => ({
+          projectPath: result.projectPath,
+          projectName: result.projectName,
+          baseBranch: 'baseBranch' in result ? (result.baseBranch ?? null) : null,
+          generatedAt: 'generatedAt' in result ? (result.generatedAt ?? null) : null,
+          error: result.error,
+        })),
+      };
+    },
+    enabled: enabled && paths.length > 0,
+    staleTime: STALE_TIMES.WORKTREES,
+    refetchInterval: createSmartPollingInterval(WORKTREE_PROGRESS_POLLING_INTERVAL),
     refetchOnWindowFocus: WORKTREE_REFETCH_ON_FOCUS,
     refetchOnReconnect: WORKTREE_REFETCH_ON_RECONNECT,
   });

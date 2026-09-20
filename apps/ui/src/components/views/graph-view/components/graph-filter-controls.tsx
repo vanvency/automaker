@@ -34,7 +34,7 @@ const statusDisplayConfig: Record<
   paused: { label: 'Paused', icon: Pause, colorClass: 'text-[var(--status-warning)]' },
   backlog: { label: 'Backlog', icon: Clock, colorClass: 'text-muted-foreground' },
   waiting_approval: {
-    label: 'Waiting Approval',
+    label: 'Waiting Review',
     icon: CircleDot,
     colorClass: 'text-[var(--status-waiting)]',
   },

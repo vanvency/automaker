@@ -12,10 +12,35 @@ import { createRowActionHandlers, type RowActionHandlers } from './row-actions';
 import { getStatusOrder } from './status-badge';
 import { getColumnsWithPipeline } from '../../constants';
 import { AddFeatureButton } from '../add-feature-button';
+import { getChildFeaturesForParent } from '../../lib/child-features';
 import type { SortConfig, SortColumn } from '../../hooks/use-list-view-state';
 
 /** Empty set constant to avoid creating new instances on each render */
 const EMPTY_SET = new Set<string>();
+
+/**
+ * Maps each task-tree root to its child progress so a row can say how many
+ * subtasks it covers (the kanban card shows the same through `ChildTaskSummary`).
+ * Child cards remain rows of their own; this is a rollup, not a filter.
+ *
+ * Uses the shared child-resolution rules so the list and the kanban card cannot
+ * disagree about which cards belong under a parent.
+ */
+export function buildChildSummaries(
+  features: Feature[]
+): Record<string, { total: number; completed: number }> {
+  const summaries: Record<string, { total: number; completed: number }> = {};
+  for (const feature of features) {
+    const children = getChildFeaturesForParent(feature, features);
+    if (children.length === 0) continue;
+    summaries[feature.id] = {
+      total: children.length,
+      completed: children.filter((child) => ['verified', 'completed'].includes(child.status ?? ''))
+        .length,
+    };
+  }
+  return summaries;
+}
 
 /**
  * Status group configuration for the list view
@@ -404,6 +429,9 @@ export const ListView = memo(function ListView({
     [allFeatures]
   );
 
+  // Child progress for parent cards (their children are merged, not separate rows)
+  const childSummaries = useMemo(() => buildChildSummaries(allFeatures), [allFeatures]);
+
   // Calculate selection state for header checkbox
   const selectionState = useMemo(() => {
     if (!isSelectionMode || totalFeatures === 0) {
@@ -500,6 +528,7 @@ export const ListView = memo(function ListView({
                       onToggleSelect={() => onToggleFeatureSelection?.(feature.id)}
                       onClick={() => onRowClick?.(feature)}
                       blockingDependencies={getBlockingDeps(feature)}
+                      childSummary={childSummaries[feature.id]}
                     />
                   ))}
                 </div>

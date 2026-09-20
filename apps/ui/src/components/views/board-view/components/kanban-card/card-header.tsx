@@ -1,9 +1,10 @@
-import { memo, useState, useMemo } from 'react';
+import { memo, useMemo } from 'react';
 import type { DraggableAttributes, DraggableSyntheticListeners } from '@dnd-kit/core';
 import { Feature } from '@/store/app-store';
 import { cn } from '@/lib/utils';
 import { CardDescription, CardHeader } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
+import { cardPreviewText } from './card-preview-text';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -16,11 +17,9 @@ import {
 import {
   GripVertical,
   Edit,
-  Trash2,
+  Archive as Trash2,
   FileText,
   MoreVertical,
-  ChevronDown,
-  ChevronUp,
   GitFork,
   Copy,
   Repeat,
@@ -28,7 +27,6 @@ import {
 import { Spinner } from '@/components/ui/spinner';
 import { CountUpTimer } from '@/components/ui/count-up-timer';
 import { formatModelName, DEFAULT_MODEL } from '@/lib/agent-context-parser';
-import { DeleteConfirmDialog } from '@/components/ui/delete-confirm-dialog';
 import { getProviderIconForModel } from '@/components/ui/provider-icon';
 import { useAppStore } from '@/store/app-store';
 
@@ -116,6 +114,8 @@ interface CardHeaderProps {
   onDuplicate?: () => void;
   onDuplicateAsChild?: () => void;
   onDuplicateAsChildMultiple?: () => void;
+  /** Opens the card details dialog (full description, goals, Jira history…) */
+  onOpenDetails?: () => void;
   dragHandleListeners?: DraggableSyntheticListeners;
   dragHandleAttributes?: DraggableAttributes;
 }
@@ -133,11 +133,10 @@ export const CardHeaderSection = memo(function CardHeaderSection({
   onDuplicate,
   onDuplicateAsChild,
   onDuplicateAsChildMultiple,
+  onOpenDetails,
   dragHandleListeners,
   dragHandleAttributes,
 }: CardHeaderProps) {
-  const [isDescriptionExpanded, setIsDescriptionExpanded] = useState(false);
-  const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false);
   const showBacklogLogsButton = hasContext && !!onViewOutput;
 
   // Get providers from store for provider-aware model name display
@@ -156,10 +155,6 @@ export const CardHeaderSection = memo(function CardHeaderSection({
 
   const handleDeleteClick = (e: React.MouseEvent) => {
     e.stopPropagation();
-    setIsDeleteDialogOpen(true);
-  };
-
-  const handleConfirmDelete = () => {
     onDelete();
   };
 
@@ -251,6 +246,20 @@ export const CardHeaderSection = memo(function CardHeaderSection({
               className="h-6 w-6 p-0 hover:bg-white/10 text-muted-foreground hover:text-foreground"
               onClick={(e) => {
                 e.stopPropagation();
+                onEdit();
+              }}
+              onPointerDown={(e) => e.stopPropagation()}
+              data-testid={`edit-backlog-${feature.id}`}
+              title="Edit"
+            >
+              <Edit className="w-4 h-4" />
+            </Button>
+            <Button
+              variant="ghost"
+              size="sm"
+              className="h-6 w-6 p-0 hover:bg-white/10 text-muted-foreground hover:text-foreground"
+              onClick={(e) => {
+                e.stopPropagation();
                 onSpawnTask?.();
               }}
               onPointerDown={(e) => e.stopPropagation()}
@@ -282,6 +291,7 @@ export const CardHeaderSection = memo(function CardHeaderSection({
               onClick={handleDeleteClick}
               onPointerDown={(e) => e.stopPropagation()}
               data-testid={`delete-backlog-${feature.id}`}
+              title="Archive Task"
             >
               <Trash2 className="w-4 h-4" />
             </Button>
@@ -361,7 +371,7 @@ export const CardHeaderSection = memo(function CardHeaderSection({
                 data-testid={`delete-${
                   feature.status === 'waiting_approval' ? 'waiting' : 'verified'
                 }-${feature.id}`}
-                title="Delete"
+                title="Archive Task"
               >
                 <Trash2 className="w-4 h-4" />
               </Button>
@@ -416,7 +426,7 @@ export const CardHeaderSection = memo(function CardHeaderSection({
               onClick={handleDeleteClick}
               onPointerDown={(e) => e.stopPropagation()}
               data-testid={`delete-feature-${feature.id}`}
-              title="Delete"
+              title="Archive Task"
             >
               <Trash2 className="w-4 h-4" />
             </Button>
@@ -509,48 +519,28 @@ export const CardHeaderSection = memo(function CardHeaderSection({
         <div className="flex-1 min-w-0 overflow-hidden">
           <CardDescription
             className={cn(
-              'text-xs leading-snug break-words hyphens-auto overflow-hidden text-muted-foreground',
-              !isDescriptionExpanded && 'line-clamp-3'
+              'text-xs leading-snug break-words hyphens-auto overflow-hidden text-muted-foreground line-clamp-3'
             )}
           >
-            {feature.description || feature.summary || feature.id}
+            {cardPreviewText(feature)}
           </CardDescription>
-          {(feature.description || feature.summary || '').length > 100 && (
+          {onOpenDetails && (
             <button
               onClick={(e) => {
                 e.stopPropagation();
-                setIsDescriptionExpanded(!isDescriptionExpanded);
+                onOpenDetails();
               }}
               onPointerDown={(e) => e.stopPropagation()}
               className="flex items-center gap-0.5 text-[10px] text-muted-foreground/70 hover:text-muted-foreground mt-1.5 transition-colors"
               data-testid={`toggle-description-${feature.id}`}
+              title="查看完整描述、目标与 Jira 记录"
             >
-              {isDescriptionExpanded ? (
-                <>
-                  <ChevronUp className="w-3 h-3" />
-                  <span>Less</span>
-                </>
-              ) : (
-                <>
-                  <ChevronDown className="w-3 h-3" />
-                  <span>More</span>
-                </>
-              )}
+              <FileText className="w-3 h-3" />
+              <span>详情</span>
             </button>
           )}
         </div>
       </div>
-
-      {/* Delete Confirmation Dialog */}
-      <DeleteConfirmDialog
-        open={isDeleteDialogOpen}
-        onOpenChange={setIsDeleteDialogOpen}
-        onConfirm={handleConfirmDelete}
-        title="Delete Feature"
-        description="Are you sure you want to delete this feature? This action cannot be undone."
-        testId="delete-confirmation-dialog"
-        confirmTestId="confirm-delete-button"
-      />
     </CardHeader>
   );
 });

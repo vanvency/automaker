@@ -8,6 +8,15 @@ import { COLUMNS, ColumnId } from '../constants';
 
 const logger = createLogger('BoardDragDrop');
 
+/**
+ * Clearing a notice has to travel as JSON `null`: `undefined` keys are dropped
+ * by the request serializer and the server keeps the old value.
+ */
+const CLEAR_ATTENTION_NOTICE = {
+  error: null,
+  executionNotice: null,
+} as unknown as Partial<Feature>;
+
 export interface PendingDependencyLink {
   draggedFeature: Feature;
   targetFeature: Feature;
@@ -188,6 +197,16 @@ export function useBoardDragDrop({
       // Check if we dropped on a column
       const column = COLUMNS.find((c) => c.id === effectiveOverId);
       if (column) {
+        // Needs Attention is a derived lane (failure, conflict, interruption), so
+        // dragging a card into it would mean "mark this failed" - not a decision a
+        // drag should make. Resolve those cards with their own actions instead.
+        if (column.id === 'failed') {
+          toast.info('Needs Attention is decided by the run', {
+            description:
+              'Resolve failures, merge conflicts and interrupted runs with the card actions.',
+          });
+          return;
+        }
         targetStatus = column.id;
       } else if (effectiveOverId.startsWith('pipeline_')) {
         // Pipeline step column (not in static COLUMNS list)
@@ -215,17 +234,28 @@ export function useBoardDragDrop({
           // Server will derive workDir from feature.branchName
           await handleStartImplementation(draggedFeature);
         } else {
-          persistFeatureUpdate(featureId, { status: targetStatus });
+          // Dropping a card on Done is the human's decision: the attention
+          // notice (failure / needs-input) is resolved with it.
+          persistFeatureUpdate(
+            featureId,
+            targetStatus === 'verified'
+              ? { status: targetStatus, completionSource: 'human', ...CLEAR_ATTENTION_NOTICE }
+              : { status: targetStatus }
+          );
         }
       } else if (draggedFeature.status === 'waiting_approval') {
         // waiting_approval features can be dragged to verified for manual verification
         // NOTE: This check must come BEFORE skipTests check because waiting_approval
         // features often have skipTests=true, and we want status-based handling first
         if (targetStatus === 'verified') {
-          // Clear justFinishedAt timestamp when manually verifying via drag
+          // Clear justFinishedAt timestamp when manually verifying via drag.
+          // Record the human decision so the Jira monitor must not reopen a
+          // receipt that intentionally contains informational limitations.
           persistFeatureUpdate(featureId, {
             status: 'verified',
             justFinishedAt: undefined,
+            completionSource: 'human',
+            ...CLEAR_ATTENTION_NOTICE,
           });
           toast.success('Feature verified', {
             description: `Manually verified: ${draggedFeature.description.slice(
@@ -287,7 +317,11 @@ export function useBoardDragDrop({
           return;
         } else if (targetStatus === 'verified' && draggedFeature.skipTests) {
           // Manual verify via drag (only for skipTests features)
-          persistFeatureUpdate(featureId, { status: 'verified' });
+          persistFeatureUpdate(featureId, {
+            status: 'verified',
+            completionSource: 'human',
+            ...CLEAR_ATTENTION_NOTICE,
+          });
           toast.success('Feature verified', {
             description: `Marked as verified: ${draggedFeature.description.slice(
               0,

@@ -89,26 +89,27 @@ describe('model-resolver.ts', () => {
 
     describe('Cursor models', () => {
       it('should pass through cursor-prefixed models unchanged', () => {
-        const result = resolveModelString('cursor-composer-1');
-        expect(result).toBe('cursor-composer-1');
+        const result = resolveModelString('cursor:composer-1');
+        expect(result).toBe('cursor:composer-1');
         expect(consoleSpy.log).toHaveBeenCalledWith(expect.stringContaining('Using Cursor model'));
       });
 
       it('should add cursor- prefix to bare Cursor model IDs', () => {
         const result = resolveModelString('composer-1');
-        expect(result).toBe('cursor-composer-1');
+        expect(result).toBe('cursor:composer-1');
       });
 
       it('should handle cursor-auto model', () => {
-        const result = resolveModelString('cursor-auto');
-        expect(result).toBe('cursor-auto');
+        const result = resolveModelString('cursor:auto');
+        expect(result).toBe('cursor:auto');
       });
 
       it('should handle all known Cursor model IDs with prefix', () => {
         const cursorModelIds = Object.keys(CURSOR_MODEL_MAP);
         cursorModelIds.forEach((modelId) => {
-          const result = resolveModelString(`cursor-${modelId}`);
-          expect(result).toBe(`cursor-${modelId}`);
+          // Canonical ids already carry the cursor: prefix and pass through
+          const result = resolveModelString(modelId);
+          expect(result).toBe(modelId);
         });
       });
     });

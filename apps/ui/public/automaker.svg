@@ -1,27 +1,21 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="256" height="256" viewBox="0 0 256 256" role="img" aria-label="Code icon">
+<svg xmlns="http://www.w3.org/2000/svg" width="256" height="256" viewBox="0 0 256 256" role="img" aria-label="Automaker — task branches converging">
   <defs>
-    <linearGradient id="bg" x1="0" y1="0" x2="256" y2="256" gradientUnits="userSpaceOnUse">
-      <stop offset="0%" stop-color="#6B5BFF"></stop>
-      <stop offset="100%" stop-color="#2EC7FF"></stop>
+    <linearGradient id="bg" x1="24" y1="16" x2="224" y2="240" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#152E46"/>
+      <stop offset="1" stop-color="#091521"/>
     </linearGradient>
-
-    <filter id="iconShadow" x="-20%" y="-20%" width="140%" height="140%">
-      <feDropShadow dx="0" dy="4" stdDeviation="4" flood-color="#000000" flood-opacity="0.25"></feDropShadow>
-    </filter>
+    <linearGradient id="flow" x1="72" y1="80" x2="176" y2="176" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#67E8F9"/>
+      <stop offset="1" stop-color="#2DD4BF"/>
+    </linearGradient>
   </defs>
-
-  <!-- Rounded square background -->
-  <rect x="16" y="16" width="224" height="224" rx="56" fill="url(#bg)"></rect>
-
-  <!-- </> icon (slightly reduced overall size) -->
-  <g fill="none" stroke="#FFFFFF" stroke-width="20" stroke-linecap="round" stroke-linejoin="round" filter="url(#iconShadow)">
-    <!-- Left bracket < -->
-    <path d="M92 92 L52 128 L92 164"></path>
-
-    <!-- Slash / -->
-    <path d="M144 72 L116 184"></path>
-
-    <!-- Right bracket > -->
-    <path d="M164 92 L204 128 L164 164"></path>
+  <rect width="256" height="256" rx="56" fill="url(#bg)"/>
+  <path d="M76 80v32c0 36 104-4 104 32v32M180 80v32c0 36-104-4-104 32v32" fill="none" stroke="url(#flow)" stroke-width="16" stroke-linecap="round"/>
+  <g fill="#E6FFFB">
+    <rect x="60" y="60" width="32" height="32" rx="10"/>
+    <rect x="164" y="60" width="32" height="32" rx="10"/>
+    <rect x="60" y="164" width="32" height="32" rx="10"/>
   </g>
+  <circle cx="180" cy="180" r="24" fill="#2DD4BF"/>
+  <path d="m169 180 7 7 14-15" fill="none" stroke="#091521" stroke-width="7" stroke-linecap="round" stroke-linejoin="round"/>
 </svg>

@@ -32,6 +32,8 @@ import { cn } from '@/lib/utils';
 interface KanbanBoardProps {
   activeFeature: Feature | null;
   getColumnFeatures: (columnId: ColumnId) => Feature[];
+  /** Full unfiltered feature list, used by parent cards to list their children */
+  allFeatures?: Feature[];
   backgroundImageStyle: React.CSSProperties;
   backgroundSettings: {
     columnOpacity: number;
@@ -45,13 +47,16 @@ interface KanbanBoardProps {
   onEdit: (feature: Feature) => void;
   onDelete: (featureId: string) => void;
   onViewOutput: (feature: Feature) => void;
-  onOpenWeb: (feature: Feature) => void;
+  onOpenHerdr?: (feature: Feature) => void;
+  onLocateFeature?: (featureId: string) => void;
   onVerify: (feature: Feature) => void;
   onResume: (feature: Feature) => void;
   onForceStop: (feature: Feature) => void;
   onManualVerify: (feature: Feature) => void;
   onMoveBackToInProgress: (feature: Feature) => void;
   onFollowUp: (feature: Feature) => void;
+  /** Reopen a finished card so the user can send feedback and the agent continues */
+  onRequestChanges: (feature: Feature) => void;
   onComplete: (feature: Feature) => void;
   onImplement: (feature: Feature) => void;
   onViewPlan: (feature: Feature) => void;
@@ -289,18 +294,21 @@ const EMPTY_FEATURE_IDS = new Set<string>();
 export const KanbanBoard = memo(function KanbanBoard({
   activeFeature,
   getColumnFeatures,
+  allFeatures,
   backgroundImageStyle,
   backgroundSettings,
   onEdit,
   onDelete,
   onViewOutput,
-  onOpenWeb,
+  onOpenHerdr,
+  onLocateFeature,
   onVerify,
   onResume,
   onForceStop,
   onManualVerify,
   onMoveBackToInProgress,
   onFollowUp,
+  onRequestChanges,
   onComplete,
   onImplement,
   onViewPlan,
@@ -345,10 +353,11 @@ export const KanbanBoard = memo(function KanbanBoard({
   return (
     <div
       className={cn(
-        'flex-1 overflow-x-auto px-5 pt-2 sm:pt-4 pb-0 sm:pb-4 relative',
+        'min-w-0 flex-1 overflow-x-auto px-3 pt-2 sm:pt-4 pb-0 sm:pb-4 relative',
         'transition-opacity duration-200',
         className
       )}
+      data-testid="kanban-scroll-container"
       style={backgroundImageStyle}
     >
       <div className="h-full pt-1 pb-0 sm:pb-1" style={containerStyle}>
@@ -537,6 +546,7 @@ export const KanbanBoard = memo(function KanbanBoard({
                         onTemplateSelect={onTemplateSelect}
                         templates={templates}
                         fullWidth
+                        compact={columnWidth < 300}
                         shortcut={formatShortcut(addFeatureShortcut, true)}
                       />
                     ) : undefined
@@ -593,16 +603,21 @@ export const KanbanBoard = memo(function KanbanBoard({
                                   >
                                     <KanbanCard
                                       feature={feature}
+                                      allFeatures={allFeatures}
                                       onEdit={() => onEdit(feature)}
                                       onDelete={() => onDelete(feature.id)}
                                       onViewOutput={() => onViewOutput(feature)}
-                                      onOpenWeb={() => onOpenWeb(feature)}
+                                      onOpenHerdr={
+                                        onOpenHerdr ? () => onOpenHerdr(feature) : undefined
+                                      }
+                                      onLocateFeature={onLocateFeature}
                                       onVerify={() => onVerify(feature)}
                                       onResume={() => onResume(feature)}
                                       onForceStop={() => onForceStop(feature)}
                                       onManualVerify={() => onManualVerify(feature)}
                                       onMoveBackToInProgress={() => onMoveBackToInProgress(feature)}
                                       onFollowUp={() => onFollowUp(feature)}
+                                      onRequestChanges={() => onRequestChanges(feature)}
                                       onComplete={() => onComplete(feature)}
                                       onImplement={() => onImplement(feature)}
                                       onViewPlan={() => onViewPlan(feature)}
@@ -643,16 +658,19 @@ export const KanbanBoard = memo(function KanbanBoard({
                               <KanbanCard
                                 key={feature.id}
                                 feature={feature}
+                                allFeatures={allFeatures}
                                 onEdit={() => onEdit(feature)}
                                 onDelete={() => onDelete(feature.id)}
                                 onViewOutput={() => onViewOutput(feature)}
-                                onOpenWeb={() => onOpenWeb(feature)}
+                                onOpenHerdr={onOpenHerdr ? () => onOpenHerdr(feature) : undefined}
+                                onLocateFeature={onLocateFeature}
                                 onVerify={() => onVerify(feature)}
                                 onResume={() => onResume(feature)}
                                 onForceStop={() => onForceStop(feature)}
                                 onManualVerify={() => onManualVerify(feature)}
                                 onMoveBackToInProgress={() => onMoveBackToInProgress(feature)}
                                 onFollowUp={() => onFollowUp(feature)}
+                                onRequestChanges={() => onRequestChanges(feature)}
                                 onComplete={() => onComplete(feature)}
                                 onImplement={() => onImplement(feature)}
                                 onViewPlan={() => onViewPlan(feature)}
@@ -711,6 +729,7 @@ export const KanbanBoard = memo(function KanbanBoard({
               onManualVerify={() => {}}
               onMoveBackToInProgress={() => {}}
               onFollowUp={() => {}}
+              onRequestChanges={() => {}}
               onImplement={() => {}}
               onComplete={() => {}}
               onViewPlan={() => {}}

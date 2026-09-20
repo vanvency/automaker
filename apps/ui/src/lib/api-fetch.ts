@@ -195,3 +195,28 @@ export function getAuthenticatedImageUrl(
 
   return `${serverUrl}/api/fs/image?${params.toString()}`;
 }
+
+/**
+ * Attach auth credentials to a server-hosted page URL.
+ *
+ * Used for pages Automaker opens in a new tab (herdr terminal, Pi viewer).
+ * Those pages cannot send auth headers, and the system browser Electron opens
+ * them in does not share the app's cookies, so the credentials have to travel
+ * in the query string - the same fallback image URLs use.
+ *
+ * @param url - URL of the page to open (mutated and returned)
+ * @returns The same URL with `apiKey` (Electron) and `token` (web mode) when available
+ */
+export function withPageAuthParams(url: URL): URL {
+  const apiKey = getApiKey();
+  if (apiKey) {
+    url.searchParams.set('apiKey', apiKey);
+  }
+
+  const sessionToken = getSessionToken();
+  if (sessionToken) {
+    url.searchParams.set('token', sessionToken);
+  }
+
+  return url;
+}

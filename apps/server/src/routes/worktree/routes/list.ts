@@ -96,7 +96,7 @@ interface WorktreeInfo {
  * Checks for the presence of state files/directories that git creates
  * during these operations.
  */
-async function detectConflictState(worktreePath: string): Promise<{
+export async function detectConflictState(worktreePath: string): Promise<{
   hasConflicts: boolean;
   conflictType?: 'merge' | 'rebase' | 'cherry-pick';
   conflictFiles?: string[];

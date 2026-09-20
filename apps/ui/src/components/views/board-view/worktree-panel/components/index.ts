@@ -12,5 +12,22 @@ export {
   getTestStatusStyles,
 } from './worktree-indicator-utils';
 export type { TestStatus } from './worktree-indicator-utils';
+export {
+  buildWorktreeCategoryGroups,
+  buildWorktreeSearchText,
+  classifyWorktreeCategory,
+  getWorktreeFeatures,
+  isActiveFeatureStatus,
+  isCompleteFeatureStatus,
+  matchesWorktreeSearch,
+  WORKTREE_CATEGORY_META,
+  WORKTREE_CATEGORY_ORDER,
+} from './worktree-category-utils';
+export type {
+  WorktreeCategory,
+  WorktreeCategoryGroup,
+  WorktreeCategoryMeta,
+  WorktreeCategorySignals,
+} from './worktree-category-utils';
 export { WorktreeMobileDropdown } from './worktree-mobile-dropdown';
 export { WorktreeTab } from './worktree-tab';

@@ -7,7 +7,7 @@
 
 import type { Request, Response } from 'express';
 import { FeatureLoader } from '../../../services/feature-loader.js';
-import { findOpenCodeSession, resolveFeatureWorkDir } from './opencode-session.js';
+import { findOpenCodeSession, resolveFeatureWorkDir, runCaptured } from './opencode-session.js';
 import { getErrorMessage, logError } from '../common.js';
 
 /**
@@ -52,6 +52,73 @@ async function fetchSessionSlug(sessionId: string): Promise<string | null> {
   }
 }
 
+/**
+ * Count user turns in an OpenCode session.
+ *
+ * `opencode export` prefixes its JSON with a human-readable line, so strip it
+ * before parsing. A turn is one user message; assistant tool-call bursts are
+ * intentionally not counted as conversation rounds.
+ *
+ * The board fetches this for every card, and each miss spawns an `opencode
+ * export` process, so results are cached briefly.
+ */
+const TURN_COUNT_CACHE_TTL_MS = 60_000;
+const turnCountCache = new Map<string, { count: number | null; at: number }>();
+
+/** Memoize a turn count (including "none") so repeated board polls do not re-spawn the CLI. */
+function cacheTurnCount(sessionId: string, count: number | null): number | null {
+  turnCountCache.set(sessionId, { count, at: Date.now() });
+  return count;
+}
+
+async function fetchSessionTurnCount(workDir: string, sessionId: string): Promise<number | null> {
+  const cached = turnCountCache.get(sessionId);
+  if (cached && Date.now() - cached.at < TURN_COUNT_CACHE_TTL_MS) {
+    return cached.count;
+  }
+
+  try {
+    const output = await runCaptured('opencode', ['export', sessionId], workDir, 20000);
+    const jsonStart = output.indexOf('{');
+    if (jsonStart < 0) return cacheTurnCount(sessionId, null);
+    const parsed = JSON.parse(output.slice(jsonStart)) as {
+      messages?: Array<{ info?: { role?: string } }>;
+    };
+    if (!Array.isArray(parsed.messages)) return cacheTurnCount(sessionId, null);
+    const userTurns = parsed.messages.filter((message) => message.info?.role === 'user');
+    const count = userTurns.length > 0 ? userTurns.length : null;
+    return cacheTurnCount(sessionId, count);
+  } catch {
+    // Turn count is supplemental metadata; the deep link remains usable without it.
+    return cacheTurnCount(sessionId, null);
+  }
+}
+
+/**
+ * Memoized "this feature has no OpenCode session yet".
+ *
+ * Session discovery shells out to `opencode session list`, and the board asks
+ * for every card on focus; without the memo an unfinished card re-spawns the CLI
+ * on every poll. Deliberately short so a session created by the next run shows
+ * up promptly.
+ */
+const MISSING_SESSION_TTL_MS = 30_000;
+const missingSessionCache = new Map<string, number>();
+
+function missingSessionCacheKey(projectPath: string, featureId: string): string {
+  return `${projectPath}\u0000${featureId}`;
+}
+
+function wasRecentlyMissing(cacheKey: string): boolean {
+  const at = missingSessionCache.get(cacheKey);
+  if (at === undefined) return false;
+  if (Date.now() - at > MISSING_SESSION_TTL_MS) {
+    missingSessionCache.delete(cacheKey);
+    return false;
+  }
+  return true;
+}
+
 export function createOpenCodeWebHandler(featureLoader: FeatureLoader) {
   return async (req: Request, res: Response): Promise<void> => {
     try {
@@ -73,22 +140,43 @@ export function createOpenCodeWebHandler(featureLoader: FeatureLoader) {
         return;
       }
 
-      const preferredTitle =
-        ((resolved.feature as { jiraKey?: string }).jiraKey ?? featureId) || undefined;
-      const session = await findOpenCodeSession(resolved.workDir, preferredTitle);
+      const featureTitle = resolved.feature.title || featureId;
+      const providerSessionId = (resolved.feature as { providerSessionId?: string })
+        .providerSessionId;
+      const sessionCacheKey = missingSessionCacheKey(projectPath, featureId);
+
+      // The provider-native session id recorded by AgentExecutor is authoritative.
+      // Title/time heuristics are only fallbacks for older features.
+      const session = providerSessionId
+        ? { id: providerSessionId }
+        : wasRecentlyMissing(sessionCacheKey)
+          ? null
+          : await findOpenCodeSession(
+              resolved.workDir,
+              featureTitle,
+              featureId,
+              (resolved.feature.startedAt as string | undefined) ??
+                (resolved.feature.updatedAt as string | undefined),
+              projectPath
+            );
       if (!session) {
+        if (!providerSessionId) {
+          missingSessionCache.set(sessionCacheKey, Date.now());
+        }
         res.json({
           success: false,
           error: 'No opencode session found for this worktree yet',
         });
         return;
       }
+      missingSessionCache.delete(sessionCacheKey);
 
       const serverUrl = process.env.OPENCODE_SERVER_URL || 'http://127.0.0.1:4096';
       const parsed = new URL(serverUrl);
       const host = resolveWebHost(req, parsed);
       const port = parsed.port || (parsed.protocol === 'https:' ? '443' : '80');
       const slug = session.slug || (await fetchSessionSlug(session.id));
+      const turnCount = await fetchSessionTurnCount(resolved.workDir, session.id);
       const dir = slug || session.id;
       res.json({
         success: true,
@@ -97,6 +185,7 @@ export function createOpenCodeWebHandler(featureLoader: FeatureLoader) {
         password: process.env.OPENCODE_SERVER_PASSWORD || '',
         sessionId: session.id,
         slug: slug ?? null,
+        turnCount,
       });
     } catch (error) {
       logError(error, 'Resolve opencode web link failed');

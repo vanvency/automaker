@@ -1,3 +1,4 @@
+import { useRecentWorktreesStore } from './recent-worktrees-store';
 import { create } from 'zustand';
 // Note: persist middleware removed - settings now sync via API (use-settings-sync.ts)
 import type { Project, TrashedProject } from '@/lib/electron';
@@ -30,10 +31,12 @@ import {
   getAllOpencodeModelIds,
   getAllGeminiModelIds,
   getAllCopilotModelIds,
+  getAllPiModelIds,
   DEFAULT_PHASE_MODELS,
   DEFAULT_OPENCODE_MODEL,
   DEFAULT_GEMINI_MODEL,
   DEFAULT_COPILOT_MODEL,
+  DEFAULT_PI_MODEL,
   DEFAULT_MAX_CONCURRENCY,
   DEFAULT_GLOBAL_SETTINGS,
   getThinkingLevelsForModel,
@@ -320,9 +323,9 @@ const initialState: AppState = {
   phaseModels: DEFAULT_PHASE_MODELS,
   favoriteModels: [],
   enabledCursorModels: getAllCursorModelIds(),
-  cursorDefaultModel: 'cursor-auto',
+  cursorDefaultModel: 'cursor:auto',
   enabledCodexModels: getAllCodexModelIds(),
-  codexDefaultModel: 'codex-gpt-5.2-codex',
+  codexDefaultModel: 'codex:gpt-5.2-codex',
   codexAutoLoadAgents: false,
   codexSandboxMode: 'workspace-write',
   codexApprovalPolicy: 'on-request',
@@ -344,6 +347,8 @@ const initialState: AppState = {
   geminiDefaultModel: DEFAULT_GEMINI_MODEL,
   enabledCopilotModels: getAllCopilotModelIds(),
   copilotDefaultModel: DEFAULT_COPILOT_MODEL,
+  enabledPiModels: getAllPiModelIds(),
+  piDefaultModel: DEFAULT_PI_MODEL,
   disabledProviders: [],
   autoLoadClaudeMd: false,
   useClaudeCodeSystemPrompt: true,
@@ -1202,13 +1207,19 @@ export const useAppStore = create<AppState & AppActions>()((set, get) => ({
 
   // Worktree Settings actions
   setUseWorktrees: (enabled) => set({ useWorktrees: enabled }),
-  setCurrentWorktree: (projectPath, worktreePath, branch) =>
+  setCurrentWorktree: (projectPath, worktreePath, branch) => {
     set((state) => ({
       currentWorktreeByProject: {
         ...state.currentWorktreeByProject,
         [projectPath]: { path: worktreePath, branch },
       },
-    })),
+    }));
+    try {
+      useRecentWorktreesStore.getState().visit(projectPath, worktreePath);
+    } catch {
+      // Optional history must never turn a successful navigation into a page error.
+    }
+  },
   setWorktrees: (projectPath, worktrees) =>
     set((state) => ({
       worktreesByProject: {
@@ -1437,6 +1448,16 @@ export const useAppStore = create<AppState & AppActions>()((set, get) => ({
       enabledCopilotModels: enabled
         ? [...state.enabledCopilotModels, model]
         : state.enabledCopilotModels.filter((m) => m !== model),
+    })),
+
+  // Pi CLI Settings actions
+  setEnabledPiModels: (models) => set({ enabledPiModels: models }),
+  setPiDefaultModel: (model) => set({ piDefaultModel: model }),
+  togglePiModel: (model, enabled) =>
+    set((state) => ({
+      enabledPiModels: enabled
+        ? [...state.enabledPiModels, model]
+        : state.enabledPiModels.filter((m) => m !== model),
     })),
 
   // Provider Visibility Settings actions

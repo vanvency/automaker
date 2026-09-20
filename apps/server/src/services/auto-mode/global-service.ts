@@ -78,6 +78,9 @@ export class GlobalAutoModeService {
         }
         return features.filter(
           (f) =>
+            !f.archive &&
+            !f.supersededBy &&
+            !f.consolidationPlanId &&
             (f.status === 'backlog' || f.status === 'ready') &&
             (branchName === null
               ? !f.branchName || (primaryBranch && f.branchName === primaryBranch)
@@ -92,9 +95,10 @@ export class GlobalAutoModeService {
       (pPath) => this.featureStateManager.resetStuckFeatures(pPath),
       // isFeatureDoneFn
       (feature) =>
-        feature.status === 'completed' ||
-        feature.status === 'verified' ||
-        feature.status === 'waiting_approval',
+        !feature.archive &&
+        (feature.status === 'completed' ||
+          feature.status === 'verified' ||
+          feature.status === 'waiting_approval'),
       // isFeatureRunningFn
       (featureId) => this.concurrencyManager.isRunning(featureId)
     );

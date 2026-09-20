@@ -46,6 +46,7 @@ const PHASE_LABELS: Record<PhaseModelKey, string> = {
   projectAnalysisModel: 'Project Analysis',
   ideationModel: 'Ideation',
   memoryExtractionModel: 'Memory Extraction',
+  jiraChangeSummaryModel: 'Jira Change Summary',
   prDescriptionModel: 'PR Description',
 };
 

@@ -16,6 +16,20 @@ export {
   listAllFilesInDirectory,
   generateDiffsForNonGitDirectory,
   getGitRepositoryDiffs,
+  getGitRepositoryDiffsWithOptions,
+  getCommittedBranchDiffs,
+  collectBranchSubmoduleDiffs,
+  collectCommitSetDiffs,
+  isParentTask,
+  listBranchCommits,
+  resolveMergeBase,
+  resolveTaskCommitMatcher,
+  deriveJiraKeyFromId,
+  selectTaskCommits,
+  type SubmoduleDiffSummary,
+  type TaskScopeFeature,
+  type TaskScopeInfo,
+  DEFAULT_MAX_DIFF_BYTES,
 } from '@automaker/git-utils';
 
 type Logger = ReturnType<typeof createLogger>;

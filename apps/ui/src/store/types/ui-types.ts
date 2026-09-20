@@ -8,6 +8,7 @@ export type ViewMode =
   | 'interview'
   | 'context'
   | 'running-agents'
+  | 'worktrees'
   | 'terminal'
   | 'wiki'
   | 'ideation';
@@ -83,6 +84,7 @@ export interface BackgroundSettings {
 
 // Keyboard Shortcuts - stored as strings like "K", "Shift+N", "Cmd+K"
 export interface KeyboardShortcuts {
+  workBoard: string;
   // Navigation shortcuts
   board: string;
   graph: string;

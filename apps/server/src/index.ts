@@ -39,6 +39,9 @@ import { createHealthRoutes, createDetailedHandler } from './routes/health/index
 import { createAgentRoutes } from './routes/agent/index.js';
 import { createSessionsRoutes } from './routes/sessions/index.js';
 import { createFeaturesRoutes } from './routes/features/index.js';
+import { createPiWebRoutes } from './routes/pi-web/index.js';
+import { createHerdrRoutes } from './routes/herdr/index.js';
+import { bootstrapHerdr } from './services/herdr-bootstrap.js';
 import { createAutoModeRoutes } from './routes/auto-mode/index.js';
 import { createEnhancePromptRoutes } from './routes/enhance-prompt/index.js';
 import { createWorktreeRoutes } from './routes/worktree/index.js';
@@ -55,6 +58,10 @@ import {
   isTerminalPasswordRequired,
 } from './routes/terminal/index.js';
 import { createSettingsRoutes } from './routes/settings/index.js';
+import { JiraSyncService } from './services/jira-sync-service.js';
+import { TaskConsolidationService } from './services/task-consolidation-service.js';
+import { createTaskConsolidationRoutes } from './routes/task-consolidation/index.js';
+import { createJiraSyncRoutes } from './routes/jira-sync/index.js';
 import { AgentService } from './services/agent-service.js';
 import { FeatureLoader } from './services/feature-loader.js';
 import { AutoModeServiceCompat } from './services/auto-mode/index.js';
@@ -341,7 +348,13 @@ const agentService = new AgentService(DATA_DIR, events, settingsService);
 const featureLoader = new FeatureLoader();
 
 // Auto-mode services: compatibility layer provides old interface while using new architecture
-const autoModeService = new AutoModeServiceCompat(events, settingsService, featureLoader);
+const autoModeService = new AutoModeServiceCompat(
+  events,
+  settingsService,
+  featureLoader,
+  null,
+  agentService
+);
 const claudeUsageService = new ClaudeUsageService();
 const codexAppServerService = new CodexAppServerService();
 const codexModelCacheService = new CodexModelCacheService(DATA_DIR, codexAppServerService);
@@ -458,6 +471,22 @@ eventHookService.initialize(events, settingsService, eventHistoryService, featur
     }
   }
 
+  // Bootstrap herdr in the background: check the pi integration (sessions are
+  // per project and started on demand, on the first dispatch or deep link).
+  void bootstrapHerdr({ installMissingIntegration: true })
+    .then((status) => {
+      if (status.problems.length > 0) {
+        logger.warn(`[STARTUP] herdr is not fully ready: ${status.problems.join('; ')}`);
+      } else {
+        logger.info(
+          `[STARTUP] herdr ready (v${status.version ?? 'unknown'}; sessions are per project)`
+        );
+      }
+    })
+    .catch((err) => {
+      logger.warn('[STARTUP] herdr bootstrap failed:', err);
+    });
+
   // Bootstrap Codex model cache in background (don't block server startup)
   void codexModelCacheService.getModels().catch((err) => {
     logger.error('Failed to bootstrap Codex model cache:', err);
@@ -478,7 +507,7 @@ setInterval(() => {
 app.use('/api', requireJsonContentType);
 
 // Mount API routes - health, auth, and setup are unauthenticated
-app.use('/api/health', createHealthRoutes());
+app.use('/api/health', createHealthRoutes(settingsService));
 app.use('/api/auth', createAuthRoutes());
 app.use('/api/setup', createSetupRoutes());
 
@@ -495,7 +524,9 @@ app.use(
   '/api/features',
   createFeaturesRoutes(featureLoader, settingsService, events, autoModeService)
 );
-app.use('/api/auto-mode', createAutoModeRoutes(autoModeService));
+app.use('/api/pi-web', createPiWebRoutes());
+app.use('/api/herdr', createHerdrRoutes());
+app.use('/api/auto-mode', createAutoModeRoutes(autoModeService, featureLoader));
 app.use('/api/enhance-prompt', createEnhancePromptRoutes(settingsService));
 app.use('/api/worktree', createWorktreeRoutes(events, settingsService, featureLoader));
 app.use('/api/git', createGitRoutes());
@@ -506,6 +537,19 @@ app.use('/api/workspace', createWorkspaceRoutes());
 app.use('/api/templates', createTemplatesRoutes());
 app.use('/api/terminal', createTerminalRoutes());
 app.use('/api/settings', createSettingsRoutes(settingsService));
+const jiraSyncService = new JiraSyncService(settingsService, DATA_DIR);
+app.use('/api/jira-sync', createJiraSyncRoutes(jiraSyncService));
+app.use(
+  '/api/task-consolidation',
+  createTaskConsolidationRoutes(
+    new TaskConsolidationService(featureLoader, settingsService, DATA_DIR, async (projectPath) =>
+      (await autoModeService.getRunningAgents())
+        .filter((agent) => agent.projectPath === projectPath)
+        .map((agent) => agent.featureId)
+    )
+  )
+);
+jiraSyncService.start();
 app.use('/api/claude', createClaudeRoutes(claudeUsageService));
 app.use('/api/codex', createCodexRoutes(codexUsageService, codexModelCacheService));
 app.use('/api/zai', createZaiRoutes(zaiUsageService, settingsService));
@@ -950,6 +994,7 @@ const SHUTDOWN_TIMEOUT_MS = 30000;
 
 // Graceful shutdown helper
 const gracefulShutdown = async (signal: string) => {
+  jiraSyncService.stop();
   logger.info(`${signal} received, shutting down...`);
   beginShutdown();
 

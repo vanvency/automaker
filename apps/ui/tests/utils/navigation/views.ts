@@ -102,7 +102,8 @@ export async function navigateToSpec(page: Page): Promise<void> {
 }
 
 /**
- * Navigate to the agent view
+ * Navigate to the agent view - the herdr workspace preview for the current
+ * project/worktree (the in-app chat runner was replaced by it).
  * Note: Navigates directly to /agent since index route shows WelcomeView
  */
 export async function navigateToAgent(page: Page): Promise<void> {
@@ -115,8 +116,8 @@ export async function navigateToAgent(page: Page): Promise<void> {
   // Handle login redirect if needed
   await handleLoginScreenIfPresent(page);
 
-  // Wait for the agent view to be visible
-  await waitForElement(page, 'agent-view', { timeout: 10000 });
+  // Wait for the herdr preview shell to be visible
+  await waitForElement(page, 'herdr-agent-preview', { timeout: 10000 });
 }
 
 /**

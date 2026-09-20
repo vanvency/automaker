@@ -44,6 +44,18 @@ export { GeminiProvider, GeminiErrorCode } from './gemini-provider.js';
 // Copilot provider (GitHub Copilot SDK)
 export { CopilotProvider, CopilotErrorCode } from './copilot-provider.js';
 
+// Pi provider (pi coding agent CLI via local LiteLLM)
+export { PiProvider } from './pi-provider.js';
+export {
+  fetchLitellmModelIds,
+  getPiModelsConfigPath,
+  refreshPiLitellmProvider,
+  resolveLitellmApiKey,
+  resolveLitellmBaseUrl,
+  syncPiLitellmProvider,
+  toPiModelId,
+} from './pi-litellm.js';
+
 // Provider factory
 export { ProviderFactory } from './provider-factory.js';
 

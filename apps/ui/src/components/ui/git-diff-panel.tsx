@@ -6,11 +6,13 @@ import {
   FilePlus,
   FileX,
   FilePen,
+  FolderGit2,
   ChevronDown,
   ChevronRight,
   RefreshCw,
   GitBranch,
   GitMerge,
+  ListFilter,
   AlertCircle,
   Plus,
   Minus,
@@ -24,7 +26,12 @@ import { getElectronAPI } from '@/lib/electron';
 import { toast } from 'sonner';
 import { parseDiff, splitDiffByFile } from '@/lib/diff-utils';
 import type { ParsedFileDiff } from '@/lib/diff-utils';
-import type { FileStatus, MergeStateInfo } from '@/types/electron';
+import type {
+  DiffScopeInfo,
+  FileStatus,
+  MergeStateInfo,
+  SubmoduleDiffSummary,
+} from '@/types/electron';
 
 interface GitDiffPanelProps {
   projectPath: string;
@@ -217,6 +224,229 @@ function MergeStateBanner({ mergeState }: { mergeState: MergeStateInfo }) {
   );
 }
 
+const SUBMODULE_STATUS_STYLES: Record<
+  SubmoduleDiffSummary['status'],
+  { label: string; className: string }
+> = {
+  added: { label: 'Added', className: 'bg-green-500/20 text-green-400 border-green-500/30' },
+  removed: { label: 'Removed', className: 'bg-red-500/20 text-red-400 border-red-500/30' },
+  modified: { label: 'Updated', className: 'bg-blue-500/20 text-blue-400 border-blue-500/30' },
+  uncommitted: {
+    label: 'Uncommitted',
+    className: 'bg-amber-500/20 text-amber-400 border-amber-500/30',
+  },
+};
+
+interface SubmoduleGroup {
+  summary: SubmoduleDiffSummary;
+  /** Parsed diffs for the files this submodule changed */
+  files: ParsedFileDiff[];
+}
+
+/**
+ * Submodule section.
+ *
+ * A gitlink change on its own only says "Subproject commit abc..def", which
+ * hides the actual work. Each card here shows the submodule's own commit range
+ * plus the real per-file diffs inside it.
+ */
+function SubmoduleChangesSection({
+  groups,
+  expandedFiles,
+  onToggleFile,
+  fileStatusMap,
+  fileDiffMap,
+}: {
+  groups: SubmoduleGroup[];
+  expandedFiles: Set<string>;
+  onToggleFile: (filePath: string) => void;
+  fileStatusMap: Map<string, FileStatus>;
+  fileDiffMap: Map<string, string>;
+}) {
+  if (groups.length === 0) return null;
+
+  // Count what git reports for the submodule range, not the number of diff blocks
+  // we could fit in the payload (a truncated diff lists fewer files).
+  const totalFiles = groups.reduce((acc, group) => acc + group.summary.filesChanged, 0);
+  const truncatedCount = groups.filter((group) => group.summary.truncated).length;
+
+  return (
+    <div className="mx-4 mt-3 space-y-2" data-testid="submodule-changes">
+      <div className="flex items-center gap-2">
+        <FolderGit2 className="h-4 w-4 text-brand-500" />
+        <span className="text-sm font-medium">Submodule changes</span>
+        <span className="text-xs text-muted-foreground">
+          {groups.length} submodule{groups.length === 1 ? '' : 's'} · {totalFiles} file
+          {totalFiles === 1 ? '' : 's'} changed inside them
+          {truncatedCount > 0 &&
+            ` (${truncatedCount} diff${truncatedCount === 1 ? '' : 's'} truncated)`}
+        </span>
+      </div>
+
+      {groups.map(({ summary, files }) => {
+        const style = SUBMODULE_STATUS_STYLES[summary.status];
+        return (
+          <div
+            key={summary.path}
+            className="overflow-hidden rounded-lg border border-border"
+            data-testid={`submodule-${summary.path}`}
+          >
+            <div className="flex flex-wrap items-center gap-2 bg-accent/30 px-3 py-2">
+              <FolderGit2 className="h-3.5 w-3.5 flex-shrink-0 text-brand-500" />
+              <span className="font-mono text-xs text-foreground">{summary.path}</span>
+              <span
+                className={cn(
+                  'rounded border px-1.5 py-0.5 text-[10px] font-medium',
+                  style.className
+                )}
+              >
+                {style.label}
+              </span>
+              <span className="font-mono text-[11px] text-muted-foreground">
+                {summary.oldCommit ? summary.oldCommit.slice(0, 7) : '∅'} →{' '}
+                {summary.newCommit ? summary.newCommit.slice(0, 7) : '∅'}
+              </span>
+              <span className="text-xs text-muted-foreground">
+                {summary.filesChanged} file{summary.filesChanged === 1 ? '' : 's'}
+              </span>
+              {summary.insertions > 0 && (
+                <span className="text-xs text-green-400">+{summary.insertions}</span>
+              )}
+              {summary.deletions > 0 && (
+                <span className="text-xs text-red-400">-{summary.deletions}</span>
+              )}
+              {summary.truncated && (
+                <span className="text-[11px] text-amber-400">diff truncated</span>
+              )}
+            </div>
+
+            {summary.error && (
+              <div className="flex items-start gap-2 border-t border-border px-3 py-2 text-xs text-amber-500">
+                <AlertCircle className="mt-0.5 h-3.5 w-3.5 flex-shrink-0" />
+                <span>{summary.error}</span>
+              </div>
+            )}
+
+            {files.length === 0 ? (
+              <div className="border-t border-border px-3 py-2 text-xs text-muted-foreground">
+                No file-level changes available
+              </div>
+            ) : (
+              <div className="space-y-2 border-t border-border p-2">
+                {files.map((fileDiff) => (
+                  <FileDiffSection
+                    key={fileDiff.filePath}
+                    fileDiff={fileDiff}
+                    rawDiff={fileDiffMap.get(fileDiff.filePath)}
+                    isExpanded={expandedFiles.has(fileDiff.filePath)}
+                    onToggle={() => onToggleFile(fileDiff.filePath)}
+                    fileStatus={fileStatusMap.get(fileDiff.filePath)}
+                  />
+                ))}
+              </div>
+            )}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+/**
+ * Explains which commits the diff covers.
+ *
+ * Several tasks can share one feature branch, so a card defaults to "only my
+ * commits" (matched by Jira key / child index in the commit message). Parent
+ * tasks keep the whole branch, and reviewers can always widen the view.
+ */
+function DiffScopeBanner({
+  scope,
+  showWholeBranch,
+  onToggle,
+}: {
+  scope: DiffScopeInfo;
+  showWholeBranch: boolean;
+  onToggle: () => void;
+}) {
+  const taskLabel = scope.jiraKey
+    ? `${scope.jiraKey}${scope.childIndex ? ` child ${scope.childIndex}` : ''}`
+    : 'this task';
+  const total = scope.totalCommits ?? 0;
+
+  if (scope.mode === 'task') {
+    return (
+      <div
+        className="mx-4 mt-3 flex flex-wrap items-center gap-2 rounded-md border border-brand-500/25 bg-brand-500/10 px-3 py-2 text-xs"
+        data-testid="diff-scope"
+      >
+        <ListFilter className="h-3.5 w-3.5 flex-shrink-0 text-brand-500" />
+        <span>
+          Showing <span className="font-medium">{scope.matchedCommits ?? 0}</span> of {total} commit
+          {total === 1 ? '' : 's'} on this branch &mdash; only changes for{' '}
+          <span className="font-medium">{taskLabel}</span>
+        </span>
+        <Button variant="ghost" size="sm" className="ml-auto h-6 text-xs" onClick={onToggle}>
+          Show all branch changes
+        </Button>
+      </div>
+    );
+  }
+
+  if (scope.reason === 'requested-branch') {
+    return (
+      <div
+        className="mx-4 mt-3 flex flex-wrap items-center gap-2 rounded-md border border-border bg-card px-3 py-2 text-xs"
+        data-testid="diff-scope"
+      >
+        <ListFilter className="h-3.5 w-3.5 flex-shrink-0 text-muted-foreground" />
+        <span>
+          Showing all {total} commit{total === 1 ? '' : 's'} on this branch
+        </span>
+        <Button
+          variant="ghost"
+          size="sm"
+          className="ml-auto h-6 text-xs"
+          onClick={onToggle}
+          disabled={showWholeBranch ? false : undefined}
+        >
+          Only {taskLabel} changes
+        </Button>
+      </div>
+    );
+  }
+
+  if (scope.reason === 'parent-task') {
+    return (
+      <div
+        className="mx-4 mt-3 flex flex-wrap items-center gap-2 rounded-md border border-border bg-card px-3 py-2 text-xs text-muted-foreground"
+        data-testid="diff-scope"
+      >
+        <ListFilter className="h-3.5 w-3.5 flex-shrink-0" />
+        <span>
+          This task owns the branch &mdash; showing all {total} commit{total === 1 ? '' : 's'}
+        </span>
+      </div>
+    );
+  }
+
+  if (scope.reason === 'no-matching-commits') {
+    return (
+      <div
+        className="mx-4 mt-3 flex flex-wrap items-center gap-2 rounded-md border border-amber-500/25 bg-amber-500/10 px-3 py-2 text-xs text-amber-500"
+        data-testid="diff-scope"
+      >
+        <AlertCircle className="h-3.5 w-3.5 flex-shrink-0" />
+        <span>
+          No commit on this branch mentions {taskLabel} &mdash; showing all {total} commit
+          {total === 1 ? '' : 's'}
+        </span>
+      </div>
+    );
+  }
+
+  return null;
+}
+
 function FileDiffSection({
   fileDiff,
   rawDiff,
@@ -357,6 +587,9 @@ export function GitDiffPanel({
   const [isExpanded, setIsExpanded] = useState(!compact);
   const [expandedFiles, setExpandedFiles] = useState<Set<string>>(new Set());
   const [stagingInProgress, setStagingInProgress] = useState<Set<string>>(new Set());
+  // Cards on a shared branch default to "only this task's commits"; the reviewer
+  // can widen the view to the whole branch.
+  const [showWholeBranch, setShowWholeBranch] = useState(false);
 
   // Use worktree diffs hook when worktrees are enabled and panel is expanded
   // Pass undefined for featureId when not using worktrees to disable the query
@@ -367,7 +600,8 @@ export function GitDiffPanel({
     refetch: refetchWorktree,
   } = useWorktreeDiffs(
     useWorktrees && isExpanded ? projectPath : undefined,
-    useWorktrees && isExpanded ? featureId : undefined
+    useWorktrees && isExpanded ? featureId : undefined,
+    { taskScope: showWholeBranch ? 'branch' : 'auto' }
   );
 
   // Use git diffs hook when worktrees are disabled and panel is expanded
@@ -388,6 +622,7 @@ export function GitDiffPanel({
   const files = useMemo(() => diffsData?.files ?? [], [diffsData?.files]);
   const diffContent = diffsData?.diff ?? '';
   const mergeState: MergeStateInfo | undefined = diffsData?.mergeState;
+  const scope: DiffScopeInfo | undefined = diffsData?.scope;
   const error = queryError
     ? queryError instanceof Error
       ? queryError.message
@@ -424,12 +659,60 @@ export function GitDiffPanel({
     return diffs;
   }, [diffContent, mergeState, fileStatusMap]);
 
+  // Submodule gitlink moves are reported separately, and their inner files are
+  // prefixed with the submodule path.
+  const submodules = useMemo(() => diffsData?.submodules ?? [], [diffsData?.submodules]);
+
+  const submoduleGroups = useMemo<SubmoduleGroup[]>(() => {
+    return submodules.map((summary) => {
+      // A file can appear in both the committed range diff and the working-tree
+      // diff; merge those blocks into one row per file so the list stays readable.
+      const merged = new Map<string, ParsedFileDiff>();
+      for (const diff of parsedDiffs) {
+        if (!diff.filePath.startsWith(`${summary.path}/`)) continue;
+        const existing = merged.get(diff.filePath);
+        if (existing) {
+          existing.additions += diff.additions;
+          existing.deletions += diff.deletions;
+          existing.hunks.push(...diff.hunks);
+        } else {
+          merged.set(diff.filePath, { ...diff, hunks: [...diff.hunks] });
+        }
+      }
+      return { summary, files: [...merged.values()] };
+    });
+  }, [submodules, parsedDiffs]);
+
+  // Files belonging to a submodule (including the gitlink entry itself) are
+  // rendered inside the submodule cards instead of the top-level list.
+  const submoduleFilePaths = useMemo(() => {
+    const paths = new Set<string>();
+    for (const { summary, files } of submoduleGroups) {
+      paths.add(summary.path);
+      for (const file of files) paths.add(file.filePath);
+    }
+    return paths;
+  }, [submoduleGroups]);
+
+  const topLevelDiffs = useMemo(
+    () => parsedDiffs.filter((diff) => !submoduleFilePaths.has(diff.filePath)),
+    [parsedDiffs, submoduleFilePaths]
+  );
+
+  const topLevelFiles = useMemo(
+    () => files.filter((file) => !submoduleFilePaths.has(file.path)),
+    [files, submoduleFilePaths]
+  );
+
   // Build a map from file path to raw diff string for CodeMirror merge view
   const fileDiffMap = useMemo(() => {
     const map = new Map<string, string>();
     const perFileDiffs = splitDiffByFile(diffContent);
     for (const entry of perFileDiffs) {
-      map.set(entry.filePath, entry.diff);
+      // A path can have several blocks (committed range + working tree); keep them
+      // all so the expanded view shows every change to that file.
+      const existing = map.get(entry.filePath);
+      map.set(entry.filePath, existing ? `${existing}\n${entry.diff}` : entry.diff);
     }
     return map;
   }, [diffContent]);
@@ -705,6 +988,24 @@ export function GitDiffPanel({
                 <MergeStateBanner mergeState={mergeState} />
               )}
 
+              {/* Which commits are covered (task-only vs whole branch) */}
+              {scope && (
+                <DiffScopeBanner
+                  scope={scope}
+                  showWholeBranch={showWholeBranch}
+                  onToggle={() => setShowWholeBranch((previous) => !previous)}
+                />
+              )}
+
+              {/* Submodule content changes (real diffs, not just gitlink moves) */}
+              <SubmoduleChangesSection
+                groups={submoduleGroups}
+                expandedFiles={expandedFiles}
+                onToggleFile={toggleFile}
+                fileStatusMap={fileStatusMap}
+                fileDiffMap={fileDiffMap}
+              />
+
               {/* Summary bar */}
               <div className="p-4 pb-2 border-b border-border-glass">
                 <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
@@ -848,7 +1149,7 @@ export function GitDiffPanel({
 
               {/* File diffs */}
               <div className="p-4 space-y-3">
-                {parsedDiffs.map((fileDiff) => (
+                {topLevelDiffs.map((fileDiff) => (
                   <FileDiffSection
                     key={fileDiff.filePath}
                     fileDiff={fileDiff}
@@ -863,9 +1164,9 @@ export function GitDiffPanel({
                   />
                 ))}
                 {/* Fallback for files that have no diff content (shouldn't happen after fix, but safety net) */}
-                {files.length > 0 && parsedDiffs.length === 0 && (
+                {topLevelFiles.length > 0 && topLevelDiffs.length === 0 && (
                   <div className="space-y-2">
-                    {files.map((file) => {
+                    {topLevelFiles.map((file) => {
                       const stagingState = getStagingState(file);
                       const isFileMerge = file.isMergeAffected;
                       return (

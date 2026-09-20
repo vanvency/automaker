@@ -243,10 +243,14 @@ function getSecondaryActions(
   const actions = [];
 
   // Refine action for waiting_approval status
-  if (feature.status === 'waiting_approval' && handlers.onFollowUp) {
+  if (
+    (feature.status === 'waiting_approval' ||
+      (isBacklogLikeStatus(feature.status) && (feature.providerSessionId || feature.error))) &&
+    handlers.onFollowUp
+  ) {
     actions.push({
       icon: Wand2,
-      label: 'Refine',
+      label: 'Reply',
       onClick: handlers.onFollowUp,
     });
   }
@@ -327,6 +331,18 @@ export const RowActions = memo(function RowActions({
     },
     [setOpen]
   );
+
+  if (feature.archive || feature.supersededBy || feature.consolidationPlanId) {
+    return (
+      <span className="text-xs text-muted-foreground">
+        {feature.archive
+          ? 'Archived'
+          : feature.supersededBy
+            ? 'Covered and archived'
+            : 'Consolidation in progress'}
+      </span>
+    );
+  }
 
   return (
     <div
@@ -534,7 +550,7 @@ export const RowActions = memo(function RowActions({
                 <DropdownMenuSeparator />
                 <MenuItem
                   icon={Trash2}
-                  label="Delete"
+                  label="Archive Task"
                   onClick={withClose(handlers.onDelete)}
                   variant="destructive"
                 />
@@ -662,7 +678,7 @@ export const RowActions = memo(function RowActions({
                 )}
                 <MenuItem
                   icon={Trash2}
-                  label="Delete"
+                  label="Archive Task"
                   onClick={withClose(handlers.onDelete)}
                   variant="destructive"
                 />
@@ -740,7 +756,7 @@ export const RowActions = memo(function RowActions({
               )}
               <MenuItem
                 icon={Trash2}
-                label="Delete"
+                label="Archive Task"
                 onClick={withClose(handlers.onDelete)}
                 variant="destructive"
               />
@@ -823,7 +839,7 @@ export const RowActions = memo(function RowActions({
               )}
               <MenuItem
                 icon={Trash2}
-                label="Delete"
+                label="Archive Task"
                 onClick={withClose(handlers.onDelete)}
                 variant="destructive"
               />
@@ -883,7 +899,7 @@ export const RowActions = memo(function RowActions({
               <DropdownMenuSeparator />
               <MenuItem
                 icon={Trash2}
-                label="Delete"
+                label="Archive Task"
                 onClick={withClose(handlers.onDelete)}
                 variant="destructive"
               />

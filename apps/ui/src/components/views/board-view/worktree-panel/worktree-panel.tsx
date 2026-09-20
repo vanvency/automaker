@@ -141,6 +141,18 @@ export function WorktreePanel({
     features,
   });
 
+  // Jira work type per branch, taken from the cards of that worktree, so the
+  // badge can sit in front of the branch name everywhere it is listed.
+  const jiraTypeByBranch = useMemo(() => {
+    const byBranch: Record<string, string> = {};
+    for (const feature of features ?? []) {
+      if (feature.branchName && feature.jiraType && !byBranch[feature.branchName]) {
+        byBranch[feature.branchName] = feature.jiraType;
+      }
+    }
+    return byBranch;
+  }, [features]);
+
   // Pinned worktrees count from store
   const pinnedWorktreesCount = useAppStore(
     (state) => state.pinnedWorktreesCountByProject[projectPath] ?? 0
@@ -979,6 +991,7 @@ export function WorktreePanel({
     return (
       <div className="flex items-center gap-2 px-3 py-2 border-b border-border bg-glass/50 backdrop-blur-sm">
         <WorktreeMobileDropdown
+          projectPath={projectPath}
           worktrees={worktrees}
           isWorktreeSelected={isWorktreeSelected}
           hasRunningFeatures={hasRunningFeatures}
@@ -987,6 +1000,7 @@ export function WorktreePanel({
           getDevServerInfo={getDevServerInfo}
           isActivating={isActivating}
           branchCardCounts={branchCardCounts}
+          features={features}
           onSelectWorktree={handleSelectWorktree}
         />
 
@@ -1244,11 +1258,13 @@ export function WorktreePanel({
           use a compact dropdown to switch between them without highlighting main */}
       {pinnedWorktreesCount === 0 && availableWorktreesForSwap.length > 0 ? (
         <WorktreeDropdown
+          projectPath={projectPath}
           worktrees={worktrees}
           isWorktreeSelected={isWorktreeSelected}
           hasRunningFeatures={hasRunningFeatures}
           isActivating={isActivating}
           branchCardCounts={branchCardCounts}
+          features={features}
           isDevServerRunning={isDevServerRunning}
           isDevServerStarting={isDevServerStarting}
           getDevServerInfo={getDevServerInfo}
@@ -1323,6 +1339,7 @@ export function WorktreePanel({
           <WorktreeTab
             worktree={mainWorktree}
             cardCount={branchCardCounts?.[mainWorktree.branch]}
+            jiraType={jiraTypeByBranch[mainWorktree.branch]}
             hasChanges={mainWorktree.hasChanges}
             changedFilesCount={mainWorktree.changedFilesCount}
             isSelected={false}
@@ -1416,6 +1433,7 @@ export function WorktreePanel({
               key={worktree.path}
               worktree={worktree}
               cardCount={branchCardCounts?.[worktree.branch]}
+              jiraType={jiraTypeByBranch[worktree.branch]}
               hasChanges={worktree.hasChanges}
               changedFilesCount={worktree.changedFilesCount}
               isSelected={effectiveIsSelected}

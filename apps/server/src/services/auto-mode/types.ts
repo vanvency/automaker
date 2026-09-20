@@ -16,6 +16,7 @@ import type { AutoLoopCoordinator } from '../auto-loop-coordinator.js';
 import type { WorktreeResolver } from '../worktree-resolver.js';
 import type { TypedEventBus } from '../typed-event-bus.js';
 import type { ClaudeUsageService } from '../claude-usage-service.js';
+import type { FeatureConversationSink } from '../agent-service.js';
 
 // Re-export types from extracted services for route consumption
 export type { AutoModeConfig, ProjectAutoLoopState } from '../auto-loop-coordinator.js';
@@ -58,6 +59,11 @@ export interface FacadeOptions {
   sharedServices?: SharedServices;
   /** ClaudeUsageService for checking usage limits before picking up features (optional) */
   claudeUsageService?: ClaudeUsageService | null;
+  /**
+   * AgentService (or any sink with the same shape) used to publish feature runs
+   * as AgentSessions so the Agent view can list in-progress conversations.
+   */
+  featureConversations?: FeatureConversationSink | null;
 }
 
 /**

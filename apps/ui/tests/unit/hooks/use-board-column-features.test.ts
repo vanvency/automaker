@@ -61,7 +61,28 @@ describe('useBoardColumnFeatures', () => {
       expect(result.current.columnFeaturesMap.backlog[0].id).toBe('feat-1');
     });
 
-    it('should map merge_conflict features to backlog column', () => {
+    it('should put a card that carries an error into the Needs Attention lane', () => {
+      const features = [
+        createMockFeature('feat-blocked', 'waiting_approval', { error: 'Waiting on the reporter' }),
+        createMockFeature('feat-open', 'waiting_approval'),
+      ];
+
+      const { result } = renderHook(() =>
+        useBoardColumnFeatures({
+          ...defaultProps,
+          features,
+        })
+      );
+
+      // The card waiting for an answer is not "waiting for review" - it is
+      // waiting for a human, so it joins the Needs Attention lane.
+      expect(result.current.columnFeaturesMap.failed.map((f) => f.id)).toEqual(['feat-blocked']);
+      expect(result.current.columnFeaturesMap.waiting_approval.map((f) => f.id)).toEqual([
+        'feat-open',
+      ]);
+    });
+
+    it('should map merge_conflict features to the Needs Attention lane', () => {
       const features = [createMockFeature('feat-1', 'merge_conflict')];
 
       const { result } = renderHook(() =>
@@ -71,8 +92,11 @@ describe('useBoardColumnFeatures', () => {
         })
       );
 
-      expect(result.current.columnFeaturesMap.backlog).toHaveLength(1);
-      expect(result.current.columnFeaturesMap.backlog[0].id).toBe('feat-1');
+      // A blocked card needs a human, so it belongs to Needs Attention - never to
+      // Backlog, which would make it look like queued work.
+      expect(result.current.columnFeaturesMap.backlog).toHaveLength(0);
+      expect(result.current.columnFeaturesMap.failed).toHaveLength(1);
+      expect(result.current.columnFeaturesMap.failed[0].id).toBe('feat-1');
     });
 
     it('should map in_progress features to in_progress column', () => {
@@ -278,7 +302,7 @@ describe('useBoardColumnFeatures', () => {
       expect(result.current.columnFeaturesMap.backlog).toHaveLength(0);
     });
 
-    it('should protect interrupted status features that are recently completed', () => {
+    it('keeps interrupted tasks visible after their agent run finishes', () => {
       const features = [createMockFeature('feat-1', 'interrupted')];
 
       useAppStore.setState({
@@ -293,8 +317,9 @@ describe('useBoardColumnFeatures', () => {
         })
       );
 
-      // Should not appear in backlog (interrupted normally goes to backlog)
+      // A completed run does not mean its interrupted task can disappear.
       expect(result.current.columnFeaturesMap.backlog).toHaveLength(0);
+      expect(result.current.columnFeaturesMap.failed).toHaveLength(1);
     });
   });
 

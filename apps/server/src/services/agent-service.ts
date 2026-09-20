@@ -77,10 +77,106 @@ interface SessionMetadata {
   tags?: string[];
   model?: string;
   sdkSessionId?: string; // Claude SDK session ID for conversation continuity
+  /** Set when this session mirrors a board feature run instead of a chat session */
+  featureId?: string;
+  /** Provider that owns the run behind a feature session (pi, claude, opencode, ...) */
+  provider?: string;
+}
+
+/**
+ * Options for mirroring a feature run into an AgentSession.
+ *
+ * Feature runs are executed by ExecutionService/AgentExecutor, not by this
+ * service, so the run only becomes visible in the Agent view when the caller
+ * registers it here.
+ */
+export interface FeatureConversationStartOptions {
+  featureId: string;
+  /** Session name shown in the Agent Sessions list (usually the feature title) */
+  name: string;
+  projectPath?: string;
+  workingDirectory: string;
+  /** Prompt sent to the agent for this run */
+  prompt: string;
+  model?: string;
+  provider?: string;
+  /** Provider-native conversation id, so follow-up runs map to the same session */
+  providerSessionId?: string;
+  /**
+   * Abort controller owned by the feature run. Handing it over lets the Agent
+   * view's Stop button abort the feature through the regular agent API.
+   */
+  abortController?: AbortController;
+}
+
+/**
+ * The slice of AgentService that ExecutionService needs to publish a running
+ * feature as an AgentSession.
+ */
+export interface FeatureConversationSink {
+  startFeatureConversation(
+    options: FeatureConversationStartOptions
+  ): Promise<{ sessionId: string }>;
+  updateFeatureConversation(featureId: string, output: string): Promise<void>;
+  finishFeatureConversation(featureId: string, options?: { error?: string }): Promise<void>;
+}
+
+/** Live state for a mirrored feature conversation */
+interface FeatureConversationState {
+  sessionId: string;
+  assistantMessageId: string | null;
+  lastEmittedContent: string;
+  lastEmitAt: number;
+  pendingSave: ReturnType<typeof setTimeout> | null;
+}
+
+/**
+ * Mirrored output is bounded: the feature transcript stays available in full in
+ * agent-output.md and in the provider's own store, while the session file and
+ * the stream events keep a readable tail.
+ */
+const MAX_FEATURE_CONVERSATION_CHARS = 60_000;
+/** Prompts include the whole feature description; keep the bubble readable. */
+const MAX_FEATURE_PROMPT_CHARS = 8_000;
+/** How often the mirrored content is pushed over the event stream */
+const FEATURE_STREAM_EMIT_INTERVAL_MS = 2_000;
+/** Debounce for persisting mirrored output to the session file */
+const FEATURE_SESSION_SAVE_DEBOUNCE_MS = 750;
+/**
+ * Finished feature mirrors kept in the session store. Feature runs are one per
+ * card, so without a cap a long board run would leave hundreds of sessions that
+ * every session-list request has to read. The full transcript always stays in
+ * agent-output.md, so old mirrors are safe to drop.
+ */
+const MAX_ARCHIVED_FEATURE_SESSIONS = 25;
+
+/**
+ * Deterministic session id for a feature's mirrored conversation, so follow-up
+ * runs, restarts and the board all resolve to the same AgentSession.
+ */
+export function featureConversationSessionId(featureId: string): string {
+  const slug = featureId
+    .trim()
+    .replace(/[^A-Za-z0-9._-]+/g, '-')
+    .replace(/^-+|-+$/g, '');
+  return `feature-${slug || 'session'}`;
+}
+
+/** Keep the most recent part of a long transcript, which is what a watcher wants. */
+function truncateFeatureOutput(output: string): string {
+  if (output.length <= MAX_FEATURE_CONVERSATION_CHARS) return output;
+  return `[… earlier output truncated …]\n\n${output.slice(-MAX_FEATURE_CONVERSATION_CHARS)}`;
+}
+
+function truncateFeaturePrompt(prompt: string): string {
+  if (prompt.length <= MAX_FEATURE_PROMPT_CHARS) return prompt;
+  return `${prompt.slice(0, MAX_FEATURE_PROMPT_CHARS)}\n\n[… prompt truncated …]`;
 }
 
 export class AgentService {
   private sessions = new Map<string, Session>();
+  /** Feature runs currently mirrored into an AgentSession, keyed by feature id */
+  private featureConversations = new Map<string, FeatureConversationState>();
   private stateDir: string;
   private metadataFile: string;
   private events: EventEmitter;
@@ -1030,6 +1126,13 @@ export class AgentService {
 
     // Clear from memory
     this.sessions.delete(sessionId);
+    // Stop mirroring a feature run whose session was just deleted
+    for (const [featureId, state] of this.featureConversations) {
+      if (state.sessionId === sessionId) {
+        if (state.pendingSave) clearTimeout(state.pendingSave);
+        this.featureConversations.delete(featureId);
+      }
+    }
 
     return true;
   }
@@ -1049,6 +1152,266 @@ export class AgentService {
       metadata[sessionId].updatedAt = new Date().toISOString();
       await this.saveMetadata(metadata);
     }
+  }
+
+  // Feature conversation mirroring
+
+  /**
+   * Publish a board/auto-mode feature run as an AgentSession.
+   *
+   * Feature runs execute through ExecutionService → AgentExecutor → provider and
+   * never touch the chat session store, which is why they used to be invisible
+   * in the Agent view. Registering the run here creates (or refreshes) one
+   * stable session per feature, records the provider conversation id and marks
+   * the session as running so the session list shows it as in progress.
+   *
+   * @returns The mirrored session id
+   */
+  async startFeatureConversation(
+    options: FeatureConversationStartOptions
+  ): Promise<{ sessionId: string }> {
+    const sessionId = featureConversationSessionId(options.featureId);
+    const resolvedWorkingDirectory = path.resolve(options.workingDirectory);
+    validateWorkingDirectory(resolvedWorkingDirectory);
+    if (options.projectPath) {
+      validateWorkingDirectory(options.projectPath);
+    }
+
+    const now = new Date().toISOString();
+    const metadata = await this.loadMetadata();
+    const existingMetadata = metadata[sessionId];
+    const sessionMetadata: SessionMetadata = {
+      ...existingMetadata,
+      id: sessionId,
+      name: options.name,
+      projectPath: options.projectPath ?? existingMetadata?.projectPath,
+      workingDirectory: resolvedWorkingDirectory,
+      createdAt: existingMetadata?.createdAt ?? now,
+      updatedAt: now,
+      model: options.model ?? existingMetadata?.model,
+      provider: options.provider ?? existingMetadata?.provider,
+      featureId: options.featureId,
+      // A follow-up run pulls the session back into the Active tab
+      archived: false,
+      tags: existingMetadata?.tags?.includes('feature')
+        ? existingMetadata.tags
+        : ['feature', ...(existingMetadata?.tags ?? [])],
+      sdkSessionId: options.providerSessionId ?? existingMetadata?.sdkSessionId,
+    };
+    metadata[sessionId] = sessionMetadata;
+    await this.saveMetadata(metadata);
+
+    // Reuse an in-memory session if there is one (follow-up run or a session
+    // that was already open in the Agent view), otherwise load it from disk.
+    let session = this.sessions.get(sessionId);
+    if (!session) {
+      const persisted = await this.loadSession(sessionId);
+      session = {
+        messages: persisted,
+        isRunning: false,
+        abortController: null,
+        workingDirectory: resolvedWorkingDirectory,
+        promptQueue: await this.loadQueueState(sessionId),
+      };
+      this.sessions.set(sessionId, session);
+    }
+    session.workingDirectory = resolvedWorkingDirectory;
+    session.model = sessionMetadata.model;
+    session.sdkSessionId = sessionMetadata.sdkSessionId;
+    session.isRunning = true;
+    session.abortController = options.abortController ?? null;
+
+    const previousState = this.featureConversations.get(options.featureId);
+    if (previousState?.pendingSave) {
+      clearTimeout(previousState.pendingSave);
+    }
+    this.featureConversations.set(options.featureId, {
+      sessionId,
+      assistantMessageId: null,
+      lastEmittedContent: '',
+      lastEmitAt: 0,
+      pendingSave: null,
+    });
+
+    const userMessage: Message = {
+      id: this.generateId(),
+      role: 'user',
+      content: truncateFeaturePrompt(options.prompt),
+      timestamp: now,
+    };
+    session.messages.push(userMessage);
+
+    this.emitAgentEvent(sessionId, { type: 'started' });
+    this.emitAgentEvent(sessionId, { type: 'message', message: userMessage });
+    await this.saveSession(sessionId, session.messages);
+
+    this.logger.info(
+      `Mirroring feature ${options.featureId} into AgentSession ${sessionId} (${sessionMetadata.name})`
+    );
+    return { sessionId };
+  }
+
+  /**
+   * Push the latest transcript of a mirrored feature run.
+   *
+   * Called repeatedly while the run is in progress with the whole transcript so
+   * far (AgentExecutor rewrites agent-output.md each run), so the assistant
+   * message always reflects the newest output.
+   */
+  async updateFeatureConversation(featureId: string, output: string): Promise<void> {
+    const state = this.featureConversations.get(featureId);
+    if (!state) return;
+
+    const session = this.sessions.get(state.sessionId);
+    if (!session) return;
+
+    const content = truncateFeatureOutput(output);
+    if (state.assistantMessageId) {
+      const message = session.messages.find((m) => m.id === state.assistantMessageId);
+      if (message) {
+        if (message.content === content) return;
+        message.content = content;
+      } else {
+        const recreated: Message = {
+          id: state.assistantMessageId,
+          role: 'assistant',
+          content,
+          timestamp: new Date().toISOString(),
+        };
+        session.messages.push(recreated);
+      }
+    } else {
+      const message: Message = {
+        id: this.generateId(),
+        role: 'assistant',
+        content,
+        timestamp: new Date().toISOString(),
+      };
+      session.messages.push(message);
+      state.assistantMessageId = message.id;
+    }
+    session.isRunning = true;
+
+    this.scheduleFeatureConversationSave(state);
+
+    const now = Date.now();
+    if (
+      now - state.lastEmitAt >= FEATURE_STREAM_EMIT_INTERVAL_MS &&
+      content !== state.lastEmittedContent
+    ) {
+      state.lastEmitAt = now;
+      state.lastEmittedContent = content;
+      this.emitAgentEvent(state.sessionId, {
+        type: 'stream',
+        messageId: state.assistantMessageId,
+        content,
+        isComplete: false,
+      });
+    }
+  }
+
+  /**
+   * Close a mirrored feature conversation: persist the final transcript and let
+   * the Agent view know the run is no longer in progress.
+   *
+   * Finished feature runs are archived so the Active tab keeps showing the work
+   * that is actually in progress; the transcript stays readable in Archived.
+   */
+  async finishFeatureConversation(featureId: string, options?: { error?: string }): Promise<void> {
+    const state = this.featureConversations.get(featureId);
+    if (!state) return;
+    this.featureConversations.delete(featureId);
+    if (state.pendingSave) {
+      clearTimeout(state.pendingSave);
+      state.pendingSave = null;
+    }
+
+    const session = this.sessions.get(state.sessionId);
+    if (!session) return;
+
+    session.isRunning = false;
+    session.abortController = null;
+
+    if (options?.error) {
+      const errorMessage: Message = {
+        id: this.generateId(),
+        role: 'assistant',
+        content: `Error: ${options.error}`,
+        timestamp: new Date().toISOString(),
+        isError: true,
+      };
+      session.messages.push(errorMessage);
+      await this.saveSession(state.sessionId, session.messages);
+      this.emitAgentEvent(state.sessionId, {
+        type: 'error',
+        error: options.error,
+        message: errorMessage,
+      });
+      await this.archiveFeatureSession(state.sessionId);
+      return;
+    }
+
+    await this.saveSession(state.sessionId, session.messages);
+    const assistantMessage = state.assistantMessageId
+      ? session.messages.find((m) => m.id === state.assistantMessageId)
+      : undefined;
+    this.emitAgentEvent(state.sessionId, {
+      type: 'complete',
+      messageId: state.assistantMessageId ?? undefined,
+      content: assistantMessage?.content ?? '',
+      toolUses: [],
+    });
+    await this.archiveFeatureSession(state.sessionId);
+  }
+
+  private async archiveFeatureSession(sessionId: string): Promise<void> {
+    try {
+      await this.updateSession(sessionId, { archived: true });
+    } catch (error) {
+      this.logger.warn(`Failed to archive mirrored feature session ${sessionId}:`, error);
+    }
+    await this.pruneFinishedFeatureSessions();
+  }
+
+  /**
+   * Drop the oldest finished feature mirrors once there are more than
+   * MAX_ARCHIVED_FEATURE_SESSIONS of them, so the session list stays cheap.
+   * Only auto-generated mirrors (tagged with a featureId) are pruned; chat
+   * sessions are never touched.
+   */
+  private async pruneFinishedFeatureSessions(): Promise<void> {
+    try {
+      const metadata = await this.loadMetadata();
+      const finishedFeatures = Object.values(metadata)
+        .filter((session) => session.featureId && session.archived)
+        .sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime());
+      const stale = finishedFeatures.slice(MAX_ARCHIVED_FEATURE_SESSIONS);
+      if (stale.length === 0) return;
+
+      for (const session of stale) {
+        delete metadata[session.id];
+        this.sessions.delete(session.id);
+        try {
+          await secureFs.unlink(path.join(this.stateDir, `${session.id}.json`));
+        } catch {
+          // Session file may already be gone
+        }
+      }
+      await this.saveMetadata(metadata);
+      this.logger.info(`Pruned ${stale.length} finished feature session(s)`);
+    } catch (error) {
+      this.logger.warn('Failed to prune finished feature sessions:', error);
+    }
+  }
+
+  private scheduleFeatureConversationSave(state: FeatureConversationState): void {
+    if (state.pendingSave) clearTimeout(state.pendingSave);
+    state.pendingSave = setTimeout(() => {
+      state.pendingSave = null;
+      const session = this.sessions.get(state.sessionId);
+      if (!session) return;
+      void this.saveSession(state.sessionId, session.messages);
+    }, FEATURE_SESSION_SAVE_DEBOUNCE_MS);
   }
 
   // Queue management methods

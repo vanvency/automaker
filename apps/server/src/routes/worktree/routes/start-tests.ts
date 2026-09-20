@@ -9,6 +9,7 @@ import type { Request, Response } from 'express';
 import type { SettingsService } from '../../../services/settings-service.js';
 import { getTestRunnerService } from '../../../services/test-runner-service.js';
 import { getErrorMessage, logError } from '../common.js';
+import { worktreePreviewService } from '../../../services/worktree-preview-service.js';
 
 export function createStartTestsHandler(settingsService?: SettingsService) {
   return async (req: Request, res: Response): Promise<void> => {
@@ -61,9 +62,19 @@ export function createStartTestsHandler(settingsService?: SettingsService) {
       }
 
       const testRunnerService = getTestRunnerService();
+      const { preview } = await worktreePreviewService.status(settingsPath, worktreePath);
+      if (preview && preview.status !== 'stopped' && preview.status !== 'ready') {
+        res.status(400).json({
+          success: false,
+          error:
+            'Worktree preview is not ready. Wait for deployment, redeploy, or stop the preview before running tests.',
+        });
+        return;
+      }
       const result = await testRunnerService.startTests(worktreePath, {
         command: testCommand,
         testFile,
+        previewUrl: preview?.status === 'ready' ? preview.url : undefined,
       });
 
       if (result.success && result.result) {

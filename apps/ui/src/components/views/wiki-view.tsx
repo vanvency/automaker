@@ -145,7 +145,7 @@ export function WikiView() {
             studio that helps developers build software faster using AI agents.
           </p>
           <p>
-            At its core, Automaker provides a visual Kanban board to manage features. When you're
+            At its core, Automaker provides a visual Task Kanban to manage features. When you're
             ready, AI agents automatically implement those features in your codebase, complete with
             git worktree isolation for safe parallel development.
           </p>
@@ -202,9 +202,9 @@ export function WikiView() {
             items={[
               {
                 icon: LayoutGrid,
-                title: 'Kanban Board',
+                title: 'Task Kanban',
                 description:
-                  '4 columns: Backlog, In Progress, Waiting Approval, Verified. Drag and drop to manage feature lifecycle.',
+                  '5 columns: Backlog, In Progress, Needs Attention, Waiting Review, Done. Drag and drop to manage feature lifecycle.',
               },
               {
                 icon: Bot,
@@ -276,7 +276,7 @@ export function WikiView() {
             <li className="text-foreground">
               <strong>Create Feature</strong>
               <p className="text-muted-foreground ml-5 mt-1">
-                Add a new feature card to the Kanban board with description and steps
+                Add a new feature card to the Task Kanban with description and steps
               </p>
             </li>
             <li className="text-foreground">
@@ -399,11 +399,11 @@ export function WikiView() {
               },
               {
                 file: 'views/board-view.tsx',
-                desc: 'Kanban board with drag-and-drop cards',
+                desc: 'Task Kanban with drag-and-drop cards',
               },
               {
                 file: 'views/agent-view.tsx',
-                desc: 'AI chat interface for conversational development',
+                desc: 'Herdr workspace preview for the current project/worktree',
               },
               {
                 file: 'views/spec-view/',
@@ -513,7 +513,7 @@ export function WikiView() {
             <li className="text-foreground">
               <strong>Create Features</strong>
               <p className="text-muted-foreground ml-5 mt-1">
-                Add feature cards to your Kanban board with clear descriptions and implementation
+                Add feature cards to your Task Kanban with clear descriptions and implementation
                 steps
               </p>
             </li>

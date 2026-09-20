@@ -1,5 +1,6 @@
 // @ts-nocheck - feature update logic with partial updates and image/file handling
-import { useCallback } from 'react';
+import { useCallback, useState } from 'react';
+import { apiFetch } from '@/lib/api-fetch';
 import {
   Feature,
   FeatureImage,
@@ -150,7 +151,8 @@ export function useBoardActions({
       thinkingLevel: ThinkingLevel;
       reasoningEffort?: ReasoningEffort;
       providerId?: string;
-      branchName: string;
+      // undefined means "use the current worktree" rather than a feature branch.
+      branchName?: string;
       priority: number;
       planningMode: PlanningMode;
       requirePlanApproval: boolean;
@@ -528,52 +530,10 @@ export function useBoardActions({
     ]
   );
 
-  const handleDeleteFeature = useCallback(
-    async (featureId: string) => {
-      const feature = features.find((f) => f.id === featureId);
-      if (!feature) return;
-
-      const isRunning = runningAutoTasks.includes(featureId);
-
-      if (isRunning) {
-        try {
-          await stopFeature(featureId);
-          // Remove from all worktrees
-          if (currentProject) {
-            removeRunningTaskFromAllWorktrees(currentProject.id, featureId);
-          }
-          toast.success('Agent stopped', {
-            description: `Stopped and deleted: ${truncateDescription(feature.description)}`,
-          });
-        } catch (error) {
-          logger.error('Error stopping feature before delete:', error);
-          toast.error('Failed to stop agent', {
-            description: 'The feature will still be deleted.',
-          });
-        }
-      }
-
-      if (feature.imagePaths && feature.imagePaths.length > 0) {
-        try {
-          const api = getElectronAPI();
-          for (const imagePathObj of feature.imagePaths) {
-            try {
-              await api.deleteFile(imagePathObj.path);
-              logger.info(`Deleted image: ${imagePathObj.path}`);
-            } catch (error) {
-              logger.error(`Failed to delete image ${imagePathObj.path}:`, error);
-            }
-          }
-        } catch (error) {
-          logger.error(`Error deleting images for feature ${featureId}:`, error);
-        }
-      }
-
-      removeFeature(featureId);
-      await persistFeatureDelete(featureId);
-    },
-    [features, runningAutoTasks, stopFeature, removeFeature, persistFeatureDelete, currentProject]
-  );
+  const [archiveFeatureIds, setArchiveFeatureIds] = useState<string[]>([]);
+  const handleDeleteFeature = useCallback(async (featureId: string) => {
+    setArchiveFeatureIds([featureId]);
+  }, []);
 
   const handleRunFeature = useCallback(
     async (feature: Feature) => {
@@ -710,6 +670,7 @@ export function useBoardActions({
           persistFeatureUpdate(feature.id, {
             status: 'verified',
             justFinishedAt: undefined,
+            completionSource: 'human',
           });
           toast.success('Verification passed', {
             description: `Verified: ${truncateDescription(feature.description)}`,
@@ -739,16 +700,29 @@ export function useBoardActions({
   );
 
   const handleManualVerify = useCallback(
-    (feature: Feature) => {
-      persistFeatureUpdate(feature.id, {
-        status: 'verified',
-        justFinishedAt: undefined,
-      });
-      toast.success('Feature verified', {
-        description: `Marked as verified: ${truncateDescription(feature.description)}`,
-      });
+    async (feature: Feature) => {
+      if (!currentProject) return false;
+      try {
+        const result = await getElectronAPI().features.update(currentProject.path, feature.id, {
+          status: 'verified',
+          justFinishedAt: undefined,
+          completionSource: 'human',
+        });
+        if (!result.success) throw new Error(result.error || 'Could not save verification');
+        if (result.feature) updateFeature(feature.id, result.feature);
+        await loadFeatures();
+        toast.success('Verification confirmed', {
+          description: 'Moved to Done. Click Complete when ready to merge and close Jira.',
+        });
+        return true;
+      } catch (error) {
+        toast.error('Could not confirm verification', {
+          description: error instanceof Error ? error.message : 'Please try again.',
+        });
+        return false;
+      }
     },
-    [persistFeatureUpdate]
+    [currentProject, updateFeature, loadFeatures]
   );
 
   const handleMoveBackToInProgress = useCallback(
@@ -773,6 +747,35 @@ export function useBoardActions({
       setShowFollowUpDialog(true);
     },
     [setFollowUpFeature, setFollowUpPrompt, setFollowUpImagePaths, setShowFollowUpDialog]
+  );
+
+  /**
+   * Reopen a finished task for feedback.
+   *
+   * A verified/completed task can still need more work - for example when the
+   * Jira issue was re-split. Waiting Approval is the state that means "the agent
+   * stopped and a human must answer", so the card goes back there (which also
+   * makes the reply input available) and the follow-up dialog opens right away.
+   * Sending the feedback then moves the card to In Progress as usual.
+   */
+  const handleRequestChanges = useCallback(
+    (feature: Feature) => {
+      if (feature.status !== 'waiting_approval') {
+        persistFeatureUpdate(feature.id, {
+          status: 'waiting_approval' as const,
+          justFinishedAt: undefined,
+          completionSource: null,
+        });
+      }
+
+      setShowFollowUpDialog(false);
+      handleOpenFollowUp({ ...feature, status: 'waiting_approval' });
+
+      toast.info('Reopened for feedback', {
+        description: `Moved back to Waiting Approval: ${truncateDescription(feature.description)}`,
+      });
+    },
+    [persistFeatureUpdate, handleOpenFollowUp, setShowFollowUpDialog]
   );
 
   const handleSendFollowUp = useCallback(async () => {
@@ -944,18 +947,29 @@ export function useBoardActions({
     [currentProject, loadFeatures]
   );
 
+  const [completionFeature, setCompletionFeature] = useState<Feature | null>(null);
   const handleCompleteFeature = useCallback(
-    (feature: Feature) => {
-      persistFeatureUpdate(feature.id, { status: 'completed' as const });
-      toast.success('Feature completed', {
-        description: `Archived: ${truncateDescription(feature.description)}`,
-      });
-    },
-    [persistFeatureUpdate]
+    (feature: Feature) => setCompletionFeature(feature),
+    []
   );
 
   const handleUnarchiveFeature = useCallback(
-    (feature: Feature) => {
+    async (feature: Feature) => {
+      if (feature.archive && currentProject) {
+        try {
+          const response = await apiFetch('/api/features/restore-archive', 'POST', {
+            body: { projectPath: currentProject.path, featureId: feature.id },
+          });
+          const result = await response.json();
+          if (!response.ok || !result.success) throw new Error(result.error || 'Restore failed');
+          updateFeature(feature.id, result.feature);
+          await loadFeatures();
+          toast.success('Task restored; archive history preserved');
+        } catch (error) {
+          toast.error((error as Error).message);
+        }
+        return;
+      }
       // Determine the branch to restore to:
       // - If the feature had a branch assigned, keep it (preserves worktree context)
       // - If no branch was assigned, it will show on the primary worktree
@@ -980,7 +994,15 @@ export function useBoardActions({
         });
       }
     },
-    [persistFeatureUpdate, currentWorktreeBranch, projectPath, isPrimaryWorktreeBranch]
+    [
+      persistFeatureUpdate,
+      currentWorktreeBranch,
+      projectPath,
+      isPrimaryWorktreeBranch,
+      currentProject,
+      updateFeature,
+      loadFeatures,
+    ]
   );
 
   const handleViewOutput = useCallback(
@@ -1335,16 +1357,21 @@ export function useBoardActions({
     handleAddFeature,
     handleUpdateFeature,
     handleDeleteFeature,
+    archiveFeatureIds,
+    setArchiveFeatureIds,
     handleStartImplementation,
     handleVerifyFeature,
     handleResumeFeature,
     handleManualVerify,
     handleMoveBackToInProgress,
     handleOpenFollowUp,
+    handleRequestChanges,
     handleSendFollowUp,
     handleCommitFeature,
     handleMergeFeature,
     handleCompleteFeature,
+    completionFeature,
+    setCompletionFeature,
     handleUnarchiveFeature,
     handleViewOutput,
     handleOutputModalNumberKeyPress,

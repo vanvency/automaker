@@ -6,17 +6,33 @@
  */
 
 import type { Request, Response } from 'express';
+import type { SettingsService } from '../../../services/settings-service.js';
 
 export interface EnvironmentResponse {
   isContainerized: boolean;
   skipSandboxWarning?: boolean;
 }
 
-export function createEnvironmentHandler() {
-  return (_req: Request, res: Response): void => {
+/**
+ * Create handler factory for GET /api/health/environment
+ *
+ * The persisted user preference is authoritative. The environment variable is a
+ * deployment-level override that can additionally suppress the warning, but it
+ * must never re-enable a warning the user explicitly dismissed.
+ */
+export function createEnvironmentHandler(settingsService: SettingsService) {
+  return async (_req: Request, res: Response): Promise<void> => {
+    let userSkipped = false;
+    try {
+      const settings = await settingsService.getGlobalSettings();
+      userSkipped = settings.skipSandboxWarning === true;
+    } catch (error) {
+      console.error('Failed to read sandbox warning preference:', error);
+    }
+
     res.json({
       isContainerized: process.env.IS_CONTAINERIZED === 'true',
-      skipSandboxWarning: process.env.AUTOMAKER_SKIP_SANDBOX_WARNING === 'true',
+      skipSandboxWarning: userSkipped || process.env.AUTOMAKER_SKIP_SANDBOX_WARNING === 'true',
     } satisfies EnvironmentResponse);
   };
 }

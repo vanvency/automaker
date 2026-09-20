@@ -22,12 +22,13 @@ describe('MODAL_CONSTANTS', () => {
   });
 
   describe('VIEW_MODES', () => {
-    it('should define all four view modes', () => {
+    it('should define every view mode', () => {
       expect(MODAL_CONSTANTS.VIEW_MODES).toEqual({
         SUMMARY: 'summary',
         PARSED: 'parsed',
         RAW: 'raw',
         CHANGES: 'changes',
+        TIMELINE: 'timeline',
       });
     });
 
@@ -36,6 +37,7 @@ describe('MODAL_CONSTANTS', () => {
       expect(typeof MODAL_CONSTANTS.VIEW_MODES.PARSED).toBe('string');
       expect(typeof MODAL_CONSTANTS.VIEW_MODES.RAW).toBe('string');
       expect(typeof MODAL_CONSTANTS.VIEW_MODES.CHANGES).toBe('string');
+      expect(typeof MODAL_CONSTANTS.VIEW_MODES.TIMELINE).toBe('string');
     });
   });
 

@@ -80,6 +80,11 @@ export function modelSupportsThinking(_model?: ModelAlias | string): boolean {
 export function getProviderFromModel(model?: string): ModelProvider {
   if (!model) return 'claude';
 
+  // Pi models (pi:litellm/<model>, legacy pi-litellm/<model>) use the Pi provider
+  if (model.startsWith('pi:') || model.startsWith('pi-')) {
+    return 'pi';
+  }
+
   // Check for Cursor models (cursor- prefix)
   if (model.startsWith('cursor-') || model.startsWith('cursor:')) {
     return 'cursor';
@@ -118,12 +123,23 @@ export function getModelDisplayName(model: ModelAlias | string): string {
     'claude-sonnet-4-20250514': 'Claude Sonnet',
     'claude-opus-4-6': 'Claude Opus',
     // Codex models
+    'codex:gpt-5.2': 'GPT-5.2',
+    'codex:gpt-5.1-codex-max': 'GPT-5.1 Codex Max',
+    'codex:gpt-5.1-codex': 'GPT-5.1 Codex',
+    'codex:gpt-5.1-codex-mini': 'GPT-5.1 Codex Mini',
+    'codex:gpt-5.1': 'GPT-5.1',
+    // Legacy dash form
     'codex-gpt-5.2': 'GPT-5.2',
     'codex-gpt-5.1-codex-max': 'GPT-5.1 Codex Max',
     'codex-gpt-5.1-codex': 'GPT-5.1 Codex',
     'codex-gpt-5.1-codex-mini': 'GPT-5.1 Codex Mini',
     'codex-gpt-5.1': 'GPT-5.1',
     // Cursor models (common ones)
+    'cursor:auto': 'Cursor Auto',
+    'cursor:composer-1': 'Composer 1',
+    'cursor:gpt-5.2': 'GPT-5.2',
+    'cursor:gpt-5.1': 'GPT-5.1',
+    // Legacy dash form
     'cursor-auto': 'Cursor Auto',
     'cursor-composer-1': 'Composer 1',
     'cursor-gpt-5.2': 'GPT-5.2',

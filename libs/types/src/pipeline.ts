@@ -39,6 +39,10 @@ export type FeatureStatusWithPipeline =
   | 'waiting_approval'
   | 'verified'
   | 'completed'
+  // Needs-Attention lane: execution failed / errored out. It has its own board
+  // column, so it has to be a first-class status here.
+  | 'failed'
+  | 'error'
   | PipelineStatus;
 
 export const PIPELINE_SUMMARY_SEPARATOR = '\n\n---\n\n';

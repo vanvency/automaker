@@ -160,7 +160,7 @@ describe('copilot-provider.ts', () => {
     it('should include copilot- prefix in model IDs', () => {
       const models = provider.getAvailableModels();
       models.forEach((model) => {
-        expect(model.id).toMatch(/^copilot-/);
+        expect(model.id).toMatch(/^copilot:/);
       });
     });
   });

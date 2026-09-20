@@ -323,7 +323,7 @@ export function BoardBackgroundModal({ open, onOpenChange }: BoardBackgroundModa
             Board Background Settings
           </SheetTitle>
           <SheetDescription className="text-muted-foreground">
-            Set a custom background image for your kanban board and adjust card/column opacity
+            Set a custom background image for Task Kanban and adjust card/column opacity
           </SheetDescription>
         </SheetHeader>
 

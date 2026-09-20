@@ -1,0 +1,1317 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Devbridge · 共享 Kubernetes 里的后端原位调试</title>
+    <style>
+      :root {
+        --bg: #05080d;
+        --ink: #f2f7ff;
+        --muted: rgba(226, 236, 255, 0.68);
+        --faint: rgba(226, 236, 255, 0.38);
+        --lime: #c7ff4a;
+        --cyan: #3cf5df;
+        --orange: #ff7a45;
+        --pink: #ff4f8b;
+        --line: rgba(255, 255, 255, 0.12);
+        --panel: rgba(255, 255, 255, 0.052);
+        --panel-strong: rgba(10, 18, 28, 0.82);
+        --shadow: 0 24px 70px rgba(0, 0, 0, 0.35);
+        --mono: 'JetBrains Mono', 'SFMono-Regular', ui-monospace, Menlo, Consolas, monospace;
+        --display: Georgia, 'Noto Serif SC', 'Songti SC', serif;
+        --body:
+          'HarmonyOS Sans SC', 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', sans-serif;
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+      html {
+        scroll-behavior: smooth;
+      }
+      body {
+        margin: 0;
+        min-height: 100vh;
+        background: var(--bg);
+        color: var(--ink);
+        font-family: var(--body);
+        line-height: 1.62;
+        overflow-x: hidden;
+      }
+
+      body::before {
+        content: '';
+        position: fixed;
+        inset: -25%;
+        z-index: -2;
+        background:
+          radial-gradient(38rem 26rem at 12% 8%, rgba(60, 245, 223, 0.17), transparent 60%),
+          radial-gradient(42rem 28rem at 82% 18%, rgba(199, 255, 74, 0.12), transparent 62%),
+          radial-gradient(38rem 30rem at 55% 82%, rgba(255, 79, 139, 0.12), transparent 63%),
+          radial-gradient(45rem 32rem at 8% 82%, rgba(255, 122, 69, 0.1), transparent 65%);
+        filter: blur(10px);
+        animation: atmosphere 24s ease-in-out infinite alternate;
+      }
+
+      body::after {
+        content: '';
+        position: fixed;
+        inset: 0;
+        z-index: -1;
+        background:
+          linear-gradient(rgba(255, 255, 255, 0.028) 1px, transparent 1px),
+          linear-gradient(90deg, rgba(255, 255, 255, 0.028) 1px, transparent 1px);
+        background-size: 64px 64px;
+        mask-image: radial-gradient(circle at 50% 40%, #000 0%, transparent 82%);
+      }
+
+      @keyframes atmosphere {
+        from {
+          transform: translate3d(-2%, -1%, 0) rotate(0deg);
+        }
+        to {
+          transform: translate3d(2%, 2%, 0) rotate(6deg);
+        }
+      }
+
+      .shell {
+        width: min(1220px, calc(100% - 40px));
+        margin: 0 auto;
+      }
+
+      .top {
+        position: sticky;
+        top: 0;
+        z-index: 20;
+        backdrop-filter: blur(18px);
+        background: rgba(5, 8, 13, 0.74);
+        border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+      }
+
+      .top-inner {
+        min-height: 70px;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 20px;
+      }
+
+      .brand {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        font-family: var(--mono);
+        font-size: 15px;
+        letter-spacing: 0.2em;
+        text-transform: uppercase;
+        white-space: nowrap;
+      }
+
+      .brand-mark {
+        width: 10px;
+        height: 10px;
+        border-radius: 2px;
+        background: conic-gradient(
+          from 0deg,
+          var(--lime),
+          var(--cyan),
+          var(--orange),
+          var(--pink),
+          var(--lime)
+        );
+        box-shadow: 0 0 18px rgba(199, 255, 74, 0.55);
+        animation: spin 8s linear infinite;
+      }
+
+      @keyframes spin {
+        to {
+          transform: rotate(360deg);
+        }
+      }
+      .nav {
+        display: flex;
+        align-items: center;
+        gap: 4px;
+        flex-wrap: wrap;
+      }
+      .nav a {
+        color: var(--muted);
+        text-decoration: none;
+        font-size: 14px;
+        padding: 8px 12px;
+        border-radius: 999px;
+        transition:
+          color 0.2s,
+          background 0.2s,
+          transform 0.2s;
+      }
+      .nav a:hover {
+        color: var(--ink);
+        background: rgba(255, 255, 255, 0.08);
+        transform: translateY(-1px);
+      }
+      .nav .cta {
+        color: #041008;
+        background: var(--lime);
+        font-weight: 700;
+        box-shadow: 0 0 22px rgba(199, 255, 74, 0.28);
+      }
+      .nav .cta:hover {
+        color: #041008;
+        background: #d8ff77;
+      }
+
+      main {
+        padding: 64px 0 80px;
+      }
+      section {
+        margin-top: 88px;
+      }
+
+      .eyebrow {
+        display: inline-flex;
+        align-items: center;
+        gap: 9px;
+        color: var(--cyan);
+        font-family: var(--mono);
+        font-size: 13px;
+        letter-spacing: 0.18em;
+        text-transform: uppercase;
+      }
+      .eyebrow::before {
+        content: '';
+        width: 28px;
+        height: 1px;
+        background: linear-gradient(90deg, transparent, var(--cyan));
+      }
+
+      h1,
+      h2,
+      h3 {
+        line-height: 1.16;
+        margin: 0 0 18px;
+      }
+      h1 {
+        font-family: var(--display);
+        font-size: clamp(42px, 7.2vw, 90px);
+        letter-spacing: -0.035em;
+        font-weight: 700;
+      }
+      h2 {
+        font-family: var(--display);
+        font-size: clamp(30px, 4.4vw, 50px);
+        letter-spacing: -0.028em;
+      }
+      h3 {
+        font-size: 19px;
+        margin-bottom: 10px;
+      }
+      p {
+        margin: 0 0 15px;
+        color: var(--muted);
+      }
+      strong {
+        color: var(--ink);
+        font-weight: 700;
+      }
+      a {
+        color: var(--cyan);
+        text-decoration: none;
+      }
+      a:hover {
+        text-decoration: underline;
+      }
+      .hero {
+        margin-top: 28px;
+      }
+      .hero-title {
+        display: flex;
+        flex-direction: column;
+      }
+      .gradient-text {
+        background: linear-gradient(94deg, var(--lime), var(--cyan) 42%, var(--orange));
+        -webkit-background-clip: text;
+        background-clip: text;
+        color: transparent;
+      }
+      .hero-copy {
+        max-width: 760px;
+        font-size: clamp(17px, 2vw, 21px);
+        margin-top: 6px;
+      }
+      .hero-meta {
+        margin-top: 30px;
+        display: flex;
+        flex-wrap: wrap;
+        gap: 10px;
+        align-items: center;
+        color: var(--faint);
+        font-family: var(--mono);
+        font-size: 13px;
+      }
+      .hero-meta span {
+        border: 1px solid var(--line);
+        padding: 7px 12px;
+        border-radius: 999px;
+      }
+      .hero-meta .live {
+        color: var(--lime);
+        border-color: rgba(199, 255, 74, 0.35);
+      }
+      .live-dot {
+        display: inline-block;
+        width: 7px;
+        height: 7px;
+        margin-right: 7px;
+        border-radius: 50%;
+        background: var(--lime);
+        box-shadow: 0 0 0 0 rgba(199, 255, 74, 0.7);
+        animation: pulse 2s infinite;
+      }
+      @keyframes pulse {
+        70% {
+          box-shadow: 0 0 0 11px rgba(199, 255, 74, 0);
+        }
+        100% {
+          box-shadow: 0 0 0 0 rgba(199, 255, 74, 0);
+        }
+      }
+
+      .stats {
+        display: grid;
+        grid-template-columns: repeat(4, 1fr);
+        gap: 14px;
+        margin-top: 44px;
+      }
+      .stat {
+        position: relative;
+        overflow: hidden;
+        min-height: 148px;
+        padding: 22px;
+        border: 1px solid var(--line);
+        border-radius: 20px;
+        background: linear-gradient(160deg, rgba(255, 255, 255, 0.08), rgba(255, 255, 255, 0.02));
+        box-shadow: var(--shadow);
+      }
+      .stat::after {
+        content: '';
+        position: absolute;
+        right: -28px;
+        bottom: -34px;
+        width: 120px;
+        height: 120px;
+        background: radial-gradient(circle, rgba(60, 245, 223, 0.18), transparent 65%);
+      }
+      .stat b {
+        display: block;
+        font-family: var(--display);
+        font-size: clamp(27px, 3.3vw, 38px);
+        color: var(--lime);
+        letter-spacing: -0.03em;
+      }
+      .stat small {
+        display: block;
+        margin-top: 8px;
+        color: var(--muted);
+      }
+
+      .panel {
+        border: 1px solid var(--line);
+        border-radius: 24px;
+        background: linear-gradient(145deg, rgba(255, 255, 255, 0.065), rgba(255, 255, 255, 0.015));
+        box-shadow: var(--shadow);
+        padding: clamp(20px, 4vw, 36px);
+      }
+      .grid-2 {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 18px;
+      }
+      .grid-3 {
+        display: grid;
+        grid-template-columns: repeat(3, 1fr);
+        gap: 16px;
+      }
+      .card {
+        border: 1px solid var(--line);
+        border-radius: 18px;
+        padding: 20px;
+        min-height: 180px;
+        background: rgba(5, 10, 17, 0.48);
+        transition:
+          transform 0.25s ease,
+          border-color 0.25s ease,
+          background 0.25s ease;
+      }
+      .card:hover {
+        transform: translateY(-5px);
+        border-color: rgba(60, 245, 223, 0.42);
+        background: rgba(9, 17, 27, 0.72);
+      }
+      .card p {
+        font-size: 14.6px;
+        margin: 0;
+      }
+      .icon {
+        display: inline-grid;
+        place-items: center;
+        width: 38px;
+        height: 38px;
+        margin-bottom: 14px;
+        border-radius: 12px;
+        font-family: var(--mono);
+        background: rgba(255, 255, 255, 0.07);
+        color: var(--lime);
+      }
+
+      .diagram {
+        display: grid;
+        grid-template-columns: repeat(6, 1fr);
+        gap: 10px;
+        align-items: center;
+        margin: 34px 0 18px;
+      }
+      .node {
+        position: relative;
+        min-height: 98px;
+        padding: 14px;
+        border-radius: 14px;
+        border: 1px solid var(--line);
+        background: rgba(4, 10, 16, 0.75);
+        display: grid;
+        align-content: center;
+        gap: 5px;
+        transition: 0.25s ease;
+      }
+      .node b {
+        font-size: 15px;
+      }
+      .node small {
+        color: var(--faint);
+        font-size: 12px;
+        font-family: var(--mono);
+      }
+      .node.active {
+        border-color: var(--lime);
+        box-shadow: 0 0 25px rgba(199, 255, 74, 0.18);
+        transform: translateY(-4px);
+      }
+      .node.shared {
+        border-color: var(--cyan);
+        box-shadow: 0 0 20px rgba(60, 245, 223, 0.16);
+      }
+      .node.dev {
+        border-color: var(--orange);
+        box-shadow: 0 0 24px rgba(255, 122, 69, 0.2);
+      }
+      .node::after {
+        content: '→';
+        position: absolute;
+        right: -19px;
+        top: 50%;
+        transform: translateY(-50%);
+        color: var(--faint);
+        font-family: var(--mono);
+      }
+      .node:last-child::after {
+        content: '';
+      }
+      .route-label {
+        position: absolute;
+        top: -22px;
+        left: 0;
+        font-family: var(--mono);
+        font-size: 11px;
+        color: var(--lime);
+        white-space: nowrap;
+      }
+
+      .controls {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 9px;
+        margin-bottom: 16px;
+      }
+      button {
+        border: 1px solid var(--line);
+        color: var(--ink);
+        background: rgba(255, 255, 255, 0.06);
+        padding: 9px 14px;
+        border-radius: 999px;
+        font: inherit;
+        font-size: 14px;
+        cursor: pointer;
+        transition: 0.2s ease;
+      }
+      button:hover {
+        transform: translateY(-1px);
+        border-color: rgba(255, 255, 255, 0.28);
+      }
+      button.active {
+        border-color: var(--lime);
+        color: #041008;
+        background: var(--lime);
+        font-weight: 700;
+      }
+      .terminal {
+        margin-top: 18px;
+        border: 1px solid rgba(255, 255, 255, 0.1);
+        border-radius: 14px;
+        overflow: hidden;
+        background: #01060a;
+      }
+      .terminal-bar {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 10px;
+        padding: 10px 14px;
+        border-bottom: 1px solid rgba(255, 255, 255, 0.07);
+        background: rgba(255, 255, 255, 0.035);
+        font-family: var(--mono);
+        font-size: 12px;
+        color: var(--faint);
+      }
+      .terminal pre {
+        margin: 0;
+        padding: 17px;
+        overflow: auto;
+        color: #e7f5ff;
+        font-family: var(--mono);
+        font-size: 13.5px;
+        line-height: 1.68;
+        white-space: pre-wrap;
+      }
+      .copy {
+        font-family: var(--mono);
+        font-size: 12px;
+        padding: 5px 10px;
+        border-radius: 7px;
+      }
+      .status-chip {
+        display: inline-flex;
+        align-items: center;
+        padding: 6px 11px;
+        border-radius: 999px;
+        border: 1px solid var(--line);
+        color: var(--muted);
+        font-family: var(--mono);
+        font-size: 12px;
+        white-space: nowrap;
+      }
+      .status-chip.ok {
+        color: var(--lime);
+        border-color: rgba(199, 255, 74, 0.4);
+      }
+      .status-chip.warn {
+        color: var(--orange);
+        border-color: rgba(255, 122, 69, 0.4);
+      }
+
+      .timeline {
+        margin: 0;
+        padding: 0;
+        list-style: none;
+        counter-reset: flow;
+      }
+      .timeline li {
+        position: relative;
+        padding: 0 0 30px 54px;
+        counter-increment: flow;
+      }
+      .timeline li::before {
+        content: counter(flow, decimal-leading-zero);
+        position: absolute;
+        left: 0;
+        top: 2px;
+        width: 35px;
+        height: 35px;
+        border-radius: 11px;
+        display: grid;
+        place-items: center;
+        color: var(--cyan);
+        background: rgba(60, 245, 223, 0.09);
+        border: 1px solid rgba(60, 245, 223, 0.25);
+        font-family: var(--mono);
+        font-size: 12px;
+      }
+      .timeline li::after {
+        content: '';
+        position: absolute;
+        left: 17px;
+        top: 42px;
+        bottom: 0;
+        width: 1px;
+        background: linear-gradient(180deg, rgba(60, 245, 223, 0.45), transparent);
+      }
+      .timeline li:last-child {
+        padding-bottom: 0;
+      }
+      .timeline li:last-child::after {
+        display: none;
+      }
+      .timeline p {
+        margin: 0;
+        font-size: 14.7px;
+      }
+
+      table {
+        width: 100%;
+        border-collapse: collapse;
+        margin-top: 18px;
+        font-size: 14.3px;
+      }
+      th,
+      td {
+        padding: 13px 14px;
+        border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+        text-align: left;
+        vertical-align: top;
+      }
+      th {
+        color: var(--cyan);
+        font-family: var(--mono);
+        font-size: 12.5px;
+        font-weight: 600;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+      }
+      td:first-child {
+        color: var(--ink);
+        font-weight: 600;
+        white-space: nowrap;
+      }
+      td {
+        color: var(--muted);
+      }
+      .yes {
+        color: var(--lime);
+      }
+      .no {
+        color: var(--pink);
+      }
+      .callout {
+        margin-top: 24px;
+        padding: 20px 22px;
+        border-left: 3px solid var(--lime);
+        border-radius: 0 16px 16px 0;
+        background: rgba(199, 255, 74, 0.07);
+        color: var(--ink);
+      }
+      .callout p:last-child {
+        margin: 0;
+      }
+      .callout.warn {
+        border-left-color: var(--orange);
+        background: rgba(255, 122, 69, 0.08);
+      }
+      .callout.danger {
+        border-left-color: var(--pink);
+        background: rgba(255, 79, 139, 0.08);
+      }
+      code.inline {
+        color: var(--lime);
+        font-family: var(--mono);
+        font-size: 0.92em;
+        background: rgba(199, 255, 74, 0.1);
+        padding: 2px 5px;
+        border-radius: 5px;
+        white-space: nowrap;
+      }
+
+      .reveal {
+        opacity: 0;
+        transform: translateY(28px);
+        transition:
+          opacity 0.65s ease,
+          transform 0.65s ease;
+      }
+      .reveal.visible {
+        opacity: 1;
+        transform: translateY(0);
+      }
+
+      footer {
+        padding: 30px 0 50px;
+        border-top: 1px solid rgba(255, 255, 255, 0.09);
+        color: var(--faint);
+        font-size: 13px;
+      }
+      footer .shell {
+        display: flex;
+        justify-content: space-between;
+        gap: 18px;
+        flex-wrap: wrap;
+      }
+
+      @media (max-width: 940px) {
+        .stats {
+          grid-template-columns: repeat(2, 1fr);
+        }
+        .grid-3 {
+          grid-template-columns: 1fr;
+        }
+        .diagram {
+          grid-template-columns: 1fr 1fr;
+        }
+        .node::after {
+          content: '↓';
+          right: unset;
+          left: 50%;
+          top: unset;
+          bottom: -25px;
+          transform: translateX(-50%);
+        }
+        .node:nth-child(even)::after {
+          content: '';
+        }
+      }
+      @media (max-width: 760px) {
+        .top-inner {
+          align-items: flex-start;
+          padding: 14px 0;
+        }
+        .brand {
+          margin-top: 8px;
+        }
+        .nav {
+          width: 100%;
+          justify-content: flex-start;
+          overflow-x: auto;
+          padding-bottom: 4px;
+        }
+        main {
+          padding-top: 42px;
+        }
+        section {
+          margin-top: 64px;
+        }
+        .grid-2,
+        .stats {
+          grid-template-columns: 1fr;
+        }
+        .diagram {
+          grid-template-columns: 1fr;
+        }
+        .node:nth-child(n):not(:last-child)::after {
+          content: '↓';
+          left: 50%;
+          right: unset;
+          top: unset;
+          bottom: -25px;
+          transform: translateX(-50%);
+        }
+        .stat {
+          min-height: 118px;
+        }
+        th,
+        td {
+          padding-left: 10px;
+          padding-right: 10px;
+        }
+        td:first-child {
+          white-space: normal;
+        }
+      }
+
+      @media (prefers-reduced-motion: reduce) {
+        *,
+        *::before,
+        *::after {
+          animation: none !important;
+          transition: none !important;
+        }
+        .reveal {
+          opacity: 1;
+          transform: none;
+        }
+        html {
+          scroll-behavior: auto;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <header class="top">
+      <div class="shell top-inner">
+        <div class="brand"><span class="brand-mark"></span>Devbridge</div>
+        <nav class="nav" aria-label="页面导航">
+          <a href="#why">为什么</a>
+          <a href="#route">链路</a>
+          <a href="#usage">使用</a>
+          <a href="#safety">安全</a>
+          <a href="#trouble">排障</a>
+          <a href="#reuse">复用</a>
+          <a class="cta" href="#usage">快速开始</a>
+        </nav>
+      </div>
+    </header>
+
+    <main class="shell">
+      <section class="hero reveal" id="why">
+        <div class="eyebrow">Local source / remote cluster</div>
+        <h1 class="hero-title">
+          <span>后端留在本地，</span>
+          <span class="gradient-text">上下文留在 K8s。</span>
+        </h1>
+        <p class="hero-copy">
+          Devbridge 让你的 Go 源码直接进入授权的非生产集群上下文：继承目标 Pod 的
+          DNS、环境变量、出站网络和只读挂载，同时只把带随机会话标识的请求引到你的进程。不改共享
+          Deployment，不构建业务镜像，不全局重写 Gateway。
+        </p>
+        <div class="hero-meta">
+          <span class="live"><i class="live-dot"></i>dev17 / llmops 已实测</span>
+          <span>Go + Viper + mirrord</span>
+          <span>前端零 selector 感知</span>
+          <span>2026-09-17 分享版</span>
+        </div>
+        <div class="stats">
+          <article class="stat">
+            <b>0</b><small>共享 Deployment 镜像、副本与 Service selector 修改</small>
+          </article>
+          <article class="stat">
+            <b>3</b><small>本地构建、本地压缩、远端应用/运行时缓存层级</small>
+          </article>
+          <article class="stat">
+            <b>128.6<small style="display: inline; font-size: 0.52em; color: inherit"> MB</small></b
+            ><small>346.8 MB 二进制经 zstd level 1 压缩后的实测上传体积</small>
+          </article>
+          <article class="stat">
+            <b
+              >5 × 900<small style="display: inline; font-size: 0.52em; color: inherit">
+                s</small
+              ></b
+            ><small>Pod rollout 自动重绑默认尝试与单次等待上限</small>
+          </article>
+        </div>
+      </section>
+
+      <section class="reveal">
+        <div class="eyebrow">Core idea</div>
+        <h2>Devbridge 不是“又一个端口转发”</h2>
+        <div class="grid-3">
+          <article class="card">
+            <div class="icon">◈</div>
+            <h3>mirrord 负责上下文</h3>
+            <p>
+              让本地源码进程拥有目标容器的 Kubernetes 环境：远端
+              DNS、服务网络、环境变量与只读挂载文件都能按需继承。
+            </p>
+          </article>
+          <article class="card">
+            <div class="icon">▤</div>
+            <h3>Devbridge 负责工程化</h3>
+            <p>
+              封装构建指纹、SSH/产物传输、版本固定、会话路由、readiness 验证、rollout
+              重绑、退出清理和缓存复用。
+            </p>
+          </article>
+          <article class="card">
+            <div class="icon">◎</div>
+            <h3>业务代码负责安全模式</h3>
+            <p>
+              CVAT 使用独立的
+              <code class="inline">CVAT_DEVBRIDGE_API_ONLY</code>
+              启动模式，跳过后台所有权与启动期变更，只挂载已审计 API。
+            </p>
+          </article>
+        </div>
+      </section>
+
+      <section id="route" class="reveal">
+        <div class="eyebrow">Request path</div>
+        <h2>一条随机会话头，隔离一个开发者</h2>
+        <div class="panel">
+          <div class="controls" role="group" aria-label="路由演示">
+            <button class="active" data-route="none">无 selector</button>
+            <button data-route="wrong">错误 selector</button>
+            <button data-route="current">当前 selector</button>
+            <button data-route="other">非注入路径</button>
+          </div>
+          <div class="diagram" id="diagram">
+            <div class="node shared"><b>浏览器 / Vite</b><small>saas-frontend</small></div>
+            <div class="node" data-node="proxy">
+              <b>loopback proxy</b><small>127.0.0.1:18080</small>
+            </div>
+            <div class="node" data-node="gateway">
+              <b>dev17 gateway</b><small>保留 X-Dev-Route</small>
+            </div>
+            <div class="node" data-node="service">
+              <b>CVAT Service</b><small>autocv-cvat</small>
+            </div>
+            <div class="node" data-node="pod"><b>original Pod</b><small>shared backend</small></div>
+            <div class="node" data-node="mirrord">
+              <b>developer binary</b><small>mirrord session</small>
+            </div>
+          </div>
+          <div class="terminal">
+            <div class="terminal-bar">
+              <span id="demo-title">route matrix · default</span
+              ><span class="status-chip" id="demo-status">checking</span>
+            </div>
+            <pre id="demo-output">选择上方场景，查看请求会走到哪里。</pre>
+          </div>
+          <div class="callout">
+            <p>
+              <strong>前端永远不需要注入 <code class="inline">X-Dev-Route</code>。</strong> 本地
+              proxy 先剥掉调用方伪造的 selector，再只对 allowlisted 的
+              <code class="inline">/cv/api/knowlhub/</code> 和 readiness 路径注入。业务响应的
+              <code class="inline">X-Devbridge-Route</code> 只用于验证
+              <code class="inline">DEVBRIDGE_ROUTE_ID</code>，防止把共享 Pod 的 HTTP 200
+              误判成本地代码接管。
+            </p>
+          </div>
+        </div>
+      </section>
+
+      <section class="reveal">
+        <div class="eyebrow">Lifecycle</div>
+        <h2><code class="inline">up</code> 背后到底发生了什么</h2>
+        <div class="panel">
+          <ol class="timeline">
+            <li>
+              <h3>doctor 预检</h3>
+              <p>
+                检查本机工具、SSH、远端 Linux amd64、kubectl、Pod 创建 RBAC、agent
+                镜像传输能力、Gateway 可达性。Deployment 目标必须是恰好 1 个 Ready replica。
+              </p>
+            </li>
+            <li>
+              <h3>构建指纹与三层缓存</h3>
+              <p>
+                指纹包含构建命令、Go 工具链/CGO 环境和当前工作区及本地 replace 仓库的
+                tracked/untracked 内容。命中则复用最终二进制、zstd 产物或远端 checksum 缓存。
+              </p>
+            </li>
+            <li>
+              <h3>传输固定版本运行时</h3>
+              <p>
+                mirrord client/layer 按 SHA-256 校验，不支持 floating latest。两端都有 zstd
+                时压缩应用二进制，否则自动回退原始上传。
+              </p>
+            </li>
+            <li>
+              <h3>远端启动并继承集群视角</h3>
+              <p>
+                开发进程在 dev17 独立目录运行，经 mirrord 连接目标容器视角。<code class="inline"
+                  >KUBERNETES_*</code
+                >
+                与远端 ServiceAccount 文件按需进入 in-cluster client。
+              </p>
+            </li>
+            <li>
+              <h3>readiness 双重确认</h3>
+              <p>
+                工具要求 <code class="inline">/cv/api/devbridge/status</code> 同时返回 HTTP 200
+                和正确 route ID。通过后才输出 <code class="inline">devbridge ready</code>。
+              </p>
+            </li>
+            <li>
+              <h3>Pod rollout 自动重绑</h3>
+              <p>
+                启动时记录唯一 Ready Pod 的 name/UID。远端退出后：原 Pod 仍健康则拒绝重复启动；原
+                Pod 消失、terminating 或不 Ready 才等待替代 Pod 并复用会话产物恢复。
+              </p>
+            </li>
+            <li>
+              <h3>Ctrl-C 清理，保留缓存</h3>
+              <p>
+                正常退出删除 agent Pod、远端 session 目录和本地活动状态。构建、压缩和
+                checksum-pinned runtime 缓存默认保留，加速下一次 <code class="inline">up</code>。
+              </p>
+            </li>
+          </ol>
+        </div>
+      </section>
+
+      <section id="usage" class="reveal">
+        <div class="eyebrow">Hands-on</div>
+        <h2>后端一条命令，前端只换 Gateway</h2>
+        <div class="grid-2">
+          <div class="panel">
+            <h3>1 · 后端启动</h3>
+            <p>
+              先确认兄弟仓库 <code class="inline">vision-std</code>、<code class="inline"
+                >llmops-common</code
+              >、<code class="inline">sophon-mind</code> 与当前分支兼容；Devbridge
+              编译的是当前工作区，不会绕开本地依赖不兼容。
+            </p>
+            <div class="terminal">
+              <div class="terminal-bar">
+                <span>cvat-backend</span><button class="copy" data-copy="backend">copy</button>
+              </div>
+              <pre id="backend">
+scripts/devbridge doctor
+scripts/devbridge up
+
+# ready:
+# devbridge ready: http://127.0.0.1:18080/cv/api/devbridge/status
+
+curl http://127.0.0.1:18080/cv/api/devbridge/status</pre
+              >
+            </div>
+          </div>
+          <div class="panel">
+            <h3>2 · 前端启动</h3>
+            <p>
+              只把 Vite 的 <code class="inline">GATEWAY</code> upstream 指向 loopback
+              proxy；不要在值里追加 <code class="inline">/gateway</code>。浏览器继续访问
+              <code class="inline">/gateway/cv/...</code>。
+            </p>
+            <div class="terminal">
+              <div class="terminal-bar">
+                <span>saas-frontend</span><button class="copy" data-copy="frontend">copy</button>
+              </div>
+              <pre id="frontend">
+cd ../saas-frontend
+BASE=/ GATEWAY=http://127.0.0.1:18080 pnpm dev --port=3001 --strictPort
+
+# 使用 Vite 打印的 Local URL 打开页面
+# /project/&lt;projectId&gt;/semantic-ontology</pre
+              >
+            </div>
+          </div>
+        </div>
+
+        <div class="panel" style="margin-top: 18px">
+          <h3>请求链路实例</h3>
+          <div class="terminal">
+            <div class="terminal-bar">
+              <span>browser → shared + developer APIs</span
+              ><span class="status-chip ok">mixed routing</span>
+            </div>
+            <pre>
+https://127.0.0.1:3001/gateway/cv/api/knowlhub/...
+  → Vite
+  → http://127.0.0.1:18080/gateway/cv/api/knowlhub/...
+  → Devbridge strip /gateway + inject X-Dev-Route
+  → dev17 gateway /cv/api/knowlhub/...
+  → selected mirrord session → local source process</pre
+            >
+          </div>
+          <p style="margin-top: 16px">
+            登录、CAS、非 KnowlHub API 和其他服务继续走同一个 proxy，无 selector
+            地访问共享稳定版本。因此前端可以同时使用“本地新 KnowlHub 接口 + 环境上其余稳定接口”。
+          </p>
+        </div>
+      </section>
+
+      <section id="safety" class="reveal">
+        <div class="eyebrow">Safe mode</div>
+        <h2>API-only 不是只读数据库模式</h2>
+        <div class="panel">
+          <p>
+            <code class="inline">CVAT_DEVBRIDGE_API_ONLY=true</code>
+            限制的是<strong>启动所有权</strong>：开发者主动调用写 API
+            时，业务写入仍然发生。它的目标是避免一个额外调试实例抢占后台任务、修改 schema
+            或重复恢复共享任务。
+          </p>
+          <table>
+            <thead>
+              <tr>
+                <th>启动行为</th>
+                <th>普通实例</th>
+                <th>Devbridge API-only</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td>连接现有 PostgreSQL / MySQL</td>
+                <td class="yes">是</td>
+                <td class="yes">是</td>
+              </tr>
+              <tr>
+                <td>创建 database / extension、主库 DDL、迁移锁</td>
+                <td class="yes">是</td>
+                <td class="no">否</td>
+              </tr>
+              <tr>
+                <td>KnowlHub AutoMigrate / 索引补建</td>
+                <td class="yes">是</td>
+                <td>默认否；显式开关仅迁移 4 张 GraphRAG 控制表</td>
+              </tr>
+              <tr>
+                <td>MinIO bootstrap、points rule upsert、demo seed</td>
+                <td class="yes">是 / 按配置</td>
+                <td class="no">否</td>
+              </tr>
+              <tr>
+                <td>task recovery、worker、cron、watcher、Redis subscriber</td>
+                <td class="yes">是</td>
+                <td class="no">否</td>
+              </tr>
+              <tr>
+                <td>HTTP API</td>
+                <td class="yes">完整</td>
+                <td><code class="inline">/api/knowlhub/*</code> + readiness</td>
+              </tr>
+            </tbody>
+          </table>
+          <div class="callout warn">
+            <p>
+              <strong>GraphRAG 迁移开关必须显式。</strong> 当前 `.devbridge.yaml` 为联调设置
+              <code class="inline">CVAT_DEVBRIDGE_GRAPHRAG_MIGRATE=true</code>；表结构补齐后应恢复为
+              <code class="inline">false</code>，重新回到零启动 DDL 模式。
+            </p>
+          </div>
+          <div class="callout danger">
+            <p>
+              <strong>不要再挂载完整 CVAT API。</strong> 实测中完整 API manager 的构造副作用启动过
+              asset task recovery，并 UPDATE 共享任务状态。新增调试模块前必须审计构造函数、singleton
+              getter 和启动调用图。
+            </p>
+          </div>
+        </div>
+      </section>
+
+      <section class="reveal">
+        <div class="eyebrow">Trust boundary</div>
+        <h2>哪些内容会离开本地，哪些永远不会</h2>
+        <div class="grid-2">
+          <article class="card">
+            <h3>可以上传 / 缓存</h3>
+            <p>
+              最终 Go 二进制、checksum-pinned mirrord client/layer、非敏感
+              <code class="inline">app.sync</code> 文件（当前只有
+              <code class="inline">etc</code>）。远端缓存目录不能是符号链接，文件必须 checksum
+              校验。
+            </p>
+          </article>
+          <article class="card">
+            <h3>不会导出 / 缓存</h3>
+            <p>
+              Pod 环境变量、Secret 内容、mirrord session 配置和业务凭据。挂载 Secret 通过 mirrord
+              按打开动作从目标容器只读获取，不会 <code class="inline">kubectl cp</code> 到本机或
+              dev17 临时目录。
+            </p>
+          </article>
+          <article class="card">
+            <h3>网络边界</h3>
+            <p>
+              proxy 只允许监听 loopback。浏览器不能传任意 upstream URL/IP；selector 只注入到
+              <code class="inline">.devbridge.yaml</code> 列出的最小公共服务前缀。
+            </p>
+          </article>
+          <article class="card">
+            <h3>环境声明</h3>
+            <p>
+              <code class="inline">remote.non_production=true</code>
+              是工具运行前的显式安全声明。mirrord agent 需要 privileged capabilities 与 Pod
+              RBAC，生产 namespace 应禁用。
+            </p>
+          </article>
+        </div>
+      </section>
+
+      <section id="trouble" class="reveal">
+        <div class="eyebrow">Operations</div>
+        <h2>常见信号与正确动作</h2>
+        <div class="grid-3">
+          <article class="card">
+            <h3>ready 一直 404</h3>
+            <p>
+              检查 gateway 是否保留 <code class="inline">X-Dev-Route</code>、health
+              path、remote/local port 映射和 agent 日志。不要为此把
+              <code class="inline">route_paths</code> 扩成整个服务。
+            </p>
+          </article>
+          <article class="card">
+            <h3>migration lock not acquired</h3>
+            <p>
+              说明运行的不是 API-only 安全模式二进制，或 override
+              未生效。立即停止，不要继续等待共享环境上的迁移锁。
+            </p>
+          </article>
+          <article class="card">
+            <h3>端口占用</h3>
+            <p>
+              本地 proxy 端口修改 <code class="inline">gateway.listen</code>；业务端口占用在 dev17
+              上，修改 <code class="inline">app.local_port</code> 和对应 Viper listen override。
+            </p>
+          </article>
+          <article class="card">
+            <h3>HTTP 正常，实时链路异常</h3>
+            <p>
+              WebSocket、gRPC、HTTP2 和大文件上传要按业务协议单独验收。当前自动 readiness 只证明
+              HTTP route 已接管。
+            </p>
+          </article>
+          <article class="card">
+            <h3>异常断开</h3>
+            <p>
+              Ctrl-C 正常退出；终端异常后执行
+              <code class="inline">scripts/devbridge down</code>，确认 agent Pod、session
+              目录和本地活动状态已清理。
+            </p>
+          </article>
+          <article class="card">
+            <h3>什么时候清缓存</h3>
+            <p>
+              普通 <code class="inline">down</code> 保留缓存。只有显式失效或磁盘清理时才用
+              <code class="inline">scripts/devbridge clean-cache</code>。
+            </p>
+          </article>
+        </div>
+      </section>
+
+      <section id="reuse" class="reveal">
+        <div class="eyebrow">Adoption</div>
+        <h2>迁移到另一个 Go + Viper 项目</h2>
+        <div class="panel">
+          <ol class="timeline">
+            <li>
+              <h3>先找 Viper 初始化和 main 调用图</h3>
+              <p>
+                不要复制 CVAT 的环境变量名或跳过清单。按项目的 Viper key 前缀实现独立的
+                <code class="inline">&lt;PREFIX&gt;_DEVBRIDGE_API_ONLY</code>。
+              </p>
+            </li>
+            <li>
+              <h3>审计启动副作用</h3>
+              <p>
+                保留配置加载、现有数据库连接、请求处理所需 client 与无状态 API；跳过创建
+                database/extension、AutoMigrate、迁移锁、bucket 创建、任务恢复、worker、cron 和
+                watcher。
+              </p>
+            </li>
+            <li>
+              <h3>挂载最小 API 与 readiness</h3>
+              <p>
+                在 API-only 模式挂载已审计模块和只存在于此模式的 readiness endpoint，让响应回显
+                <code class="inline">DEVBRIDGE_ROUTE_ID</code>。
+              </p>
+            </li>
+            <li>
+              <h3>分层验证，不接受“agent 起来了”</h3>
+              <p>
+                运行工具单测、项目单测、真实服务
+                E2E；检查禁止启动动作的日志；调用一个真实读接口；最后验证退出清理。
+              </p>
+            </li>
+          </ol>
+        </div>
+      </section>
+
+      <section class="reveal">
+        <div class="eyebrow">One-line takeaway</div>
+        <div class="panel" style="text-align: center; padding: 46px 26px">
+          <h2 style="max-width: 900px; margin-inline: auto">
+            后端拿到完整的集群上下文，<br />前端拿到稳定的本地 Gateway，<br />集群拿到的却只是<span
+              class="gradient-text"
+              >一个短生命周期 agent</span
+            >。
+          </h2>
+          <p
+            style="margin-top: 18px; color: var(--faint); font-family: var(--mono); font-size: 13px"
+          >
+            参考资料：docs/devbridge-local-k8s.md · .agents/skills/go-viper-k8s-devbridge ·
+            .devbridge.yaml
+          </p>
+        </div>
+      </section>
+    </main>
+
+    <footer>
+      <div class="shell">
+        <span>CVAT Backend · Devbridge 分享页</span>
+        <span>仅单文件 HTML · 无外部资源依赖</span>
+      </div>
+    </footer>
+
+    <script>
+      const revealObserver = new IntersectionObserver(
+        (entries) => {
+          for (const entry of entries) {
+            if (entry.isIntersecting) entry.target.classList.add('visible');
+          }
+        },
+        { threshold: 0.12, rootMargin: '0px 0px -42px 0px' }
+      );
+      document.querySelectorAll('.reveal').forEach((node) => revealObserver.observe(node));
+
+      document.querySelectorAll('.copy').forEach((button) => {
+        button.addEventListener('click', async () => {
+          const text = document.getElementById(button.dataset.copy)?.innerText || '';
+          try {
+            await navigator.clipboard.writeText(text);
+            const old = button.innerText;
+            button.innerText = 'copied';
+            setTimeout(() => (button.innerText = old), 1200);
+          } catch {
+            button.innerText = 'select';
+          }
+        });
+      });
+
+      const routes = {
+        none: {
+          title: 'route matrix · no selector',
+          status: 'shared backend',
+          ok: false,
+          active: ['proxy', 'gateway', 'service', 'pod'],
+          output: `GET /gateway/cv/api/knowlhub/health
+  loopback proxy: strip caller X-Dev-Route, inject none
+  dev17 gateway:  forward without selector
+  CVAT Service:  负载均衡到 original shared Pod
+  result:         shared code handles the request`,
+        },
+        wrong: {
+          title: 'route matrix · wrong selector',
+          status: 'shared backend',
+          ok: false,
+          active: ['proxy', 'gateway', 'service', 'pod'],
+          output: `GET /gateway/cv/api/knowlhub/...
+  loopback proxy: reject forged X-Dev-Route, inject none
+  dev17 gateway:  forward without selector
+  CVAT Service:   no match to this developer session
+  result:         original shared CVAT`,
+        },
+        current: {
+          title: 'route matrix · current session',
+          status: 'developer binary',
+          ok: true,
+          active: ['proxy', 'gateway', 'service', 'mirrord'],
+          output: `GET /gateway/cv/api/knowlhub/...
+  loopback proxy: strip /gateway; inject X-Dev-Route: devbridge-<user>-<random>
+  dev17 gateway:  preserve header and forward to Service
+  mirrord:        HTTP header filter selects this developer session
+  result:         local source process + target Pod context`,
+        },
+        other: {
+          title: 'route matrix · non-injected path',
+          status: 'shared backend',
+          ok: false,
+          active: ['proxy', 'gateway', 'service', 'pod'],
+          output: `GET /gateway/cv/api/other/...
+  loopback proxy: strip /gateway; remove any X-Dev-Route
+  dev17 gateway:  forward to the same shared Service
+  allowlist:      only /cv/api/knowlhub/ and readiness receive selector
+  result:         stable shared service, no cross-service leakage`,
+        },
+      };
+
+      const routeButtons = [...document.querySelectorAll('[data-route]')];
+      const demoTitle = document.getElementById('demo-title');
+      const demoStatus = document.getElementById('demo-status');
+      const demoOutput = document.getElementById('demo-output');
+
+      routeButtons.forEach((button) => {
+        button.addEventListener('click', () => {
+          const route = routes[button.dataset.route];
+          routeButtons.forEach((item) => item.classList.toggle('active', item === button));
+          demoTitle.textContent = route.title;
+          demoOutput.textContent = route.output;
+          demoStatus.textContent = route.status;
+          demoStatus.className = route.ok ? 'status-chip ok' : 'status-chip warn';
+          document.querySelectorAll('[data-node]').forEach((node) => {
+            const shouldActivate = route.active.includes(node.dataset.node);
+            node.classList.toggle('active', shouldActivate);
+            if (node.dataset.node === 'pod') node.classList.toggle('shared', !route.ok);
+            if (node.dataset.node === 'mirrord') node.classList.toggle('dev', route.ok);
+          });
+        });
+      });
+    </script>
+  </body>
+</html>

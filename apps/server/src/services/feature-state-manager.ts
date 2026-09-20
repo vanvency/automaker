@@ -323,6 +323,15 @@ export class FeatureStateManager {
         if (isActiveState) {
           const hasApprovedPlan = feature.planSpec?.status === 'approved';
           feature.status = hasApprovedPlan ? 'ready' : 'backlog';
+          const message =
+            '执行跟踪已中断，服务器恢复时将任务放回待执行。请先查看 Conversation；可使用 Reply 继续处理。';
+          feature.error = message;
+          feature.executionNotice = {
+            kind: 'interrupted',
+            source: 'recovery',
+            message,
+            occurredAt: new Date().toISOString(),
+          };
           needsUpdate = true;
           logger.info(
             `[${callerLabel}] Reset feature ${feature.id} from ${originalStatus} to ${feature.status}`
@@ -542,6 +551,28 @@ export class FeatureStateManager {
    * @param featureId - The feature ID
    * @param summary - The summary text to save
    */
+  /**
+   * Persist arbitrary feature metadata such as the provider-native session id.
+   * This must not overwrite status/summary; it merges fields atomically.
+   */
+  async updateFeatureFields(
+    projectPath: string,
+    featureId: string,
+    fields: Partial<Feature>
+  ): Promise<void> {
+    const featurePath = path.join(getFeatureDir(projectPath, featureId), 'feature.json');
+    const result = await readJsonWithRecovery<Feature | null>(featurePath, null, {
+      maxBackups: DEFAULT_BACKUP_COUNT,
+      autoRestore: true,
+    });
+    logRecoveryWarning(result, `Feature ${featureId}`, logger);
+    const feature = result.data;
+    if (!feature) throw new Error(`Feature ${featureId} not found`);
+
+    const updated = { ...feature, ...fields, updatedAt: new Date().toISOString() };
+    await atomicWriteJson(featurePath, updated, { backupCount: DEFAULT_BACKUP_COUNT });
+  }
+
   async saveFeatureSummary(projectPath: string, featureId: string, summary: string): Promise<void> {
     const featureDir = getFeatureDir(projectPath, featureId);
     const featurePath = path.join(featureDir, 'feature.json');

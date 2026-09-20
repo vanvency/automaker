@@ -32,12 +32,19 @@ export { useRunningAgents, useRunningAgentsCount } from './use-running-agents';
 // Worktrees
 export {
   useWorktrees,
+  useWorktreeProgress,
   useWorktreeInfo,
   useWorktreeStatus,
   useWorktreeDiffs,
   useWorktreeBranches,
   useWorktreeInitScript,
   useAvailableEditors,
+} from './use-worktrees';
+export type {
+  WorktreeProgressData,
+  WorktreeProgressProject,
+  WorktreeProgressProjectInfo,
+  WorktreeProgressRow,
 } from './use-worktrees';
 
 // Settings
@@ -74,7 +81,6 @@ export {
 export { useIdeationPrompts, useIdeas, useIdea } from './use-ideation';
 
 // Sessions
-export { useSessions, useSessionHistory, useSessionQueue } from './use-sessions';
 
 // Git
 export { useGitDiffs } from './use-git';

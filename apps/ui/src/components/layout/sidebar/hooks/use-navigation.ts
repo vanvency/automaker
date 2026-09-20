@@ -4,6 +4,7 @@ import {
   FileText,
   Folder,
   LayoutGrid,
+  GitBranch,
   Bot,
   BookOpen,
   Terminal,
@@ -14,7 +15,6 @@ import {
   Network,
   Bell,
   Settings,
-  Home,
 } from 'lucide-react';
 import type { NavSection, NavItem } from '../types';
 import type { KeyboardShortcut } from '@/hooks/use-keyboard-shortcuts';
@@ -32,6 +32,7 @@ interface UseNavigationProps {
     context: string;
     memory: string;
     board: string;
+    workBoard: string;
     graph: string;
     agent: string;
     terminal: string;
@@ -146,8 +147,14 @@ export function useNavigation({
     // Build project items - Terminal and File Editor are conditionally included
     const projectItems: NavItem[] = [
       {
+        id: 'worktrees',
+        label: 'Work Board',
+        icon: GitBranch,
+        shortcut: shortcuts.workBoard,
+      },
+      {
         id: 'board',
-        label: 'Kanban Board',
+        label: 'Task Kanban',
         icon: LayoutGrid,
         shortcut: shortcuts.board,
       },
@@ -164,7 +171,7 @@ export function useNavigation({
       },
       {
         id: 'agent',
-        label: 'Agent Runner',
+        label: 'Agent',
         icon: Bot,
         shortcut: shortcuts.agent,
       },
@@ -181,17 +188,6 @@ export function useNavigation({
     }
 
     const sections: NavSection[] = [
-      // Dashboard - standalone at top (links to projects overview)
-      {
-        label: '',
-        items: [
-          {
-            id: 'overview',
-            label: 'Dashboard',
-            icon: Home,
-          },
-        ],
-      },
       // Project section - expanded by default
       {
         label: 'Project',

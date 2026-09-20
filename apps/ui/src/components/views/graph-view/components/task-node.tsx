@@ -49,7 +49,7 @@ const statusConfig = {
   },
   waiting_approval: {
     icon: Pause,
-    label: 'Waiting Approval',
+    label: 'Waiting Review',
     colorClass: 'text-[var(--status-waiting)]',
     borderClass: 'border-[var(--status-waiting)]',
     bgClass: 'bg-[var(--status-warning-bg)]',
@@ -424,7 +424,7 @@ export const TaskNode = memo(function TaskNode({ data, selected }: TaskNodeProps
                     }}
                   >
                     <Trash2 className="w-3 h-3 mr-2" />
-                    Delete Task
+                    Archive Task
                   </DropdownMenuItem>
                 )}
               </DropdownMenuContent>

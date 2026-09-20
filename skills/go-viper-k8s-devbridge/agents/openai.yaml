@@ -1,0 +1,4 @@
+interface:
+  display_name: 'Go Viper K8s Devbridge'
+  short_description: '一键复用 Kubernetes 依赖调试本地 Go API'
+  default_prompt: 'Use $go-viper-k8s-devbridge to set up safe request-scoped Kubernetes debugging for this Go Viper service.'

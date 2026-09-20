@@ -72,7 +72,9 @@ export function CreatePRDialog({
   const [body, setBody] = useState('');
   const [baseBranch, setBaseBranch] = useState(defaultBaseBranch);
   const [commitMessage, setCommitMessage] = useState('');
-  const [isDraft, setIsDraft] = useState(false);
+  // Drafts by default: an accidentally merged PR is much worse than an extra
+  // click to mark a PR ready for review.
+  const [isDraft, setIsDraft] = useState(true);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [prUrl, setPrUrl] = useState<string | null>(null);
@@ -778,6 +780,9 @@ export function CreatePRDialog({
                       Create as draft
                     </Label>
                   </div>
+                  <p className="text-[11px] text-muted-foreground pl-6">
+                    Drafts cannot be merged until someone marks them ready.
+                  </p>
                 </div>
               </div>
 

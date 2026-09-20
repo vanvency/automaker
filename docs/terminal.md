@@ -61,6 +61,20 @@ Global shortcut (works anywhere in the app):
 
 ## Features
 
+### Herdr Sessions (one per project)
+
+Boards can open a Herdr terminal for a card: the **Herdr** button next to the card's
+conversation button opens a browser page that renders `herdr --session <name>`, where the
+session is named after the project (for example `vibe-llmops`). Inside it each worktree is a
+space and each task is a tab, so a card opens the pi conversation that belongs to that card.
+The browser shows exactly the TUI a terminal user sees after `herdr session attach <name>`.
+
+The sidebar's **Agents Herdr** entry (Project ▸ Agents Herdr) is the same view without a card: it
+attaches the current project/worktree and embeds the TUI in the app instead of opening a tab.
+
+Details and the roadmap for driving workspaces/agents over the Herdr socket API live in
+[herdr-session-architecture.md](./herdr-session-architecture.md).
+
 ### Multiple Terminals
 
 - Create multiple terminal tabs using the `+` button

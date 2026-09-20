@@ -31,6 +31,7 @@ export const MODAL_CONSTANTS = {
     PARSED: 'parsed',
     RAW: 'raw',
     CHANGES: 'changes',
+    TIMELINE: 'timeline',
   } as const,
 
   // Component heights (complete Tailwind class fragments for template interpolation)

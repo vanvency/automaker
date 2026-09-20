@@ -1,0 +1,63 @@
+version: 1
+
+project:
+  name: my-go-service
+
+remote:
+  ssh: dev-cluster-host
+  namespace: development
+  target: deployment/my-go-service/container/backend
+  base_dir: /tmp
+  non_production: true
+
+gateway:
+  upstream: http://development-gateway.example.internal
+  listen: 127.0.0.1:18080
+  strip_prefix: /gateway
+  route_header: X-Dev-Route
+  route_paths:
+    - /my-service/
+  health_path: /my-service/api/devbridge/status
+
+recovery:
+  auto_reattach: true
+  max_attempts: 5
+  target_wait_seconds: 900
+
+app:
+  name: my-go-service
+  local_port: 8620
+  remote_port: 80
+  build:
+    - go
+    - build
+    - -o
+    - '{{output}}'
+    - .
+  sync:
+    - etc
+  env:
+    MY_SERVICE_DEVBRIDGE_API_ONLY: 'true'
+    MY_SERVICE_SERVER.ADDR: ':8620'
+
+remote_context:
+  env_include: MY_SERVICE_*;KUBERNETES_*;TZ
+  read_only:
+    - ^/etc/my-service/secret(/.*)?$
+    - ^/var/run/secrets/kubernetes.io/serviceaccount(/.*)?$
+    - ^/etc/resolv.conf$
+
+mirrord:
+  version: 3.256.0
+  binary_sha256: 9e972f9c6e237f5fe14ec47bd5dd578b33bf8d16f2235151be2cd8281d2b25de
+  layer_sha256: 009da41efed013ee88c80b063c2b84cf841b937c7f06a2dd89a15126c33a05d0
+  agent_image: ghcr.io/metalbear-co/mirrord:3.256.0
+  agent_ttl_seconds: 60
+  clean_iptables_on_start: false
+  agent_resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      cpu: '1'
+      memory: 1Gi

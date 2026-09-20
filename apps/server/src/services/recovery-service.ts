@@ -23,6 +23,11 @@ import type { TypedEventBus } from './typed-event-bus.js';
 import type { ConcurrencyManager, RunningFeature } from './concurrency-manager.js';
 import type { SettingsService } from './settings-service.js';
 import type { PipelineStatusInfo } from './pipeline-orchestrator.js';
+import {
+  featurePromptBlock,
+  hasProviderSession,
+  previousContextBlock,
+} from './continuation-prompt.js';
 
 const logger = createLogger('RecoveryService');
 
@@ -183,11 +188,14 @@ export class RecoveryService {
     const feature = await this.loadFeatureFn(projectPath, featureId);
     if (!feature) throw new Error(`Feature ${featureId} not found`);
     const prompts = await getPromptCustomization(this.settingsService, '[RecoveryService]');
-    const featurePrompt = `## Feature Implementation Task\n\n**Feature ID:** ${feature.id}\n**Title:** ${feature.title || 'Untitled Feature'}\n**Description:** ${feature.description}\n`;
+    // A resumable conversation already holds the description and the earlier
+    // output, so only send them when there is no session to continue.
+    const continuing = hasProviderSession(feature);
+    const featurePrompt = featurePromptBlock(feature, { continuing });
     let prompt = prompts.taskExecution.resumeFeatureTemplate;
     prompt = prompt
       .replace(/\{\{featurePrompt\}\}/g, featurePrompt)
-      .replace(/\{\{previousContext\}\}/g, context);
+      .replace(/\{\{previousContext\}\}/g, previousContextBlock(context, { continuing }));
     return this.executeFeatureFn(projectPath, featureId, useWorktrees, false, undefined, {
       continuationPrompt: prompt,
       _calledInternally: true,

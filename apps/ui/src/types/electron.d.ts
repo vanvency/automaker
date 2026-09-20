@@ -8,8 +8,14 @@ import type {
   ZaiUsageResponse,
   GeminiUsageResponse,
 } from '@/store/app-store';
-import type { ParsedTask, FeatureStatusWithPipeline, MergeStateInfo } from '@automaker/types';
-export type { MergeStateInfo } from '@automaker/types';
+import type {
+  ParsedTask,
+  FeatureStatusWithPipeline,
+  MergeStateInfo,
+  WorktreeProgressResponse,
+  WorktreePreviewResponse,
+} from '@automaker/types';
+export type { MergeStateInfo, WorktreeProgressResponse } from '@automaker/types';
 
 export interface ImageAttachment {
   id?: string; // Optional - may not be present in messages loaded from server
@@ -801,12 +807,58 @@ export interface FileStatus {
   mergeType?: string;
 }
 
+/** How a submodule changed between two revisions. */
+export type SubmoduleChangeStatus = 'added' | 'removed' | 'modified' | 'uncommitted';
+
+/** Why a diff covers the whole branch or only the card's task commits. */
+export interface DiffScopeInfo {
+  mode: 'task' | 'branch';
+  reason:
+    | 'task-commits'
+    | 'parent-task'
+    | 'no-jira-key'
+    | 'no-matching-commits'
+    | 'all-commits-match'
+    | 'requested-branch';
+  jiraKey?: string | null;
+  childIndex?: number | null;
+  matchedCommits?: number;
+  totalCommits?: number;
+  commits?: Array<{ sha: string; subject: string }>;
+}
+
+/** One submodule whose gitlink change was expanded into its own content diff. */
+export interface SubmoduleDiffSummary {
+  /** Path of the submodule inside the parent repository (e.g. `frontend/saas-frontend`) */
+  path: string;
+  status: SubmoduleChangeStatus;
+  /** Commit recorded by the parent before the change (null when the submodule was added) */
+  oldCommit: string | null;
+  /** Commit recorded by the parent after the change (null when removed) */
+  newCommit: string | null;
+  /** Files changed inside the submodule */
+  filesChanged: number;
+  insertions: number;
+  deletions: number;
+  /** The submodule diff was cut off because the byte budget ran out */
+  truncated: boolean;
+  /** Set when the submodule content could not be diffed (not initialised, commits not fetched, ...) */
+  error?: string;
+}
+
 export interface FileDiffsResult {
   success: boolean;
   diff?: string;
   files?: FileStatus[];
   hasChanges?: boolean;
   error?: string;
+  /**
+   * Submodule gitlink moves that were expanded into the submodule's own changes.
+   * The related files are part of `files`/`diff`, prefixed with the submodule path.
+   */
+  submodules?: SubmoduleDiffSummary[];
+  /** How the diff was narrowed to the card's task commits */
+  scope?: DiffScopeInfo;
   /** Merge state info, present when a merge/rebase/cherry-pick is in progress */
   mergeState?: MergeStateInfo;
 }
@@ -882,6 +934,21 @@ export interface WorktreeAPI {
     worktrees?: WorktreeInfo[];
     error?: string;
   }>;
+
+  // Aggregate progress for every worktree of a project
+  progress: (
+    projectPath: string,
+    options?: {
+      /** Reference branch for ahead/behind counts (defaults to origin/HEAD → dev → main → master) */
+      baseBranch?: string;
+      /** Skip the per-worktree `git status`/conflict scan (faster, no change columns) */
+      includeGitDetails?: boolean;
+    }
+  ) => Promise<WorktreeProgressResponse>;
+
+  previewStatus: (projectPath: string, worktreePath: string) => Promise<WorktreePreviewResponse>;
+  previewStart: (projectPath: string, worktreePath: string) => Promise<WorktreePreviewResponse>;
+  previewStop: (projectPath: string, worktreePath: string) => Promise<WorktreePreviewResponse>;
 
   // List all worktrees with details (for worktree selector)
   listAll: (
@@ -1110,7 +1177,15 @@ export interface WorktreeAPI {
   }>;
 
   // Get file diffs for a feature worktree
-  getDiffs: (projectPath: string, featureId: string) => Promise<FileDiffsResult>;
+  getDiffs: (
+    projectPath: string,
+    featureId: string,
+    options?: {
+      /** 'auto' narrows to the card's task commits, 'branch' shows everything */ taskScope?:
+        | 'auto'
+        | 'branch';
+    }
+  ) => Promise<FileDiffsResult>;
 
   // Get diff for a specific file in a worktree
   getFileDiff: (

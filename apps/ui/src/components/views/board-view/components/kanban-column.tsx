@@ -56,7 +56,7 @@ export const KanbanColumn = memo(function KanbanColumn({
     <div
       ref={setNodeRef}
       className={cn(
-        'relative flex flex-col h-full rounded-xl',
+        'relative flex min-w-0 flex-col h-full rounded-xl',
         // Only transition ring/shadow for drag-over effect, not width
         'transition-[box-shadow,ring] duration-200',
         !width && 'w-72', // Only apply w-72 if no custom width
@@ -79,12 +79,12 @@ export const KanbanColumn = memo(function KanbanColumn({
       <div
         ref={setHeaderDropRef}
         className={cn(
-          'relative z-10 flex items-center gap-3 px-3 py-2.5',
+          'relative z-10 flex flex-wrap items-center gap-1.5 px-2 py-2.5',
           showBorder && 'border-b border-border/40'
         )}
       >
         <div className={cn('w-2.5 h-2.5 rounded-full shrink-0', colorClass)} />
-        <h3 className="font-semibold text-sm text-foreground/90 flex-1 tracking-tight whitespace-nowrap">
+        <h3 className="font-semibold text-sm text-foreground/90 min-w-0 flex-1 tracking-tight">
           {title}
         </h3>
         {headerAction}

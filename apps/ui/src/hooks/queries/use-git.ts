@@ -33,6 +33,10 @@ export function useGitDiffs(projectPath: string | undefined, enabled = true) {
         files: result.files ?? [],
         diff: result.diff ?? '',
         ...(result.mergeState ? { mergeState: result.mergeState } : {}),
+        ...(result.submodules && result.submodules.length > 0
+          ? { submodules: result.submodules }
+          : {}),
+        ...(result.scope ? { scope: result.scope } : {}),
       };
     },
     enabled: !!projectPath && enabled,

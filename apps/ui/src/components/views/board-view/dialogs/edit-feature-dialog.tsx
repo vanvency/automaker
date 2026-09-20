@@ -38,6 +38,8 @@ import {
 } from '../shared';
 import type { WorkMode } from '../shared';
 import { PhaseModelSelector } from '@/components/views/settings-view/model-defaults/phase-model-selector';
+import { TaskNotice } from '../components/task-notice';
+import { TaskArchiveDetails } from '../components/task-archive-details';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { DependencyTreeDialog } from './dependency-tree-dialog';
 
@@ -311,6 +313,16 @@ export function EditFeatureDialog({
         </DialogHeader>
 
         <div className="py-4 space-y-4 overflow-y-auto flex-1 min-h-0">
+          <TaskNotice feature={editingFeature} />
+          <TaskArchiveDetails feature={editingFeature} />
+          {editingFeature.supersededBy && (
+            <p className="rounded border p-3 text-sm">
+              已由 {editingFeature.supersededBy.jiraKey || editingFeature.supersededBy.featureId}{' '}
+              覆盖：
+              {editingFeature.supersededBy.reason}
+            </p>
+          )}
+          {/* 验收结果不再放在编辑表单里：卡片上的 Verify 按钮会打开它。 */}
           {/* Task Details Section */}
           <div className={cardClass}>
             <div className="space-y-2">

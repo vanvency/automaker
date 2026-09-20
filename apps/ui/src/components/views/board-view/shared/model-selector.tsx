@@ -138,7 +138,7 @@ export function ModelSelector({
   // Filter Cursor models based on enabled models from global settings
   const filteredCursorModels = CURSOR_MODELS.filter((model) => {
     // enabledCursorModels stores CursorModelIds which may or may not have "cursor-" prefix
-    // (e.g., 'auto', 'sonnet-4.5' without prefix, but 'cursor-gpt-5.2' with prefix)
+    // (e.g., 'auto', 'sonnet-4.5' without prefix, but 'cursor:gpt-5.2' with prefix)
     // CURSOR_MODELS always has the "cursor-" prefix added in model-constants.ts
     // Check both the full ID (for GPT models) and the unprefixed version (for non-GPT models)
     const unprefixedId = model.id.startsWith('cursor-') ? model.id.slice(7) : model.id;
@@ -151,12 +151,12 @@ export function ModelSelector({
   const handleProviderChange = (provider: ModelProvider) => {
     if (provider === 'cursor' && selectedProvider !== 'cursor') {
       // Switch to Cursor's default model (from global settings)
-      // cursorDefaultModel is now canonical (e.g., 'cursor-auto'), so use directly
+      // cursorDefaultModel is now canonical (e.g., 'cursor:auto'), so use directly
       onModelSelect(cursorDefaultModel);
     } else if (provider === 'codex' && selectedProvider !== 'codex') {
       // Switch to Codex's default model (use isDefault flag from dynamic models)
       const defaultModel = codexModels.find((m) => m.isDefault);
-      const defaultModelId = defaultModel?.id || codexModels[0]?.id || 'codex-gpt-5.2-codex';
+      const defaultModelId = defaultModel?.id || codexModels[0]?.id || 'codex:gpt-5.2-codex';
       onModelSelect(defaultModelId);
     } else if (provider === 'claude' && selectedProvider !== 'claude') {
       // Switch to Claude's default model (canonical format)

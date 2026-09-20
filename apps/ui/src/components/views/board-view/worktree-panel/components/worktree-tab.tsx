@@ -17,10 +17,13 @@ import type {
 import { BranchSwitchDropdown } from './branch-switch-dropdown';
 import { WorktreeActionsDropdown } from './worktree-actions-dropdown';
 import { getConflictBadgeStyles, getConflictTypeLabel } from './worktree-indicator-utils';
+import { JiraTypeBadge } from '../../components/jira-type-badge';
 
 interface WorktreeTabProps {
   worktree: WorktreeInfo;
   cardCount?: number; // Number of unarchived cards for this branch
+  /** Normalized Jira work type of the cards on this branch (epic/story/task/...) */
+  jiraType?: string;
   hasChanges?: boolean; // Whether the worktree has uncommitted changes
   changedFilesCount?: number; // Number of files with uncommitted changes
   isSelected: boolean;
@@ -136,6 +139,7 @@ interface WorktreeTabProps {
 export function WorktreeTab({
   worktree,
   cardCount,
+  jiraType,
   hasChanges,
   changedFilesCount,
   isSelected,
@@ -340,6 +344,15 @@ export function WorktreeTab({
             {isActivating && !isRunning && (
               <Spinner size="xs" variant={isSelected ? 'foreground' : 'primary'} />
             )}
+            <JiraTypeBadge
+              type={jiraType}
+              data-testid={`tab-worktree-jira-type-${worktree.branch}`}
+              className={
+                isSelected
+                  ? 'border-primary-foreground/40 bg-primary-foreground/15 text-primary-foreground'
+                  : undefined
+              }
+            />
             {worktree.branch}
             {cardCount !== undefined && cardCount > 0 && (
               <span className="inline-flex items-center justify-center h-4 min-w-[1rem] px-1 text-[10px] font-medium rounded bg-background/80 text-foreground border border-border">

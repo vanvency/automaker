@@ -28,12 +28,12 @@ describe('gemini-provider.ts', () => {
         prompt: 'Hello',
         model: '2.5-flash',
         cwd: '/tmp/project',
-        sdkSessionId: 'gemini-session-123',
+        sdkSessionId: 'gemini:session-123',
       });
 
       const resumeIndex = args.indexOf('--resume');
       expect(resumeIndex).toBeGreaterThan(-1);
-      expect(args[resumeIndex + 1]).toBe('gemini-session-123');
+      expect(args[resumeIndex + 1]).toBe('gemini:session-123');
     });
 
     it('should not include --resume when sdkSessionId is missing', () => {
@@ -103,13 +103,14 @@ describe('gemini-provider.ts', () => {
 
       const modelIndex = args.indexOf('--model');
       expect(modelIndex).toBeGreaterThan(-1);
+      // The CLI gets the provider-native name, not the canonical routing id
       expect(args[modelIndex + 1]).toBe('gemini-2.5-flash');
     });
 
     it('should not double-prefix model names that already have gemini-', () => {
       const args = provider.buildCliArgs({
         prompt: 'Hello',
-        model: 'gemini-2.5-pro',
+        model: 'gemini:2.5-pro',
         cwd: '/tmp/project',
       });
 
@@ -258,15 +259,15 @@ describe('gemini-provider.ts', () => {
   describe('validateBareModelId integration', () => {
     it('should allow gemini- prefixed models for Gemini provider with expectedProvider="gemini"', () => {
       expect(() =>
-        validateBareModelId('gemini-2.5-flash', 'GeminiProvider', 'gemini')
+        validateBareModelId('gemini:2.5-flash', 'GeminiProvider', 'gemini')
       ).not.toThrow();
-      expect(() => validateBareModelId('gemini-2.5-pro', 'GeminiProvider', 'gemini')).not.toThrow();
+      expect(() => validateBareModelId('gemini:2.5-pro', 'GeminiProvider', 'gemini')).not.toThrow();
     });
 
     it('should reject other provider prefixes for Gemini provider', () => {
-      expect(() => validateBareModelId('cursor-gpt-4', 'GeminiProvider', 'gemini')).toThrow();
-      expect(() => validateBareModelId('codex-gpt-4', 'GeminiProvider', 'gemini')).toThrow();
-      expect(() => validateBareModelId('copilot-gpt-4', 'GeminiProvider', 'gemini')).toThrow();
+      expect(() => validateBareModelId('cursor:gpt-4', 'GeminiProvider', 'gemini')).toThrow();
+      expect(() => validateBareModelId('codex:gpt-4', 'GeminiProvider', 'gemini')).toThrow();
+      expect(() => validateBareModelId('copilot:gpt-4', 'GeminiProvider', 'gemini')).toThrow();
     });
   });
 });

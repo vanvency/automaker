@@ -1,3 +1,4 @@
+import { secureFs } from '@automaker/platform';
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import fs from 'fs/promises';
 import path from 'path';
@@ -185,24 +186,15 @@ describe('fs-utils.ts', () => {
 
   describe('Error handling', () => {
     it('should handle permission errors in mkdirSafe', async () => {
-      // Skip on Windows where permissions work differently
-      if (process.platform === 'win32') {
-        return;
-      }
-
-      const restrictedDir = path.join(tempDir, 'restricted');
-      await fs.mkdir(restrictedDir);
-
-      // Make directory read-only
-      await fs.chmod(restrictedDir, 0o444);
-
-      const newDir = path.join(restrictedDir, 'new');
-
+      const failure = vi
+        .spyOn(secureFs, 'mkdir')
+        .mockRejectedValueOnce(Object.assign(new Error('Permission denied'), { code: 'EACCES' }));
       try {
-        await expect(mkdirSafe(newDir)).rejects.toThrow();
+        await expect(mkdirSafe(path.join(tempDir, 'restricted-new'))).rejects.toThrow(
+          'Permission denied'
+        );
       } finally {
-        // Restore permissions for cleanup
-        await fs.chmod(restrictedDir, 0o755);
+        failure.mockRestore();
       }
     });
 

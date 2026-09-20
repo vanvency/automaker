@@ -6,6 +6,12 @@ export const Route = createLazyFileRoute('/board')({
 });
 
 function BoardRouteComponent() {
-  const { featureId, projectPath } = useSearch({ from: '/board' });
-  return <BoardView initialFeatureId={featureId} initialProjectPath={projectPath} />;
+  const { featureId, projectPath, worktree } = useSearch({ from: '/board' });
+  return (
+    <BoardView
+      initialFeatureId={featureId}
+      initialProjectPath={projectPath}
+      initialWorktreeBranch={worktree}
+    />
+  );
 }

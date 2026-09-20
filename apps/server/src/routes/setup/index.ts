@@ -41,6 +41,12 @@ import {
   createGetOpencodeProvidersHandler,
   createClearOpencodeCacheHandler,
 } from './routes/opencode-models.js';
+import { createPiStatusHandler } from './routes/pi-status.js';
+import {
+  createGetPiModelsHandler,
+  createRefreshPiModelsHandler,
+  createClearPiCacheHandler,
+} from './routes/pi-models.js';
 import {
   createGetCursorConfigHandler,
   createSetCursorDefaultModelHandler,
@@ -103,6 +109,12 @@ export function createSetupRoutes(): Router {
   router.post('/opencode/models/refresh', createRefreshOpencodeModelsHandler());
   router.get('/opencode/providers', createGetOpencodeProvidersHandler());
   router.post('/opencode/cache/clear', createClearOpencodeCacheHandler());
+
+  // Pi CLI routes (models come from the local LiteLLM gateway)
+  router.get('/pi-status', createPiStatusHandler());
+  router.get('/pi/models', createGetPiModelsHandler());
+  router.post('/pi/models/refresh', createRefreshPiModelsHandler());
+  router.post('/pi/cache/clear', createClearPiCacheHandler());
   router.get('/cursor-config', createGetCursorConfigHandler());
   router.post('/cursor-config/default-model', createSetCursorDefaultModelHandler());
   router.post('/cursor-config/models', createSetCursorModelsHandler());

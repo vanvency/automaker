@@ -358,13 +358,15 @@ export class OpencodeProvider extends CliProvider {
     }
 
     // Handle model selection
-    // Convert canonical prefix format (opencode-xxx) to CLI slash format (opencode/xxx)
-    // OpenCode CLI expects provider/model format (e.g., 'opencode/big-model')
+    // Canonical IDs use the agent:model form (opencode:litellm/auto); the CLI
+    // expects provider/model (litellm/auto) or opencode/<name> for its own models.
     if (options.model) {
-      // Strip opencode- prefix if present, then ensure slash format
-      const model = options.model.startsWith('opencode-')
-        ? options.model.slice('opencode-'.length)
-        : options.model;
+      // Strip the canonical prefix (or the pre-rename dash form) if present
+      const model = options.model.startsWith('opencode:')
+        ? options.model.slice('opencode:'.length)
+        : options.model.startsWith('opencode-')
+          ? options.model.slice('opencode-'.length)
+          : options.model;
 
       // If model has slash, it's already provider/model format; otherwise prepend opencode/
       const cliModel = model.includes('/') ? model : `opencode/${model}`;

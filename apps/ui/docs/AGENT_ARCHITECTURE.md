@@ -1,5 +1,12 @@
 # Agent Architecture - Surviving Next.js Restarts
 
+> **Superseded (2026-09-18)**: the interactive chat runner described here is no longer part of the
+> app. The sidebar's Agent entry (formerly "Agent Runner") now embeds the herdr workspace preview,
+> and the chat components (`src/components/session-manager.tsx`, `src/components/views/agent-view/`,
+> `src/hooks/use-electron-agent.ts`) were removed. See
+> [docs/herdr-session-architecture.md](../../../docs/herdr-session-architecture.md). The main-process
+> IPC handlers and the server-side `/api/agent/*` service described below still exist.
+
 ## Problem Statement
 
 When using the Automaker app to iterate on itself:

@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { Button } from '@/components/ui/button';
-import { Pencil, X, CheckSquare, Trash2, CheckCircle2, Loader2 } from 'lucide-react';
+import { Pencil, X, CheckSquare, Archive as Trash2, CheckCircle2, Loader2 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import {
   Dialog,
@@ -34,18 +34,12 @@ export function SelectionActionBar({
   onSelectAll,
   mode = 'backlog',
 }: SelectionActionBarProps) {
-  const [showDeleteDialog, setShowDeleteDialog] = useState(false);
   const [showVerifyDialog, setShowVerifyDialog] = useState(false);
   const [isVerifying, setIsVerifying] = useState(false);
 
   const allSelected = selectedCount === totalCount && totalCount > 0;
 
   const handleDeleteClick = () => {
-    setShowDeleteDialog(true);
-  };
-
-  const handleConfirmDelete = () => {
-    setShowDeleteDialog(false);
     onDelete?.();
   };
 
@@ -113,7 +107,7 @@ export function SelectionActionBar({
                 data-testid="selection-delete-button"
               >
                 <Trash2 className="w-4 h-4 mr-1.5" />
-                Delete
+                Archive
               </Button>
             </>
           )}
@@ -157,42 +151,6 @@ export function SelectionActionBar({
           </Button>
         </div>
       </div>
-
-      {/* Delete Confirmation Dialog */}
-      <Dialog open={showDeleteDialog} onOpenChange={setShowDeleteDialog}>
-        <DialogContent data-testid="bulk-delete-confirmation-dialog">
-          <DialogHeader>
-            <DialogTitle className="flex items-center gap-2 text-destructive">
-              <Trash2 className="w-5 h-5" />
-              Delete Selected Features?
-            </DialogTitle>
-            <DialogDescription>
-              Are you sure you want to permanently delete {selectedCount} feature
-              {selectedCount !== 1 ? 's' : ''}?
-              <span className="block mt-2 text-destructive font-medium">
-                This action cannot be undone.
-              </span>
-            </DialogDescription>
-          </DialogHeader>
-          <DialogFooter>
-            <Button
-              variant="ghost"
-              onClick={() => setShowDeleteDialog(false)}
-              data-testid="cancel-bulk-delete-button"
-            >
-              Cancel
-            </Button>
-            <Button
-              variant="destructive"
-              onClick={handleConfirmDelete}
-              data-testid="confirm-bulk-delete-button"
-            >
-              <Trash2 className="w-4 h-4 mr-2" />
-              Delete
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
 
       {/* Verify Confirmation Dialog */}
       <Dialog

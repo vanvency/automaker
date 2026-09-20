@@ -1,11 +1,13 @@
 // @ts-nocheck - column filtering logic with dependency resolution and status mapping
 import { useMemo, useCallback, useEffect } from 'react';
+import { isNeedsAttentionStatus } from '../constants';
 import { Feature, useAppStore } from '@/store/app-store';
 import {
   createFeatureMap,
   getBlockingDependenciesFromMap,
   resolveDependencies,
 } from '@automaker/dependency-resolver';
+import { parentFeatureIdsOf } from '../lib/child-features';
 
 type ColumnId = Feature['status'];
 
@@ -23,6 +25,18 @@ function getFeatureCreatedTime(feature: Feature): number {
     return parseInt(match[1], 10);
   }
   return 0;
+}
+
+/**
+ * Pin task-tree roots before their children in every lane. The root card is
+ * the lane's anchor (it carries the aggregate progress and links to children),
+ * so it always renders first regardless of creation order.
+ */
+function pinTaskRootsFirst<T extends Pick<Feature, 'id'>>(cards: T[], parentIds: Set<string>): T[] {
+  const roots = cards.filter((card) => parentIds.has(card.id));
+  if (roots.length === 0) return cards;
+  const rootIds = new Set(roots.map((card) => card.id));
+  return [...roots, ...cards.filter((card) => !rootIds.has(card.id))];
 }
 
 /**
@@ -171,6 +185,7 @@ export function useBoardColumnFeatures({
   projectPath,
   sortNewestCardOnTop = false,
 }: UseBoardColumnFeaturesProps) {
+  const taskParentIds = useMemo(() => parentFeatureIdsOf(features), [features]);
   // Get recently completed features from store for race condition protection
   const recentlyCompletedFeatures = useAppStore((state) => state.recentlyCompletedFeatures);
   const clearRecentlyCompletedFeatures = useAppStore(
@@ -215,6 +230,7 @@ export function useBoardColumnFeatures({
     const map: Record<string, Feature[]> = {
       backlog: [],
       in_progress: [],
+      failed: [], // Needs Attention lane: failures/conflicts/interruptions
       waiting_approval: [],
       verified: [],
       completed: [], // Completed features are shown in the archive modal, not as a column
@@ -332,19 +348,33 @@ export function useBoardColumnFeatures({
       // Filter all items by worktree, including backlog
       // This ensures backlog items with a branch assigned only show in that branch
       //
-      // 'merge_conflict', 'ready', and 'interrupted' are backlog-lane statuses that don't
-      // have dedicated columns:
-      // - 'merge_conflict': Automatic merge failed; user must resolve conflicts before restart
-      // - 'ready': Feature has an approved plan, waiting to be picked up for execution
-      // - 'interrupted': Feature execution was aborted (e.g., user stopped it, server restart)
-      // Both display in the backlog column and need the same allRunningTaskIds race-condition
-      // protection as 'backlog' to prevent briefly flashing in backlog when already executing.
-      if (
-        status === 'backlog' ||
-        status === 'merge_conflict' ||
-        status === 'ready' ||
-        status === 'interrupted'
-      ) {
+      // 'ready' is a backlog-lane status (approved plan, waiting for a worker) and
+      // needs the same allRunningTaskIds race-condition protection as 'backlog' to
+      // prevent briefly flashing there while it is already executing.
+      // Needs Attention lane: nothing here is waiting for an agent, it is waiting
+      // for a human (failure, conflict, interruption). Keep the running-task race
+      // protection so a restarting card never flashes into this lane either.
+      // A card carrying an `error` is waiting on a human answer (needs_input, a
+      // decomposition that has to be confirmed, ...), so it belongs in the same
+      // lane as failures - exactly what the Work Board's attention signal does.
+      const hasError = typeof f.error === 'string' && f.error.trim() !== '';
+      // Done is terminal: a human already decided, so a leftover notice (or a
+      // stale needs-input message kept for the record) must not yank the card
+      // back into Needs Attention.
+      const isTerminal = status === 'verified' || status === 'completed';
+      if (!isTerminal && (isNeedsAttentionStatus(status) || hasError)) {
+        // A run finishing is not task completion. Evidence import failures
+        // and review blockers must remain visible, even if the completion
+        // event arrived before this feature snapshot.
+        if (allRunningTaskIds.has(f.id)) {
+          if (matchesWorktree) map.in_progress.push(f);
+        } else if (matchesWorktree) {
+          map.failed.push(f);
+        }
+        return;
+      }
+
+      if (status === 'backlog' || status === 'ready') {
         // IMPORTANT: Check if this feature is running on ANY worktree before placing in backlog.
         // This prevents a race condition where the feature has started executing on the server
         // (and is tracked in a different worktree's running list) but the disk status hasn't
@@ -435,15 +465,17 @@ export function useBoardColumnFeatures({
 
     // Apply newest-on-top sorting to non-backlog columns when enabled
     // (Backlog is handled above with dependency-aware sorting)
-    if (sortNewestCardOnTop) {
-      for (const columnId of Object.keys(map)) {
-        if (columnId === 'backlog') continue;
+    for (const columnId of Object.keys(map)) {
+      if (columnId === 'backlog') continue;
+      if (sortNewestCardOnTop) {
         map[columnId] = [...map[columnId]].sort((a, b) => {
           const aTime = getFeatureCreatedTime(a);
           const bTime = getFeatureCreatedTime(b);
           return bTime - aTime; // desc: newest first
         });
       }
+      // Task roots are lane anchors even when the user sorted by newest first.
+      map[columnId] = pinTaskRootsFirst(map[columnId], taskParentIds);
     }
 
     return map;
@@ -457,6 +489,7 @@ export function useBoardColumnFeatures({
     projectPath,
     recentlyCompletedFeatures,
     sortNewestCardOnTop,
+    taskParentIds,
   ]);
 
   const getColumnFeatures = useCallback(

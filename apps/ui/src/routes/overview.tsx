@@ -1,6 +1,7 @@
-import { createFileRoute } from '@tanstack/react-router';
-import { OverviewView } from '@/components/views/overview-view';
+import { createFileRoute, redirect } from '@tanstack/react-router';
 
 export const Route = createFileRoute('/overview')({
-  component: OverviewView,
+  beforeLoad: () => {
+    throw redirect({ to: '/worktrees' });
+  },
 });

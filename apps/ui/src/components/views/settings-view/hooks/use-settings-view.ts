@@ -10,6 +10,7 @@ export type SettingsViewId =
   | 'opencode-provider'
   | 'gemini-provider'
   | 'copilot-provider'
+  | 'pi-provider'
   | 'mcp-servers'
   | 'prompts'
   | 'templates'

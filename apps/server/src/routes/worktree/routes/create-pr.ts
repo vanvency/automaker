@@ -21,6 +21,55 @@ import { resolvePrTarget } from '../../../services/pr-service.js';
 
 const logger = createLogger('CreatePR');
 
+export interface PrCreateArgsOptions {
+  base: string;
+  branchName: string;
+  title: string;
+  body: string;
+  /** Upstream repo (forks only) - when set the PR is opened against it */
+  upstreamRepo?: string | null;
+  /** Origin owner (forks only) - used as the `owner:branch` head ref */
+  originOwner?: string | null;
+  /**
+   * Create the PR as a draft.
+   *
+   * Draft is the default: Automaker must never open a PR that can be merged by
+   * accident. Callers have to pass `false` explicitly to opt out.
+   */
+  draft?: boolean;
+}
+
+/**
+ * Build the `gh pr create` argument list.
+ *
+ * Returned as an array (not a shell string) to avoid injection through the
+ * title/body, and so callers/tests can verify the draft default.
+ */
+export function buildPrCreateArgs(options: PrCreateArgsOptions): string[] {
+  const args = ['pr', 'create', '--base', options.base];
+
+  if (options.upstreamRepo && options.originOwner) {
+    // For forks: --repo specifies where to create PR, --head specifies source
+    args.push(
+      '--repo',
+      options.upstreamRepo,
+      '--head',
+      `${options.originOwner}:${options.branchName}`
+    );
+  } else {
+    args.push('--head', options.branchName);
+  }
+
+  args.push('--title', options.title, '--body', options.body);
+
+  // Draft by default (see PrCreateArgsOptions.draft).
+  if (options.draft !== false) {
+    args.push('--draft');
+  }
+
+  return args;
+}
+
 export function createCreatePRHandler() {
   return async (req: Request, res: Response): Promise<void> => {
     try {
@@ -303,21 +352,17 @@ export function createCreatePRHandler() {
         // Only create a new PR if one doesn't already exist
         if (!prUrl) {
           try {
-            // Build gh pr create args as an array to avoid shell injection on
-            // title/body (backticks, $, \ were unsafe with string interpolation)
-            const prArgs = ['pr', 'create', '--base', base];
-
-            // If this is a fork (has upstream remote), specify the repo and head
-            if (upstreamRepo && originOwner) {
-              // For forks: --repo specifies where to create PR, --head specifies source
-              prArgs.push('--repo', upstreamRepo, '--head', `${originOwner}:${branchName}`);
-            } else {
-              // Not a fork, just specify the head branch
-              prArgs.push('--head', branchName);
-            }
-
-            prArgs.push('--title', title, '--body', body);
-            if (draft) prArgs.push('--draft');
+            // Draft unless the caller explicitly opted out, so an accidental
+            // merge is impossible until someone marks the PR ready.
+            const prArgs = buildPrCreateArgs({
+              base,
+              branchName,
+              title,
+              body,
+              upstreamRepo,
+              originOwner,
+              draft,
+            });
 
             logger.debug(`Creating PR with args: gh ${prArgs.join(' ')}`);
             const prResult = await spawnProcess({
@@ -425,6 +470,8 @@ export function createCreatePRHandler() {
           prNumber,
           prCreated: !!prUrl,
           prAlreadyExisted,
+          // Draft is the default; only an explicit `draft: false` opts out.
+          draft: draft !== false,
           prError: prError || undefined,
           browserUrl: browserUrl || undefined,
           ghCliAvailable,

@@ -55,7 +55,7 @@ describe('createApplyHandler', () => {
   it('applies default feature model and planning settings when backlog plan additions omit them', async () => {
     const settingsService = {
       getGlobalSettings: vi.fn().mockResolvedValue({
-        defaultFeatureModel: { model: 'codex-gpt-5.2-codex', reasoningEffort: 'high' },
+        defaultFeatureModel: { model: 'codex:gpt-5.2-codex', reasoningEffort: 'high' },
         defaultPlanningMode: 'spec',
         defaultRequirePlanApproval: true,
       }),
@@ -86,7 +86,7 @@ describe('createApplyHandler', () => {
     expect(mockCreate).toHaveBeenCalledWith(
       '/tmp/project',
       expect.objectContaining({
-        model: 'codex-gpt-5.2-codex',
+        model: 'codex:gpt-5.2-codex',
         reasoningEffort: 'high',
         planningMode: 'spec',
         requirePlanApproval: true,

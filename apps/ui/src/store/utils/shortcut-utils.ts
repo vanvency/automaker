@@ -78,6 +78,7 @@ export function formatShortcut(shortcut: string | undefined | null, forDisplay =
 
 // Default keyboard shortcuts
 export const DEFAULT_KEYBOARD_SHORTCUTS: KeyboardShortcuts = {
+  workBoard: 'W',
   // Navigation
   board: 'K',
   graph: 'H',

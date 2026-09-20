@@ -18,7 +18,7 @@ const SHELL_ASSETS = [
   '/logo.png',
   '/logo_larger.png',
   '/automaker.svg',
-  '/favicon.ico',
+  '/icon.ico',
 ];
 
 // Critical JS/CSS assets extracted from index.html at build time by the swCacheBuster
@@ -478,55 +478,24 @@ self.addEventListener('fetch', (event) => {
     return;
   }
 
-  // Strategy 3: Cache-first with background revalidation for navigation requests (HTML)
-  //
-  // The app shell (index.html) is a thin SPA entry point — its content rarely changes
-  // meaningfully between deploys because all JS/CSS bundles are content-hashed. Serving
-  // it from cache first eliminates the visible "reload flash" that occurs when the user
-  // switches back to the PWA and the old network-first strategy went to the network.
-  //
-  // The background revalidation ensures the cache stays fresh for the NEXT navigation,
-  // so new deployments are picked up within one page visit. Navigation Preload is used
-  // for the background fetch when available (no extra latency cost).
+  // HTML names the current hashed bundles: use the network when online so a
+  // refresh actually loads deployed fixes. Retain the shell for offline use.
   if (isNavigationRequest(event.request)) {
     event.respondWith(
       (async () => {
         const cache = await caches.open(CACHE_NAME);
         const cachedResponse = (await cache.match(event.request)) || (await cache.match('/'));
 
-        // Start a background fetch to update the cache for next time.
-        // Uses Navigation Preload if available (already in-flight, no extra cost).
-        const updateCache = async () => {
-          try {
-            const preloadResponse = event.preloadResponse && (await event.preloadResponse);
-            const freshResponse = preloadResponse || (await fetch(event.request));
-            if (freshResponse.ok && freshResponse.type === 'basic') {
-              await cache.put(event.request, freshResponse.clone());
-            }
-          } catch (_e) {
-            // Network failed — cache stays as-is, still fine for next visit
-          }
-        };
-
-        if (cachedResponse) {
-          // Serve from cache immediately — no network delay, no reload flash.
-          // Update cache in background for the next visit.
-          event.waitUntil(updateCache());
-          return cachedResponse;
-        }
-
-        // No cache yet (first visit) — must go to network
         try {
           const preloadResponse = event.preloadResponse && (await event.preloadResponse);
           const response = preloadResponse || (await fetch(event.request));
+          if (!response.ok && cachedResponse) return cachedResponse;
           if (response.ok && response.type === 'basic') {
-            // Use event.waitUntil to ensure the cache write completes before
-            // the service worker is terminated (mirrors the cached-path pattern).
-            event.waitUntil(cache.put(event.request, response.clone()));
+            event.waitUntil(cache.put(event.request, response.clone()).catch(() => {}));
           }
           return response;
         } catch (_e) {
-          return new Response('Offline', { status: 503 });
+          return cachedResponse || new Response('Offline', { status: 503 });
         }
       })()
     );

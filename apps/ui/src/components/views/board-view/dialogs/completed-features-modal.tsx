@@ -8,7 +8,8 @@ import {
 } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
 import { Card, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
-import { ArchiveRestore, Trash2 } from 'lucide-react';
+import { ArchiveRestore, Archive as Trash2 } from 'lucide-react';
+import { TaskArchiveDetails } from '../components/task-archive-details';
 import { Feature } from '@/store/app-store';
 import { extractImplementationSummary } from '@/lib/log-parser';
 import { getFirstNonEmptySummary } from '@/lib/summary-selection';
@@ -35,11 +36,11 @@ export function CompletedFeaturesModal({
         data-testid="completed-features-modal"
       >
         <DialogHeader>
-          <DialogTitle>Completed Features</DialogTitle>
+          <DialogTitle>Archived Tasks</DialogTitle>
           <DialogDescription>
             {completedFeatures.length === 0
-              ? 'No completed features yet.'
-              : `${completedFeatures.length} completed feature${
+              ? 'No archived tasks yet.'
+              : `${completedFeatures.length} archived task${
                   completedFeatures.length > 1 ? 's' : ''
                 }`}
           </DialogDescription>
@@ -48,7 +49,7 @@ export function CompletedFeaturesModal({
           {completedFeatures.length === 0 ? (
             <div className="text-center text-muted-foreground py-8">
               <ArchiveRestore className="w-12 h-12 mx-auto mb-4 opacity-50" />
-              <p>No completed features</p>
+              <p>No archived tasks</p>
             </div>
           ) : (
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
@@ -75,6 +76,9 @@ export function CompletedFeaturesModal({
                         {feature.category || 'Uncategorized'}
                       </CardDescription>
                     </CardHeader>
+                    <div className="px-3">
+                      <TaskArchiveDetails feature={feature} />
+                    </div>
                     <div className="p-3 pt-0 flex gap-2">
                       <Button
                         variant="secondary"
@@ -86,16 +90,18 @@ export function CompletedFeaturesModal({
                         <ArchiveRestore className="w-3 h-3 mr-1" />
                         Restore
                       </Button>
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        className="h-7 w-7 p-0 text-muted-foreground hover:text-destructive"
-                        onClick={() => onDelete(feature)}
-                        data-testid={`delete-completed-${feature.id}`}
-                        title="Delete"
-                      >
-                        <Trash2 className="w-4 h-4" />
-                      </Button>
+                      {!feature.archive && (
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          className="h-7 w-7 p-0 text-muted-foreground hover:text-destructive"
+                          onClick={() => onDelete(feature)}
+                          data-testid={`delete-completed-${feature.id}`}
+                          title="Archive Task"
+                        >
+                          <Trash2 className="w-4 h-4" />
+                        </Button>
+                      )}
                     </div>
                   </Card>
                 );

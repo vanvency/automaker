@@ -13,6 +13,7 @@ import {
   isOpencodeModel,
   isGeminiModel,
   isCopilotModel,
+  isPiModel,
   type ModelProvider,
 } from '@automaker/types';
 import * as fs from 'fs';
@@ -25,6 +26,7 @@ const DISCONNECTED_MARKERS: Record<string, string> = {
   opencode: '.opencode-disconnected',
   gemini: '.gemini-disconnected',
   copilot: '.copilot-disconnected',
+  pi: '.pi-disconnected',
 };
 
 /**
@@ -298,6 +300,7 @@ import { CodexProvider } from './codex-provider.js';
 import { OpencodeProvider } from './opencode-provider.js';
 import { GeminiProvider } from './gemini-provider.js';
 import { CopilotProvider } from './copilot-provider.js';
+import { PiProvider } from './pi-provider.js';
 
 // Register Claude provider
 registerProvider('claude', {
@@ -347,4 +350,14 @@ registerProvider('copilot', {
   aliases: ['github-copilot', 'github'],
   canHandleModel: (model: string) => isCopilotModel(model),
   priority: 6, // High priority - check before Codex since both can handle GPT models
+});
+
+// Register Pi provider (pi coding agent CLI backed by local LiteLLM)
+registerProvider('pi', {
+  factory: () => new PiProvider(),
+  aliases: ['pi-agent', 'pi-coding-agent'],
+  canHandleModel: (model: string) => isPiModel(model),
+  // Must win over OpenCode's dynamic "provider/model" matcher, which would
+  // otherwise claim "pi:litellm/auto".
+  priority: 7,
 });

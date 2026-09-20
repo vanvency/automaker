@@ -83,9 +83,10 @@ const KEYBOARD_ROWS = [
 
 // Map shortcut names to human-readable labels
 const SHORTCUT_LABELS: Record<keyof KeyboardShortcuts, string> = {
-  board: 'Kanban Board',
+  workBoard: 'Work Board',
+  board: 'Task Kanban',
   graph: 'Graph View',
-  agent: 'Agent Runner',
+  agent: 'Herdr',
   spec: 'Spec Editor',
   context: 'Context',
   memory: 'Memory',
@@ -113,6 +114,7 @@ const SHORTCUT_LABELS: Record<keyof KeyboardShortcuts, string> = {
 
 // Categorize shortcuts for color coding
 const SHORTCUT_CATEGORIES: Record<keyof KeyboardShortcuts, 'navigation' | 'ui' | 'action'> = {
+  workBoard: 'navigation',
   board: 'navigation',
   graph: 'navigation',
   agent: 'navigation',

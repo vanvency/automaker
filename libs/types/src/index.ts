@@ -58,18 +58,29 @@ export type {
 } from './codex-app-server.js';
 
 // Feature types
+export * from './jira-sync.js';
+export * from './task-consolidation.js';
+export * from './task-archive.js';
 export type {
   Feature,
+  AcceptanceEvidence,
+  ChangedProject,
+  JiraSubtask,
+  JiraWorkType,
   FeatureImagePath,
   FeatureTextFilePath,
   FeatureStatus,
   DescriptionHistoryEntry,
+  JiraChange,
   FeatureExport,
   FeatureImport,
   FeatureImportResult,
   ParsedTask,
   PlanSpec,
 } from './feature.js';
+
+// Feature hierarchy rules (parent/child cards), shared by the UI and the server
+export * from './feature-hierarchy.js';
 
 // Session types
 export type {
@@ -275,6 +286,9 @@ export * from './gemini-models.js';
 // Copilot types
 export * from './copilot-models.js';
 
+// Pi types
+export * from './pi-models.js';
+
 // Provider utilities
 export {
   PROVIDER_PREFIXES,
@@ -284,6 +298,7 @@ export {
   isOpencodeModel,
   isGeminiModel,
   isCopilotModel,
+  isPiModel,
   getModelProvider,
   stripProviderPrefix,
   addProviderPrefix,
@@ -366,6 +381,7 @@ export type {
 export { EVENT_HISTORY_VERSION, DEFAULT_EVENT_HISTORY_INDEX } from './event-history.js';
 
 // Worktree and PR types
+export type { WorktreePreview, WorktreePreviewResponse } from './worktree-preview.js';
 export type {
   PRState,
   WorktreePRInfo,
@@ -374,6 +390,14 @@ export type {
   AddRemoteResponse,
   AddRemoteErrorResponse,
   MergeStateInfo,
+  WorktreeProgressStage,
+  WorktreeProgressFeature,
+  WorktreeProgressTask,
+  WorktreeProgressCounts,
+  WorktreeProgressAttention,
+  WorktreeProgressCommit,
+  WorktreeProgressItem,
+  WorktreeProgressResponse,
 } from './worktree.js';
 export { PR_STATES, validatePRState } from './worktree.js';
 

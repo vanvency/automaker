@@ -6,6 +6,8 @@ import { AlertCircle, Lock, Hand, Sparkles, FileText, FileCheck } from 'lucide-r
 import type { Feature } from '@/store/app-store';
 import { RowActions, type RowActionHandlers } from './row-actions';
 import { getColumnWidth, getColumnAlign } from './list-header';
+import { JiraTypeBadge } from '../jira-type-badge';
+import { JiraReleaseBadges } from '../jira-release-badges';
 
 export interface ListRowProps {
   /** The feature to display */
@@ -24,6 +26,8 @@ export interface ListRowProps {
   onClick?: () => void;
   /** Blocking dependency feature IDs */
   blockingDependencies?: string[];
+  /** Auto-decomposed children merged into this row's parent card */
+  childSummary?: { total: number; completed: number };
   /** Additional className for custom styling */
   className?: string;
 }
@@ -217,6 +221,7 @@ export const ListRow = memo(function ListRow({
   onToggleSelect,
   onClick,
   blockingDependencies = [],
+  childSummary,
   className,
 }: ListRowProps) {
   // A row should display as "actively running" if it's in the runningAutoTasks list
@@ -326,14 +331,39 @@ export const ListRow = memo(function ListRow({
               isCurrentAutoTask={isCurrentAutoTask}
             />
           </div>
-          {/* Show description as subtitle if title exists and is different */}
-          {feature.title && feature.title !== feature.description && (
-            <p
-              className="text-xs text-muted-foreground truncate mt-0.5"
-              title={feature.description}
-            >
-              {feature.description}
-            </p>
+          {/* Jira cards: show the issue metadata instead of the raw agent prompt,
+              which is what `description` holds for dispatched features. */}
+          {feature.jiraKey ? (
+            <div className="mt-0.5 flex items-center gap-1.5 flex-wrap">
+              <JiraTypeBadge
+                type={typeof feature.jiraType === 'string' ? feature.jiraType : undefined}
+                data-testid={`list-jira-type-${feature.id}`}
+              />
+              <span className="font-mono text-[10px] text-muted-foreground">{feature.jiraKey}</span>
+              <JiraReleaseBadges
+                labels={Array.isArray(feature.jiraLabels) ? feature.jiraLabels : undefined}
+                data-testid={`list-jira-releases-${feature.id}`}
+              />
+              {childSummary && (
+                <span
+                  className="inline-flex shrink-0 items-center rounded border border-border bg-secondary/60 px-1 py-px text-[10px] text-muted-foreground"
+                  title="自动拆分的子任务已合并进这张卡片，状态在卡片详情里"
+                  data-testid={`list-child-summary-${feature.id}`}
+                >
+                  子任务 {childSummary.total} · {childSummary.completed}/{childSummary.total} 已完成
+                </span>
+              )}
+            </div>
+          ) : (
+            feature.title &&
+            feature.title !== feature.description && (
+              <p
+                className="text-xs text-muted-foreground truncate mt-0.5"
+                title={feature.description}
+              >
+                {feature.description}
+              </p>
+            )
           )}
         </div>
       </div>

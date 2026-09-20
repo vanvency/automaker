@@ -57,7 +57,7 @@ describe('running-agents routes', () => {
           projectPath: '/home/user/other-project',
           projectName: 'other-project',
           isAutoMode: false,
-          model: 'codex-gpt-5.1',
+          model: 'codex:gpt-5.1',
           provider: 'codex',
           title: 'Fix navigation bug',
           description: undefined,
@@ -185,7 +185,7 @@ describe('running-agents routes', () => {
           projectPath: '/workspace/project-beta',
           projectName: 'project-beta',
           isAutoMode: false,
-          model: 'codex-gpt-5.1',
+          model: 'codex:gpt-5.1',
           provider: 'codex',
           title: 'Feature B',
           description: 'In project beta',
@@ -222,7 +222,7 @@ describe('running-agents routes', () => {
           projectPath: '/project',
           projectName: 'project',
           isAutoMode: false,
-          model: 'codex-gpt-5.1',
+          model: 'codex:gpt-5.1',
           provider: 'codex',
           title: 'Codex Feature',
           description: 'Using Codex model',
@@ -232,7 +232,7 @@ describe('running-agents routes', () => {
           projectPath: '/project',
           projectName: 'project',
           isAutoMode: false,
-          model: 'cursor-auto',
+          model: 'cursor:auto',
           provider: 'cursor',
           title: 'Cursor Feature',
           description: 'Using Cursor model',
@@ -249,9 +249,9 @@ describe('running-agents routes', () => {
       const response = vi.mocked(res.json).mock.calls[0][0];
       expect(response.runningAgents[0].model).toBe('claude-sonnet-4-20250514');
       expect(response.runningAgents[0].provider).toBe('claude');
-      expect(response.runningAgents[1].model).toBe('codex-gpt-5.1');
+      expect(response.runningAgents[1].model).toBe('codex:gpt-5.1');
       expect(response.runningAgents[1].provider).toBe('codex');
-      expect(response.runningAgents[2].model).toBe('cursor-auto');
+      expect(response.runningAgents[2].model).toBe('cursor:auto');
       expect(response.runningAgents[2].provider).toBe('cursor');
     });
   });

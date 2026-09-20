@@ -185,6 +185,11 @@ export interface TerminalSession {
   cwd: string;
   createdAt: Date;
   shell: string;
+  /**
+   * Stable caller-supplied key used to reuse a session instead of spawning a
+   * second process (for example one herdr attach per worktree session).
+   */
+  key: string | null;
   scrollbackBuffer: string; // Store recent output for replay on reconnect
   outputBuffer: string; // Pending output to be flushed
   flushTimeout: NodeJS.Timeout | null; // Throttle timer
@@ -195,9 +200,28 @@ export interface TerminalSession {
 export interface TerminalOptions {
   cwd?: string;
   shell?: string;
+  /**
+   * Explicit executable to run instead of a shell.
+   *
+   * Only server-side code may set this: it bypasses shell detection and the
+   * terminal prompt configuration, and the value is spawned verbatim.
+   */
+  command?: string;
+  /** Arguments for `command`. Ignored unless `command` is set. */
+  args?: string[];
   cols?: number;
   rows?: number;
   env?: Record<string, string>;
+  /**
+   * Environment variable names to drop from the inherited process environment.
+   *
+   * Nested tooling (herdr, agent CLIs) reads its own control variables from the
+   * environment, so a session that starts such a tool must not inherit the
+   * caller's context.
+   */
+  envExcludeKeys?: string[];
+  /** Reuse key - an existing live session with the same key is returned as-is. */
+  key?: string;
 }
 
 type DataCallback = (sessionId: string, data: string) => void;
@@ -439,11 +463,30 @@ export class TerminalService extends EventEmitter {
       return null;
     }
 
+    // Reuse an existing live session when the caller supplied a key. This keeps
+    // idempotent entry points (for example "attach to this worktree's herdr
+    // session") from stacking a second client process on every click.
+    if (options.key) {
+      const existing = this.getSessionByKey(options.key);
+      if (existing) {
+        logger.info(`Reusing session ${existing.id} for key ${options.key}`);
+        return existing;
+      }
+    }
+
     const id = `term-${Date.now()}-${Math.random().toString(36).slice(2, 11)}`;
 
     const { shell: detectedShell, args: detectedShellArgs } = this.detectShell();
-    const shell = options.shell || detectedShell;
-    let shellArgs = options.shell ? getShellArgsForPath(shell) : [...detectedShellArgs];
+    // Explicit command sessions (herdr, custom agents) run the binary directly
+    // instead of going through the user's login shell.
+    const explicitCommand = options.command?.trim();
+    const isCommandSession = !!explicitCommand;
+    const shell = explicitCommand || options.shell || detectedShell;
+    let shellArgs = isCommandSession
+      ? [...(options.args ?? [])]
+      : options.shell
+        ? getShellArgsForPath(shell)
+        : [...detectedShellArgs];
 
     // Validate and resolve working directory
     // Uses secureFs internally to enforce ALLOWED_ROOT_DIRECTORY
@@ -461,9 +504,10 @@ export class TerminalService extends EventEmitter {
       }
     }
 
-    // Terminal config injection (custom prompts, themes)
+    // Terminal config injection (custom prompts, themes). Command sessions are
+    // not shells, so the shell-specific RC injection below does not apply.
     const terminalConfigEnv: Record<string, string> = {};
-    if (this.settingsService) {
+    if (!isCommandSession && this.settingsService) {
       try {
         logger.info(
           `[createSession] Checking terminal config for session ${id}, cwd: ${options.cwd || cwd}`
@@ -544,8 +588,15 @@ export class TerminalService extends EventEmitter {
       }
     }
 
+    // Callers that start nested tooling can drop control variables that would
+    // otherwise leak their own context into the new session.
+    const inheritedEnv = { ...cleanEnv };
+    for (const excludedKey of options.envExcludeKeys ?? []) {
+      delete inheritedEnv[excludedKey];
+    }
+
     const env: Record<string, string> = {
-      ...cleanEnv,
+      ...inheritedEnv,
       TERM: 'xterm-256color',
       COLORTERM: 'truecolor',
       TERM_PROGRAM: 'automaker-terminal',
@@ -556,7 +607,9 @@ export class TerminalService extends EventEmitter {
       ...terminalConfigEnv, // Apply terminal config env vars last (highest priority)
     };
 
-    logger.info(`Creating session ${id} with shell: ${shell} in ${cwd}`);
+    logger.info(
+      `Creating session ${id} with ${isCommandSession ? 'command' : 'shell'}: ${shell} in ${cwd}`
+    );
 
     // Build PTY spawn options
     const ptyOptions: pty.IPtyForkOptions = {
@@ -619,6 +672,7 @@ export class TerminalService extends EventEmitter {
       cwd,
       createdAt: new Date(),
       shell,
+      key: options.key ?? null,
       scrollbackBuffer: '',
       outputBuffer: '',
       flushTimeout: null,
@@ -798,6 +852,16 @@ export class TerminalService extends EventEmitter {
    */
   getSession(sessionId: string): TerminalSession | undefined {
     return this.sessions.get(sessionId);
+  }
+
+  /**
+   * Get a live session by its caller-supplied reuse key
+   */
+  getSessionByKey(key: string): TerminalSession | undefined {
+    for (const session of this.sessions.values()) {
+      if (session.key === key) return session;
+    }
+    return undefined;
   }
 
   /**

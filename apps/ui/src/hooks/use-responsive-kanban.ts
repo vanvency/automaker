@@ -15,10 +15,10 @@ export interface ResponsiveKanbanConfig {
  */
 const DEFAULT_CONFIG: ResponsiveKanbanConfig = {
   columnWidth: 320, // Increased from 288px to accommodate longer column titles
-  columnMinWidth: 320, // Increased from 280px to prevent title overflow
+  columnMinWidth: 170, // Fit five lanes on laptop screens; scroll on smaller screens
   columnMaxWidth: Infinity, // No max width - columns scale evenly to fill viewport
-  gap: 20, // gap-5 = 20px
-  padding: 40, // px-5 on both sides = 40px (matches gap between columns)
+  gap: 12,
+  padding: 24, // px-3 on both sides
 };
 
 // Sidebar transition duration (matches sidebar.tsx)
@@ -69,7 +69,7 @@ export function useResponsiveKanban(
       // The flex layout already accounts for sidebar width, so we use the container's actual width
       let width = containerWidth;
       if (width === undefined) {
-        const boardContainer = document.querySelector('[data-testid="board-view"]')?.parentElement;
+        const boardContainer = document.querySelector('[data-testid="kanban-scroll-container"]');
         width = boardContainer ? boardContainer.clientWidth : window.innerWidth;
       }
 
@@ -129,15 +129,14 @@ export function useResponsiveKanban(
 
     // Use ResizeObserver on the actual board container for precise updates
     let resizeObserver: ResizeObserver | null = null;
-    const boardView = document.querySelector('[data-testid="board-view"]');
-    const container = boardView?.parentElement;
+    const container = document.querySelector('[data-testid="kanban-scroll-container"]');
 
     if (container && typeof ResizeObserver !== 'undefined') {
       resizeObserver = new ResizeObserver((entries) => {
         // Use the observed container's width for calculation
         const entry = entries[0];
         if (entry) {
-          const containerWidth = entry.contentRect.width;
+          const containerWidth = container.clientWidth;
           const newWidth = calculateColumnWidth(containerWidth);
           setColumnWidth(newWidth);
         }

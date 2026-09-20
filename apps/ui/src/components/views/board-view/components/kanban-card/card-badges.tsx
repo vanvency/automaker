@@ -112,6 +112,17 @@ export const PriorityBadges = memo(function PriorityBadges({
     return getBlockingDependencies(feature, features);
   }, [enableDependencyBlocking, feature, features]);
 
+  const dependencyCount = feature.dependencies?.length ?? 0;
+  const satisfiedDependencies = useMemo(
+    () =>
+      (feature.dependencies ?? []).filter((depId) => {
+        const dep = features.find((f) => f.id === depId);
+        return dep?.status === 'completed' || dep?.status === 'verified';
+      }).length,
+    [feature.dependencies, features]
+  );
+  const hasDependencies = dependencyCount > 0;
+
   const isJustFinished = useMemo(() => {
     if (!feature.justFinishedAt || feature.status !== 'waiting_approval' || feature.error) {
       return false;
@@ -161,6 +172,7 @@ export const PriorityBadges = memo(function PriorityBadges({
     feature.priority ||
     showManualVerification ||
     isBlocked ||
+    hasDependencies ||
     isJustFinished ||
     hasPipelineExclusions ||
     showPlanApproval;
@@ -220,6 +232,35 @@ export const PriorityBadges = memo(function PriorityBadges({
           </TooltipTrigger>
           <TooltipContent side="bottom" className="text-xs">
             <p>Manual verification required</p>
+          </TooltipContent>
+        </Tooltip>
+      )}
+
+      {/* Dependency badge */}
+      {hasDependencies && !isBlocked && (
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <div
+              className={cn(uniformBadgeClass, 'bg-muted border-border text-muted-foreground')}
+              data-testid={`dependency-badge-${feature.id}`}
+            >
+              <span className="text-[10px] font-semibold leading-none">
+                {satisfiedDependencies}/{dependencyCount}
+              </span>
+            </div>
+          </TooltipTrigger>
+          <TooltipContent side="bottom" className="text-xs max-w-[250px]">
+            <p className="font-medium mb-1">
+              Dependencies {satisfiedDependencies}/{dependencyCount} complete
+            </p>
+            <p className="text-muted-foreground">
+              {(feature.dependencies ?? [])
+                .map((depId) => {
+                  const dep = features.find((f) => f.id === depId);
+                  return dep?.title || dep?.description || depId;
+                })
+                .join(' → ')}
+            </p>
           </TooltipContent>
         </Tooltip>
       )}

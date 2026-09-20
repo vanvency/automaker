@@ -155,8 +155,8 @@ describe('PhaseModelSelector - useShallow Selector Behavior', () => {
     it('should return all required state values from the selector', () => {
       mockUseAppStore.mockImplementation((selector?: unknown) => {
         const mockState = createMockStoreState({
-          enabledCursorModels: ['cursor-small'],
-          enabledGeminiModels: ['gemini-flash'],
+          enabledCursorModels: ['cursor:small'],
+          enabledGeminiModels: ['gemini:flash'],
           enabledCopilotModels: ['gpt-4o'],
           enabledDynamicModelIds: ['custom-model-1'],
           defaultThinkingLevel: 'medium',
@@ -184,8 +184,8 @@ describe('PhaseModelSelector - useShallow Selector Behavior', () => {
       expect(result).toHaveProperty('defaultReasoningEffort');
 
       // Verify values
-      expect(result.enabledCursorModels).toEqual(['cursor-small']);
-      expect(result.enabledGeminiModels).toEqual(['gemini-flash']);
+      expect(result.enabledCursorModels).toEqual(['cursor:small']);
+      expect(result.enabledGeminiModels).toEqual(['gemini:flash']);
       expect(result.enabledCopilotModels).toEqual(['gpt-4o']);
       expect(result.enabledDynamicModelIds).toEqual(['custom-model-1']);
     });

@@ -33,7 +33,6 @@ describe('AgentOutputModal Integration Tests', () => {
   const defaultProps = {
     open: true,
     onClose: vi.fn(),
-    featureDescription: 'Implement a responsive navigation menu',
     featureId: 'feature-test-123',
     featureStatus: 'running',
   };
@@ -160,11 +159,11 @@ Successfully implemented a responsive navigation menu with hamburger menu for mo
   });
 
   describe('Content Display', () => {
-    it('should display feature description', () => {
+    it('keeps task details out of the logs dialog', () => {
       render(<AgentOutputModal {...defaultProps} />);
 
-      const description = screen.getByTestId('agent-output-description');
-      expect(description).toHaveTextContent('Implement a responsive navigation menu');
+      // The description belongs to the card details dialog; Logs only shows runs.
+      expect(screen.queryByTestId('agent-output-description')).not.toBeInTheDocument();
     });
 
     it('should show loading state when output is loading', () => {
@@ -355,7 +354,11 @@ Successfully implemented a responsive navigation menu with hamburger menu for mo
       const projectPath = '/custom/project/path';
       render(<AgentOutputModal {...defaultProps} projectPath={projectPath} />);
 
-      expect(screen.getByText('Implement a responsive navigation menu')).toBeInTheDocument();
+      expect(mockUseFeature).toHaveBeenCalledWith(
+        projectPath,
+        defaultProps.featureId,
+        expect.anything()
+      );
     });
 
     it('should fallback to window.__currentProject when projectPath is not provided', () => {
@@ -363,10 +366,57 @@ Successfully implemented a responsive navigation menu with hamburger menu for mo
       try {
         window.__currentProject = { path: '/fallback/project' };
         render(<AgentOutputModal {...defaultProps} />);
-        expect(screen.getByText('Implement a responsive navigation menu')).toBeInTheDocument();
+        expect(mockUseFeature).toHaveBeenCalledWith(
+          '/fallback/project',
+          defaultProps.featureId,
+          expect.anything()
+        );
       } finally {
         window.__currentProject = previousProject;
       }
+    });
+  });
+
+  describe('Timeline', () => {
+    it('merges resident sessions and one-shot calls when the tab is opened', async () => {
+      mockGetElectronAPI.mockReturnValue({
+        features: {
+          timeline: vi.fn().mockResolvedValue({
+            success: true,
+            entries: [
+              {
+                id: 'session:resident',
+                kind: 'session',
+                at: '2026-09-19T14:00:00.000Z',
+                title: '常驻会话 · litellm/worker',
+                model: 'litellm/worker',
+                turns: 8,
+                status: 'ok',
+              },
+              {
+                id: 'session:oneshot',
+                kind: 'one-shot',
+                at: '2026-09-19T15:00:00.000Z',
+                title: '一次性调用：Generate a commit message',
+                model: 'litellm/auto',
+                turns: 1,
+                status: 'ok',
+              },
+            ],
+          }),
+        },
+      } as never);
+
+      render(<AgentOutputModal {...defaultProps} projectPath="/tmp/project" />);
+      await act(async () => {
+        fireEvent.click(screen.getByTestId('view-mode-timeline'));
+      });
+
+      await waitFor(() => {
+        expect(screen.getByTestId('timeline-entry-session')).toBeInTheDocument();
+      });
+      expect(screen.getByTestId('timeline-entry-one-shot')).toBeInTheDocument();
+      expect(screen.getByText('常驻会话 · litellm/worker')).toBeInTheDocument();
     });
   });
 

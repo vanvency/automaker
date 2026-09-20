@@ -92,8 +92,8 @@ export function CursorModelConfiguration({
           <div className="grid gap-3">
             {availableModels.map((model) => {
               const isEnabled = enabledCursorModels.includes(model.id);
-              // With canonical IDs, 'auto' becomes 'cursor-auto'
-              const isAuto = model.id === 'cursor-auto';
+              // With canonical IDs, 'auto' becomes 'cursor:auto'
+              const isAuto = model.id === 'cursor:auto';
 
               return (
                 <div

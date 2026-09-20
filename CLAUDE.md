@@ -155,6 +155,28 @@ Each feature executes in an isolated git worktree, created via `@automaker/git-u
 
 Project-specific rules are stored in `.automaker/context/` and automatically loaded into agent prompts via `loadContextFiles()` from `@automaker/utils`.
 
+### Pull Requests / Merge Requests
+
+**Every PR/MR is opened as a draft** so it can never be merged by accident:
+
+- Automaker's Create PR flow defaults to draft (`buildPrCreateArgs` adds `--draft` unless the caller passes `draft: false`); the dialog has "Create as draft" checked by default.
+- When creating one by hand, always use `gh pr create --draft`. For GitLab, add `-o merge_request.draft` to the push options and prefix the title with `Draft:`.
+- Never mark a PR/MR ready for review and never enable auto-merge on an agent-created PR; only a human does that.
+
+### Done Lane Delivery Conflicts
+
+A verified card stays in Done until its merge requests can actually be merged, so a
+conflict there is a fixable state rather than a dead end:
+
+- `POST /api/features/mr-conflicts` reports the conflicting MRs of one card (GitLab
+  `has_conflicts`, read only from the project's configured GitLab host).
+- The Done card renders them with a "让 Agent 修复冲突" button;
+  `POST /api/features/resolve-conflicts` dispatches one agent turn per owning task
+  (`findConflictOwner`) with `buildConflictResolutionPrompt`, which forbids merging
+  the MRs or touching other repositories.
+- The Complete preview returns `conflicts` separately from `blockers`, and Complete
+  stays disabled while conflicts exist.
+
 ### Model Resolution
 
 Use `resolveModelString()` from `@automaker/model-resolver` to convert model aliases:

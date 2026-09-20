@@ -93,7 +93,7 @@ components/views/
 
 Code that is used across **multiple views**:
 
-- `src/hooks/use-auto-mode.ts` - Used by board-view, agent-view, etc.
+- `src/hooks/use-auto-mode.ts` - Used by board-view, graph-view, etc.
 - `src/hooks/use-keyboard-shortcuts.ts` - Used across the app
 - `src/lib/utils.ts` - Global utilities
 

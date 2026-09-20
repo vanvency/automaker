@@ -6,12 +6,21 @@ import { Card, CardContent, CardTitle } from '@/components/ui/card';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Feature, useAppStore } from '@/store/app-store';
 import { useShallow } from 'zustand/react/shallow';
-import { ExternalLink } from 'lucide-react';
+import { Copy, ExternalLink } from 'lucide-react';
+import { toast } from 'sonner';
+import { writeToClipboard } from '@/lib/clipboard-utils';
 import { CardBadges, PriorityBadges } from './card-badges';
 import { CardHeaderSection } from './card-header';
 import { CardContentSections } from './card-content-sections';
+import { CardDetailsDialog } from './card-details-dialog';
+import { AcceptanceEvidenceDialog } from '../acceptance-evidence';
+import { ChildTaskSummary } from './child-task-summary';
+import { JiraTypeBadge } from '../jira-type-badge';
+import { JiraReleaseBadges } from '../jira-release-badges';
 import { AgentInfoPanel } from './agent-info-panel';
 import { CardActions } from './card-actions';
+import { HerdrStatusBadge } from './herdr-status-badge';
+import { MrConflictNotice } from './mr-conflict-notice';
 
 function getCardBorderStyle(enabled: boolean, opacity: number): React.CSSProperties {
   if (!enabled) {
@@ -39,20 +48,29 @@ function getCursorClass(
 
 interface KanbanCardProps {
   feature: Feature;
+  /**
+   * Full, unfiltered feature list for the project. The board passes it down so
+   * parent cards can list their (filtered-out) children; the store copy is only
+   * a fallback because it is not always hydrated.
+   */
+  allFeatures?: Feature[];
   onEdit: () => void;
   onDelete: () => void;
   onViewOutput?: () => void;
-  onOpenWeb?: () => void;
+  onOpenHerdr?: () => void;
+  onLocateFeature?: (featureId: string) => void;
   onVerify?: () => void;
   onResume?: () => void;
   onForceStop?: () => void;
   onManualVerify?: () => void;
   onMoveBackToInProgress?: () => void;
   onFollowUp?: () => void;
+  onRequestChanges?: () => void;
   onImplement?: () => void;
   onComplete?: () => void;
   onViewPlan?: () => void;
   onApprovePlan?: () => void;
+  /** Current OpenCode session user-turn count, if resolved for this card. */
   onSpawnTask?: () => void;
   onDuplicate?: () => void;
   onDuplicateAsChild?: () => void;
@@ -77,16 +95,19 @@ interface KanbanCardProps {
 
 export const KanbanCard = memo(function KanbanCard({
   feature,
+  allFeatures: allFeaturesProp,
   onEdit,
   onDelete,
   onViewOutput,
-  onOpenWeb,
+  onOpenHerdr,
+  onLocateFeature,
   onVerify,
   onResume,
   onForceStop,
   onManualVerify,
   onMoveBackToInProgress: _onMoveBackToInProgress,
   onFollowUp,
+  onRequestChanges,
   onImplement,
   onComplete,
   onViewPlan,
@@ -111,12 +132,22 @@ export const KanbanCard = memo(function KanbanCard({
   onToggleSelect,
   selectionTarget = null,
 }: KanbanCardProps) {
-  const { useWorktrees, currentProject } = useAppStore(
+  const [isDetailsOpen, setIsDetailsOpen] = useState(false);
+  const [isEvidenceOpen, setIsEvidenceOpen] = useState(false);
+  const {
+    useWorktrees,
+    currentProject,
+    features: storeFeatures,
+  } = useAppStore(
     useShallow((state) => ({
       useWorktrees: state.useWorktrees,
       currentProject: state.currentProject,
+      features: state.features,
     }))
   );
+
+  // Prefer the board-provided list: the store copy is not always hydrated.
+  const allFeatures = allFeaturesProp ?? storeFeatures;
   // A card should display as "actively running" if it's in the runningAutoTasks list
   // AND in an execution-compatible status. However, there's a race window where a feature
   // is tracked as running (in runningAutoTasks) but its disk/UI status hasn't caught up yet
@@ -215,6 +246,16 @@ export const KanbanCard = memo(function KanbanCard({
   const isInteractive = !isDragging && !isOverlay;
   const hasError = feature.error && !isCurrentAutoTask;
 
+  // Jira metadata (type, release labels) is rendered in its own row.
+  const hasJiraMetadata =
+    (typeof feature.jiraType === 'string' && feature.jiraType.length > 0) ||
+    (Array.isArray(feature.jiraLabels) &&
+      feature.jiraLabels.some((label) => String(label).toLowerCase().startsWith('release-'))) ||
+    // A Jira card without a release label still shows the 待定 priority badge.
+    (typeof feature.jiraKey === 'string' && feature.jiraKey.length > 0);
+
+  // Subtask cards exist for this parent: the child summary is the block to show.
+
   // Jira links come from the dispatched feature (jiraKey/jiraUrl); fall back to
   // the default Jira host when only the issue key is present.
   const jiraKey = typeof feature.jiraKey === 'string' ? feature.jiraKey : undefined;
@@ -241,18 +282,24 @@ export const KanbanCard = memo(function KanbanCard({
   );
 
   const handleCardClick = (e: React.MouseEvent) => {
+    // Portalled dialogs are React descendants but are not part of the card face.
+    if (!e.currentTarget.contains(e.target as Node)) return;
     if (isSelectable && onToggleSelect) {
       e.preventDefault();
       e.stopPropagation();
       onToggleSelect();
+      return;
     }
+    // The card face is the task overview: a click opens details, the pencil in
+    // the header is what opens the edit form.
+    e.stopPropagation();
+    setIsDetailsOpen(true);
   };
 
   const renderCardContent = () => (
     <Card
       style={showRunningVisuals ? undefined : cardStyle}
       className={innerCardClasses}
-      onDoubleClick={isSelectionMode ? undefined : onEdit}
       onClick={handleCardClick}
     >
       {/* Background overlay with opacity */}
@@ -282,28 +329,70 @@ export const KanbanCard = memo(function KanbanCard({
         </CardTitle>
       </div>
 
-      {/* Category row with Jira link */}
+      {/* Jira metadata row: type, release labels and the issue link. The
+          category (`Jira AIP / dodo`) is dropped here: the type badge already
+          says what kind of work it is, and the queue label lives in the board. */}
       <div className="px-3 pt-1.5 flex items-center gap-2 flex-wrap">
-        <span className="text-[11px] text-muted-foreground/70 font-medium">{feature.category}</span>
+        {hasJiraMetadata && (
+          <>
+            <JiraTypeBadge
+              type={typeof feature.jiraType === 'string' ? feature.jiraType : undefined}
+              data-testid={`jira-type-${feature.id}`}
+            />
+            <JiraReleaseBadges
+              labels={Array.isArray(feature.jiraLabels) ? feature.jiraLabels : undefined}
+              data-testid={`jira-releases-${feature.id}`}
+            />
+          </>
+        )}
         {jiraHref && (
-          <a
-            href={jiraHref}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="inline-flex items-center gap-1 text-[11px] font-medium text-brand-500 hover:underline"
-            onClick={(e) => e.stopPropagation()}
-            onPointerDown={(e) => e.stopPropagation()}
-            data-testid={`jira-link-${feature.id}`}
-            title={`Open ${jiraLabel} in Jira`}
-          >
-            {jiraLabel}
-            <ExternalLink className="w-3 h-3" />
-          </a>
+          <>
+            <a
+              href={jiraHref}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-flex items-center gap-1 text-[11px] font-medium text-brand-500 hover:underline"
+              onClick={(e) => e.stopPropagation()}
+              onPointerDown={(e) => e.stopPropagation()}
+              data-testid={`jira-link-${feature.id}`}
+              title={`Open ${jiraLabel} in Jira`}
+            >
+              {jiraLabel}
+              <ExternalLink className="w-3 h-3" />
+            </a>
+            <button
+              type="button"
+              className="inline-flex items-center justify-center h-4 w-4 rounded text-muted-foreground/60 hover:text-foreground hover:bg-muted"
+              onClick={async (e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                const copied = await writeToClipboard(jiraKey || jiraLabel);
+                if (copied) {
+                  toast.success(`${jiraKey || jiraLabel} copied`);
+                } else {
+                  toast.error('Failed to copy Jira ID');
+                }
+              }}
+              onPointerDown={(e) => e.stopPropagation()}
+              data-testid={`jira-copy-${feature.id}`}
+              title={`Copy ${jiraLabel} to clipboard`}
+              aria-label={`Copy ${jiraLabel} to clipboard`}
+            >
+              <Copy className="w-3 h-3" aria-hidden="true" />
+            </button>
+          </>
         )}
       </div>
 
       {/* Priority and Manual Verification badges */}
       <PriorityBadges feature={feature} projectPath={currentProject?.path} />
+
+      {/* Live leader/worker state when this feature runs in the shared herdr session */}
+      {currentProject?.path && (
+        <div className="absolute top-2 right-2 z-10">
+          <HerdrStatusBadge projectPath={currentProject.path} featureId={feature.id} />
+        </div>
+      )}
 
       {/* Card Header */}
       <CardHeaderSection
@@ -319,13 +408,30 @@ export const KanbanCard = memo(function KanbanCard({
         onDuplicate={onDuplicate}
         onDuplicateAsChild={onDuplicateAsChild}
         onDuplicateAsChildMultiple={onDuplicateAsChildMultiple}
+        onOpenDetails={() => setIsDetailsOpen(true)}
         dragHandleListeners={isDraggable ? listeners : undefined}
         dragHandleAttributes={isDraggable ? attributes : undefined}
       />
 
       <CardContent className="px-3 pt-0 pb-0">
-        {/* Content Sections */}
-        <CardContentSections feature={feature} useWorktrees={useWorktrees} />
+        {/* Done lane: a verified card whose delivery merge requests conflict cannot
+            be completed until an agent resolves them, so the fix is offered here. */}
+        {feature.status === 'verified' && currentProject?.path && (
+          <MrConflictNotice projectPath={currentProject.path} featureId={feature.id} />
+        )}
+
+        {/* Content Sections. Long material (full description, every goal, the
+            Jira records, changed projects and evidence) lives in the details
+            dialog so one verbose card cannot stretch the whole column. */}
+        <CardContentSections feature={feature} onOpenDetails={() => setIsDetailsOpen(true)} />
+
+        {/* Parent task child execution summary: this is live progress, so it
+            stays on the card face. */}
+        <ChildTaskSummary
+          feature={feature}
+          allFeatures={allFeatures}
+          onLocateChild={onLocateFeature}
+        />
 
         {/* Agent Info Panel */}
         <AgentInfoPanel
@@ -344,20 +450,43 @@ export const KanbanCard = memo(function KanbanCard({
           hasContext={hasContext}
           shortcutKey={shortcutKey}
           isSelectionMode={isSelectionMode}
-          onEdit={onEdit}
           onViewOutput={onViewOutput}
-          onOpenWeb={onOpenWeb}
+          onOpenHerdr={onOpenHerdr}
           onVerify={onVerify}
           onResume={onResume}
           onForceStop={onForceStop}
           onManualVerify={onManualVerify}
           onFollowUp={onFollowUp}
+          onRequestChanges={onRequestChanges}
           onImplement={onImplement}
           onComplete={onComplete}
           onViewPlan={onViewPlan}
           onApprovePlan={onApprovePlan}
+          onViewAcceptance={() => setIsEvidenceOpen(true)}
         />
       </CardContent>
+
+      <AcceptanceEvidenceDialog
+        evidence={feature.acceptanceEvidence}
+        projectPath={currentProject?.path ?? ''}
+        open={isEvidenceOpen}
+        onOpenChange={setIsEvidenceOpen}
+        onConfirm={
+          ['waiting_approval', 'verified'].includes(feature.status) && !isActivelyRunning
+            ? onManualVerify
+            : undefined
+        }
+      />
+
+      {/* One place for everything that is too long for the card face. */}
+      <CardDetailsDialog
+        feature={feature}
+        isOpen={isDetailsOpen}
+        onOpenChange={setIsDetailsOpen}
+        projectPath={currentProject?.path}
+        allFeatures={allFeatures ?? []}
+        onLocateChild={onLocateFeature}
+      />
     </Card>
   );
 

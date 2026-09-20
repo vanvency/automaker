@@ -7,8 +7,10 @@ import type { EventEmitter } from '../../lib/events.js';
 import { validatePathParams } from '../../middleware/validate-paths.js';
 import { requireValidWorktree, requireValidProject, requireGitRepoOnly } from './middleware.js';
 import { createInfoHandler } from './routes/info.js';
+import { createPreviewHandler } from './routes/preview.js';
 import { createStatusHandler } from './routes/status.js';
 import { createListHandler } from './routes/list.js';
+import { createWorktreeProgressHandler } from './routes/progress.js';
 import { createDiffsHandler } from './routes/diffs.js';
 import { createFileDiffHandler } from './routes/file-diff.js';
 import { createMergeHandler } from './routes/merge.js';
@@ -80,10 +82,23 @@ export function createWorktreeRoutes(
 ): Router {
   const router = Router();
 
+  for (const action of ['status', 'start', 'stop'] as const) {
+    router.post(
+      `/preview-${action}`,
+      validatePathParams('projectPath', 'worktreePath'),
+      createPreviewHandler(action)
+    );
+  }
+
   router.post('/info', validatePathParams('projectPath'), createInfoHandler());
   router.post('/status', validatePathParams('projectPath'), createStatusHandler());
   router.post('/list', createListHandler());
-  router.post('/diffs', validatePathParams('projectPath'), createDiffsHandler());
+  router.post(
+    '/progress',
+    validatePathParams('projectPath'),
+    createWorktreeProgressHandler(featureLoader)
+  );
+  router.post('/diffs', validatePathParams('projectPath'), createDiffsHandler(featureLoader));
   router.post('/file-diff', validatePathParams('projectPath', 'filePath'), createFileDiffHandler());
   router.post(
     '/merge',

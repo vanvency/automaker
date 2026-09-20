@@ -28,6 +28,7 @@ import {
   isOpencodeModel,
   isCopilotModel,
   isGeminiModel,
+  isPiModel,
   stripProviderPrefix,
   migrateModelId,
   type PhaseModelEntry,
@@ -81,6 +82,13 @@ export function resolveModelString(
   // Codex model with explicit prefix (e.g., "codex-gpt-5.1-codex-max")
   if (canonicalKey.startsWith(PROVIDER_PREFIXES.codex)) {
     console.log(`[ModelResolver] Using Codex model: ${canonicalKey}`);
+    return canonicalKey;
+  }
+
+  // Pi model (pi-litellm/<model>) - handled by the Pi provider
+  // Checked before OpenCode, whose dynamic provider/model matcher would match it.
+  if (isPiModel(canonicalKey)) {
+    console.log(`[ModelResolver] Using Pi model: ${canonicalKey}`);
     return canonicalKey;
   }
 

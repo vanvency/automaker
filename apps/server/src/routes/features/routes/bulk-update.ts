@@ -50,6 +50,9 @@ export function createBulkUpdateHandler(featureLoader: FeatureLoader) {
         const batchResults = await Promise.all(
           batch.map(async (featureId) => {
             try {
+              if ((await featureLoader.get(projectPath, featureId))?.archive) {
+                throw new Error('Restore the archived task before editing it');
+              }
               const updated = await featureLoader.update(projectPath, featureId, updates);
               return { featureId, success: true as const, feature: updated };
             } catch (error) {

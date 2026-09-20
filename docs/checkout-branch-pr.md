@@ -100,18 +100,22 @@ git push -u origin refactor/monorepo-restructure
 
 ### 6. Create Pull Request
 
+> **Always open pull requests as drafts.** A draft cannot be merged until someone
+> explicitly marks it ready for review, which prevents accidental merges. Every
+> example below uses `--draft`; do not drop that flag.
+
 #### Option A: Using GitHub CLI (Recommended)
 
 If you have GitHub CLI installed:
 
 ```bash
-gh pr create --title "Your PR Title" --body "Description of changes"
+gh pr create --draft --title "Your PR Title" --body "Description of changes"
 ```
 
 To open in browser for review before creating:
 
 ```bash
-gh pr create --title "Your PR Title" --body "Description" --web
+gh pr create --draft --title "Your PR Title" --body "Description" --web
 ```
 
 #### Option B: Using GitHub Web Interface
@@ -156,7 +160,7 @@ git commit -m "feat: add new user dashboard component"
 git push -u origin feature/add-new-component
 
 # 7. Create PR
-gh pr create --title "feat: add new user dashboard component" --body "Implements new dashboard component with user statistics and activity feed."
+gh pr create --draft --title "feat: add new user dashboard component" --body "Implements new dashboard component with user statistics and activity feed."
 ```
 
 ## Handling Additional Changes
@@ -226,8 +230,8 @@ git commit -m "type: message"
 # Push
 git push -u origin <branch-name>
 
-# Create PR (GitHub CLI)
-gh pr create --title "Title" --body "Description"
+# Create PR (GitHub CLI) - always a draft, never ready-for-review by default
+gh pr create --draft --title "Title" --body "Description"
 
 # View PR
 gh pr view

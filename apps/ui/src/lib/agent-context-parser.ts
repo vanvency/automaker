@@ -73,33 +73,71 @@ export function formatModelName(model: string, options?: FormatModelNameOptions)
   if (model.includes('haiku')) return 'Haiku 4.5';
 
   // Codex/GPT models - specific formatting
-  if (model === 'codex-gpt-5.3-codex') return 'GPT-5.3 Codex';
-  if (model === 'codex-gpt-5.2-codex') return 'GPT-5.2 Codex';
-  if (model === 'codex-gpt-5.2') return 'GPT-5.2';
-  if (model === 'codex-gpt-5.1-codex-max') return 'GPT-5.1 Max';
-  if (model === 'codex-gpt-5.1-codex-mini') return 'GPT-5.1 Mini';
-  if (model === 'codex-gpt-5.1') return 'GPT-5.1';
+  if (model === 'codex:gpt-5.3-codex' || model === 'codex-gpt-5.3-codex') return 'GPT-5.3 Codex';
+  if (model === 'codex:gpt-5.2-codex' || model === 'codex-gpt-5.2-codex') return 'GPT-5.2 Codex';
+  if (model === 'codex:gpt-5.2' || model === 'codex-gpt-5.2') return 'GPT-5.2';
+  if (model === 'codex:gpt-5.1-codex-max' || model === 'codex-gpt-5.1-codex-max')
+    return 'GPT-5.1 Max';
+  if (model === 'codex:gpt-5.1-codex-mini' || model === 'codex-gpt-5.1-codex-mini')
+    return 'GPT-5.1 Mini';
+  if (model === 'codex:gpt-5.1' || model === 'codex-gpt-5.1') return 'GPT-5.1';
   // Generic fallbacks for other GPT models
   if (model.startsWith('gpt-')) return model.toUpperCase();
   if (model.match(/^o\d/)) return model.toUpperCase(); // o1, o3, etc.
 
   // Cursor models
-  if (model === 'cursor-auto' || model === 'auto') return 'Cursor Auto';
-  if (model === 'cursor-composer-1' || model === 'composer-1') return 'Composer 1';
-  if (model.startsWith('cursor-sonnet')) return 'Cursor Sonnet';
-  if (model.startsWith('cursor-opus')) return 'Cursor Opus';
-  if (model.startsWith('cursor-gpt')) return model.replace('cursor-', '').replace('gpt-', 'GPT-');
-  if (model.startsWith('cursor-gemini'))
-    return model.replace('cursor-', 'Cursor ').replace('gemini', 'Gemini');
-  if (model.startsWith('cursor-grok')) return 'Cursor Grok';
+  if (model === 'cursor:auto' || model === 'cursor-auto' || model === 'auto') return 'Cursor Auto';
+  if (model === 'cursor:composer-1' || model === 'cursor-composer-1' || model === 'composer-1')
+    return 'Composer 1';
+  if (model.startsWith('cursor:') || model.startsWith('cursor-')) {
+    const bare = model.replace(/^cursor[:-]/, '');
+    if (bare.startsWith('sonnet')) return 'Cursor Sonnet';
+    if (bare.startsWith('opus')) return 'Cursor Opus';
+    if (bare.startsWith('gpt')) return bare.replace('gpt-', 'GPT-');
+    if (bare.startsWith('gemini')) {
+      const rest = bare.replace(/^gemini-/, '');
+      const pretty = rest
+        .split('-')
+        .map((part) => (part ? part.charAt(0).toUpperCase() + part.slice(1) : part))
+        .join(' ');
+      return `Cursor Gemini ${pretty}`.trim();
+    }
+    if (bare.startsWith('grok')) return 'Cursor Grok';
+    return `Cursor ${bare}`;
+  }
+
+  // Gemini CLI models
+  if (model.startsWith('gemini:')) {
+    return model
+      .slice('gemini:'.length)
+      .replace(/[-_]/g, ' ')
+      .replace(/\b\w/g, (c) => c.toUpperCase());
+  }
 
   // OpenCode static models (canonical opencode- prefix)
-  if (model === 'opencode-litellm/auto' || model === 'litellm/auto') return 'Auto';
-  if (model === 'opencode-big-pickle') return 'Big Pickle';
-  if (model === 'opencode-glm-5-free') return 'GLM 5 Free';
-  if (model === 'opencode-gpt-5-nano') return 'GPT-5 Nano';
-  if (model === 'opencode-kimi-k2.5-free') return 'Kimi K2.5';
-  if (model === 'opencode-minimax-m2.5-free') return 'MiniMax M2.5';
+  if (
+    model === 'opencode:litellm/auto' ||
+    model === 'opencode-litellm/auto' ||
+    model === 'litellm/auto'
+  )
+    return 'Auto';
+
+  // Pi models (pi:litellm/<model>, legacy pi-litellm/<model>) - local LiteLLM
+  if (model === 'pi:litellm/auto' || model === 'pi-litellm/auto') return 'Auto (LiteLLM)';
+  if (model.startsWith('pi:litellm/') || model.startsWith('pi-litellm/')) {
+    return model
+      .replace(/^pi[:-]litellm\//, '')
+      .replace(/[-_]/g, ' ')
+      .replace(/\b\w/g, (c) => c.toUpperCase());
+  }
+
+  if (model === 'opencode:big-pickle' || model === 'opencode-big-pickle') return 'Big Pickle';
+  if (model === 'opencode:glm-5-free' || model === 'opencode-glm-5-free') return 'GLM 5 Free';
+  if (model === 'opencode:gpt-5-nano' || model === 'opencode-gpt-5-nano') return 'GPT-5 Nano';
+  if (model === 'opencode:kimi-k2.5-free' || model === 'opencode-kimi-k2.5-free')
+    return 'Kimi K2.5';
+  if (model === 'opencode:minimax-m2.5-free' || model === 'opencode-minimax-m2.5-free')
+    return 'MiniMax M2.5';
 
   // OpenCode dynamic models (provider/model format like "google/gemini-2.5-pro")
   if (model.includes('/') && !model.includes('://')) {

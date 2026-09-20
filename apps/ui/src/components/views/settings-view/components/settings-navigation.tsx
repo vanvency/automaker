@@ -19,6 +19,7 @@ const NAV_ID_TO_PROVIDER: Record<string, ModelProvider> = {
   'opencode-provider': 'opencode',
   'gemini-provider': 'gemini',
   'copilot-provider': 'copilot',
+  'pi-provider': 'pi',
 };
 
 interface SettingsNavigationProps {

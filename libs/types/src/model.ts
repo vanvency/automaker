@@ -51,29 +51,29 @@ export const LEGACY_CLAUDE_ALIAS_MAP: Record<string, ClaudeCanonicalId> = {
 export const CODEX_MODEL_MAP = {
   // Recommended Codex-specific models
   /** Latest frontier agentic coding model */
-  gpt53Codex: 'codex-gpt-5.3-codex',
+  gpt53Codex: 'codex:gpt-5.3-codex',
   /** Smaller, near-instant version of GPT-5.3-Codex for real-time coding */
-  gpt53CodexSpark: 'codex-gpt-5.3-codex-spark',
+  gpt53CodexSpark: 'codex:gpt-5.3-codex-spark',
   /** Frontier agentic coding model */
-  gpt52Codex: 'codex-gpt-5.2-codex',
+  gpt52Codex: 'codex:gpt-5.2-codex',
   /** Codex-optimized flagship for deep and fast reasoning */
-  gpt51CodexMax: 'codex-gpt-5.1-codex-max',
+  gpt51CodexMax: 'codex:gpt-5.1-codex-max',
   /** Optimized for codex. Cheaper, faster, but less capable */
-  gpt51CodexMini: 'codex-gpt-5.1-codex-mini',
+  gpt51CodexMini: 'codex:gpt-5.1-codex-mini',
   /** Original GPT-5.1 Codex model */
-  gpt51Codex: 'codex-gpt-5.1-codex',
+  gpt51Codex: 'codex:gpt-5.1-codex',
   /** Original GPT-5 Codex model */
-  gpt5Codex: 'codex-gpt-5-codex',
+  gpt5Codex: 'codex:gpt-5-codex',
   /** Smaller, cheaper GPT-5 Codex variant */
-  gpt5CodexMini: 'codex-gpt-5-codex-mini',
+  gpt5CodexMini: 'codex:gpt-5-codex-mini',
 
   // General-purpose GPT models (also available in Codex)
   /** Latest frontier model with improvements across knowledge, reasoning and coding */
-  gpt52: 'codex-gpt-5.2',
+  gpt52: 'codex:gpt-5.2',
   /** Great for coding and agentic tasks across domains */
-  gpt51: 'codex-gpt-5.1',
+  gpt51: 'codex:gpt-5.1',
   /** Base GPT-5 model */
-  gpt5: 'codex-gpt-5',
+  gpt5: 'codex:gpt-5',
 } as const;
 
 export const CODEX_MODEL_IDS = Object.values(CODEX_MODEL_MAP);
@@ -128,7 +128,7 @@ export function getAllCodexModelIds(): CodexModelId[] {
  */
 export const DEFAULT_MODELS = {
   claude: 'claude-opus-4-6',
-  cursor: 'cursor-auto', // Cursor's recommended default (with prefix)
+  cursor: 'cursor:auto', // Cursor's recommended default (with prefix)
   codex: CODEX_MODEL_MAP.gpt53Codex, // GPT-5.3-Codex is the latest frontier agentic coding model
 } as const;
 

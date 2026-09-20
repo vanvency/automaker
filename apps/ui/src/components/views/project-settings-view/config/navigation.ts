@@ -18,6 +18,7 @@ export interface ProjectNavigationItem {
 }
 
 export const PROJECT_SETTINGS_NAV_ITEMS: ProjectNavigationItem[] = [
+  { id: 'jira', label: 'Jira 同步', icon: Workflow },
   { id: 'identity', label: 'Identity', icon: User },
   { id: 'worktrees', label: 'Worktrees', icon: GitBranch },
   { id: 'commands-scripts', label: 'Commands & Scripts', icon: Terminal },

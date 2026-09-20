@@ -9,7 +9,7 @@ export type ColumnId = Feature['status'];
 export interface EmptyStateConfig {
   title: string;
   description: string;
-  icon: 'lightbulb' | 'play' | 'clock' | 'check' | 'sparkles';
+  icon: 'lightbulb' | 'play' | 'clock' | 'check' | 'sparkles' | 'alert';
   shortcutKey?: string; // Keyboard shortcut label (e.g., 'N', 'A')
   shortcutHint?: string; // Human-readable shortcut hint
   primaryAction?: {
@@ -38,14 +38,20 @@ export const EMPTY_STATE_CONFIGS: Record<string, EmptyStateConfig> = {
     description: 'Drag a feature from the backlog here or click implement to start working on it.',
     icon: 'play',
   },
+  failed: {
+    title: 'Nothing needs attention',
+    description:
+      'Execution failures, merge conflicts and interrupted runs land here until a human resolves them.',
+    icon: 'alert',
+  },
   waiting_approval: {
-    title: 'No Items Awaiting Approval',
+    title: 'Nothing waiting for review',
     description: 'Features will appear here after implementation is complete and need your review.',
     icon: 'clock',
   },
   verified: {
-    title: 'No Verified Features',
-    description: 'Approved features will appear here. They can then be completed and archived.',
+    title: 'Nothing done yet',
+    description: 'Verified features appear here. Press Complete to archive them.',
     icon: 'check',
   },
   // Pipeline step default configuration
@@ -74,7 +80,15 @@ export interface Column {
   pipelineStepId?: string;
 }
 
-// Base columns (start)
+/**
+ * Base columns (start).
+ *
+ * These mirror the Work Board lanes exactly - Backlog → In Progress → Needs
+ * Attention → Waiting Review → Done - so both views describe the same work in
+ * the same order. `Needs Attention` has no status of its own: it collects the
+ * statuses that need a human (failed/error, merge conflict, interrupted run),
+ * which the column assignment maps into it.
+ */
 const BASE_COLUMNS: Column[] = [
   { id: 'backlog', title: 'Backlog', colorClass: 'bg-[var(--status-backlog)]' },
   {
@@ -82,21 +96,41 @@ const BASE_COLUMNS: Column[] = [
     title: 'In Progress',
     colorClass: 'bg-[var(--status-in-progress)]',
   },
+  {
+    id: 'failed',
+    title: 'Needs Attention',
+    colorClass: 'bg-[var(--status-error)]',
+  },
 ];
 
 // End columns (after pipeline)
 const END_COLUMNS: Column[] = [
   {
     id: 'waiting_approval',
-    title: 'Waiting Approval',
+    title: 'Waiting Review',
     colorClass: 'bg-[var(--status-waiting)]',
   },
   {
     id: 'verified',
-    title: 'Verified',
+    title: 'Done',
     colorClass: 'bg-[var(--status-success)]',
   },
 ];
+
+/** Statuses the Needs Attention lane collects (they have no column of their own) */
+export const NEEDS_ATTENTION_STATUSES = [
+  'failed',
+  'error',
+  'cancelled',
+  'canceled',
+  'merge_conflict',
+  'interrupted',
+] as const;
+
+/** True when a feature status belongs in the Needs Attention lane */
+export function isNeedsAttentionStatus(status: string | undefined | null): boolean {
+  return !!status && (NEEDS_ATTENTION_STATUSES as readonly string[]).includes(status);
+}
 
 // Static COLUMNS for backwards compatibility (no pipeline)
 export const COLUMNS: Column[] = [...BASE_COLUMNS, ...END_COLUMNS];

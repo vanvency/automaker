@@ -5,6 +5,7 @@ import {
   OPENCODE_MODELS as OPENCODE_MODEL_CONFIGS,
   GEMINI_MODEL_MAP,
   COPILOT_MODEL_MAP,
+  PI_MODELS as PI_MODEL_CONFIGS,
 } from '@automaker/types';
 import { Brain, Zap, Scale, Cpu, Rocket, Sparkles } from 'lucide-react';
 import {
@@ -14,6 +15,7 @@ import {
   OpenCodeIcon,
   GeminiIcon,
   CopilotIcon,
+  PiIcon,
 } from '@/components/ui/provider-icon';
 
 export type ModelOption = {
@@ -126,6 +128,18 @@ export const OPENCODE_MODELS: ModelOption[] = OPENCODE_MODEL_CONFIGS.map((config
 }));
 
 /**
+ * Pi models - powered by the local LiteLLM gateway
+ * IDs use the 'agent:model' form (e.g. 'pi:litellm/auto')
+ */
+export const PI_MODELS: ModelOption[] = PI_MODEL_CONFIGS.map((config) => ({
+  id: config.id,
+  label: config.label,
+  description: config.description,
+  badge: config.tier === 'premium' ? 'Premium' : undefined,
+  provider: 'pi' as ModelProvider,
+}));
+
+/**
  * Gemini models derived from GEMINI_MODEL_MAP
  * Model IDs already have 'gemini-' prefix (like Cursor models)
  */
@@ -165,6 +179,7 @@ export const ALL_MODELS: ModelOption[] = [
   ...OPENCODE_MODELS,
   ...GEMINI_MODELS,
   ...COPILOT_MODELS,
+  ...PI_MODELS,
 ];
 
 export const THINKING_LEVELS: ThinkingLevel[] = [
@@ -221,4 +236,5 @@ export const PROFILE_ICONS: Record<string, React.ComponentType<{ className?: str
   OpenCode: OpenCodeIcon,
   Gemini: GeminiIcon,
   Copilot: CopilotIcon,
+  Pi: PiIcon,
 };

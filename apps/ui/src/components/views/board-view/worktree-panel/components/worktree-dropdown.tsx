@@ -1,10 +1,10 @@
-import { useMemo } from 'react';
+import { Fragment, useMemo, useState } from 'react';
 import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
 import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuLabel,
-  DropdownMenuSeparator,
   DropdownMenuTrigger,
   DropdownMenuGroup,
 } from '@/components/ui/dropdown-menu';
@@ -17,6 +17,7 @@ import {
   GitPullRequest,
   FlaskConical,
   AlertTriangle,
+  Search,
 } from 'lucide-react';
 import { Spinner } from '@/components/ui/spinner';
 import { cn } from '@/lib/utils';
@@ -28,10 +29,13 @@ import type {
   GitRepoStatus,
   TestSessionInfo,
   MergeConflictInfo,
+  FeatureInfo,
 } from '../types';
 import { WorktreeDropdownItem } from './worktree-dropdown-item';
 import { BranchSwitchDropdown } from './branch-switch-dropdown';
 import { WorktreeActionsDropdown } from './worktree-actions-dropdown';
+import { useRecentWorktreesStore } from '@/store/recent-worktrees-store';
+import { buildWorktreeCategoryGroups, withRecentWorktrees } from './worktree-category-utils';
 import {
   truncateBranchName,
   getPRBadgeStyles,
@@ -44,6 +48,7 @@ import {
 export interface WorktreeDropdownProps {
   /** List of all worktrees to display in the dropdown */
   worktrees: WorktreeInfo[];
+  projectPath?: string;
   /** Function to check if a worktree is currently selected */
   isWorktreeSelected: (worktree: WorktreeInfo) => boolean;
   /** Function to check if a worktree has running features/processes */
@@ -52,6 +57,8 @@ export interface WorktreeDropdownProps {
   isActivating: boolean;
   /** Map of branch names to card counts */
   branchCardCounts?: Record<string, number>;
+  /** Board cards, used to categorise and search the worktree list */
+  features?: FeatureInfo[];
   /** Function to check if dev server is running for a worktree */
   isDevServerRunning: (worktree: WorktreeInfo) => boolean;
   /** Function to check if dev server is starting for a worktree */
@@ -170,7 +177,8 @@ const MAX_TRIGGER_BRANCH_NAME_LENGTH = 24;
  *
  * Features:
  * - Compact dropdown trigger showing current worktree with indicators
- * - Grouped display (main branch + worktrees)
+ * - Keyword search over branch, path, cards and pull requests
+ * - Grouped display (工作中 / 空闲 / 新增 / 已完成)
  * - Full status indicators (PR, dev server, auto mode, changes)
  * - Branch switch dropdown integration
  * - Actions dropdown integration
@@ -178,10 +186,12 @@ const MAX_TRIGGER_BRANCH_NAME_LENGTH = 24;
  */
 export function WorktreeDropdown({
   worktrees,
+  projectPath,
   isWorktreeSelected,
   hasRunningFeatures,
   isActivating,
   branchCardCounts,
+  features,
   isDevServerRunning,
   isDevServerStarting,
   getDevServerInfo,
@@ -258,6 +268,9 @@ export function WorktreeDropdown({
   remotesWithBranch,
   highlightTrigger = true,
 }: WorktreeDropdownProps) {
+  const recentPaths = useRecentWorktreesStore((state) =>
+    projectPath ? state.pathsByProject[projectPath] : undefined
+  );
   // Find the currently selected worktree to display in the trigger
   const selectedWorktree = worktrees.find((w) => isWorktreeSelected(w));
   const displayBranch =
@@ -268,9 +281,51 @@ export function WorktreeDropdown({
     MAX_TRIGGER_BRANCH_NAME_LENGTH
   );
 
-  // Separate main worktree from others for grouping
-  const mainWorktree = worktrees.find((w) => w.isMain);
-  const otherWorktrees = worktrees.filter((w) => !w.isMain);
+  // Keyword filter for the worktree list
+  const [searchQuery, setSearchQuery] = useState('');
+
+  // Jira work type per branch, taken from the cards of that worktree, so legacy
+  // `jira/<key>-<label>` branches still show whether they carry a story, task, ...
+  const jiraTypeByBranch = useMemo(() => {
+    const byBranch: Record<string, string> = {};
+    for (const feature of features ?? []) {
+      if (feature.branchName && feature.jiraType && !byBranch[feature.branchName]) {
+        byBranch[feature.branchName] = feature.jiraType;
+      }
+    }
+    return byBranch;
+  }, [features]);
+
+  // Worktrees grouped as 工作中 / 空闲 / 新增 / 已完成 (in that order) and narrowed
+  // down by the keyword filter. Memoized to avoid regrouping on every render.
+  const categoryGroups = useMemo(
+    () =>
+      withRecentWorktrees(
+        buildWorktreeCategoryGroups(
+          worktrees,
+          {
+            isRunning: (worktree) =>
+              hasRunningFeatures(worktree) ||
+              isAutoModeRunningForWorktree(worktree) ||
+              isTestRunningForWorktree(worktree),
+            features,
+            cardCounts: branchCardCounts,
+          },
+          searchQuery
+        ),
+        recentPaths
+      ),
+    [
+      worktrees,
+      hasRunningFeatures,
+      isAutoModeRunningForWorktree,
+      isTestRunningForWorktree,
+      features,
+      branchCardCounts,
+      searchQuery,
+      recentPaths,
+    ]
+  );
 
   // Get status info for selected worktree - memoized to prevent unnecessary recalculations
   const selectedStatus = useMemo(() => {
@@ -469,50 +524,63 @@ export function WorktreeDropdown({
 
   return (
     <div className="flex items-center">
-      <DropdownMenu>
+      <DropdownMenu
+        onOpenChange={(open) => {
+          // Start every visit with the full list
+          if (!open) setSearchQuery('');
+        }}
+      >
         {triggerWithTooltip}
         <DropdownMenuContent
           align="start"
           className="w-80 max-h-96 overflow-y-auto"
           aria-label="Worktree selection"
         >
-          {/* Main worktree section */}
-          {mainWorktree && (
-            <>
-              <DropdownMenuLabel className="text-xs font-normal text-muted-foreground">
-                Main Branch
-              </DropdownMenuLabel>
-              <WorktreeDropdownItem
-                worktree={mainWorktree}
-                isSelected={isWorktreeSelected(mainWorktree)}
-                isRunning={hasRunningFeatures(mainWorktree)}
-                cardCount={branchCardCounts?.[mainWorktree.branch]}
-                devServerRunning={isDevServerRunning(mainWorktree)}
-                devServerStarting={isDevServerStarting(mainWorktree)}
-                devServerInfo={getDevServerInfo(mainWorktree)}
-                isAutoModeRunning={isAutoModeRunningForWorktree(mainWorktree)}
-                isTestRunning={isTestRunningForWorktree(mainWorktree)}
-                testSessionInfo={getTestSessionInfo(mainWorktree)}
-                onSelect={() => onSelectWorktree(mainWorktree)}
+          {/* Keyword search - sticky so the filter stays reachable while scrolling */}
+          <div className="sticky -top-1 z-10 -mx-1 -mt-1 border-b border-border/50 bg-popover px-3 pb-2 pt-2">
+            <div className="relative">
+              <Search className="pointer-events-none absolute left-2 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
+              <Input
+                value={searchQuery}
+                onChange={(event) => setSearchQuery(event.target.value)}
+                onKeyDown={(event) => {
+                  // The menu owns typeahead and Enter/Space selection. While the
+                  // filter input is focused those keys belong to the input, but
+                  // Escape must stay untouched so the menu can still be dismissed.
+                  if (event.key !== 'Escape') event.stopPropagation();
+                }}
+                onKeyUp={(event) => event.stopPropagation()}
+                placeholder="搜索分支 / 卡片 / PR…"
+                aria-label="Search worktrees"
+                className="h-7 pl-7 text-base md:text-xs"
+                autoFocus
               />
-            </>
-          )}
+            </div>
+          </div>
 
-          {/* Other worktrees section */}
-          {otherWorktrees.length > 0 && (
-            <>
-              <DropdownMenuSeparator />
-              <DropdownMenuLabel className="text-xs font-normal text-muted-foreground">
-                Worktrees ({otherWorktrees.length})
+          {/* Categorised list: 工作中 → 空闲 → 新增 → 已完成 */}
+          {categoryGroups.map((group) => (
+            <Fragment key={group.category}>
+              <DropdownMenuLabel
+                data-category={group.category}
+                className="flex items-center justify-between text-[10px] uppercase tracking-wider text-muted-foreground"
+                title={group.hint}
+              >
+                <span className="flex items-center gap-1.5">
+                  <span className={cn('h-1.5 w-1.5 rounded-full', group.dotClass)} />
+                  {group.label}
+                </span>
+                <span className="font-normal tabular-nums">{group.worktrees.length}</span>
               </DropdownMenuLabel>
               <DropdownMenuGroup>
-                {otherWorktrees.map((worktree) => (
+                {group.worktrees.map((worktree) => (
                   <WorktreeDropdownItem
                     key={worktree.path}
                     worktree={worktree}
                     isSelected={isWorktreeSelected(worktree)}
                     isRunning={hasRunningFeatures(worktree)}
                     cardCount={branchCardCounts?.[worktree.branch]}
+                    jiraType={jiraTypeByBranch[worktree.branch]}
                     devServerRunning={isDevServerRunning(worktree)}
                     devServerStarting={isDevServerStarting(worktree)}
                     devServerInfo={getDevServerInfo(worktree)}
@@ -523,13 +591,13 @@ export function WorktreeDropdown({
                   />
                 ))}
               </DropdownMenuGroup>
-            </>
-          )}
+            </Fragment>
+          ))}
 
-          {/* Empty state */}
-          {worktrees.length === 0 && (
+          {/* Empty states */}
+          {categoryGroups.length === 0 && (
             <div className="px-2 py-4 text-center text-sm text-muted-foreground">
-              No worktrees available
+              {searchQuery.trim() ? '没有匹配的 worktree' : 'No worktrees available'}
             </div>
           )}
         </DropdownMenuContent>

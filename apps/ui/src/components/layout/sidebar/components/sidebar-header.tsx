@@ -42,7 +42,7 @@ export function SidebarHeader({
   const [dropdownOpen, setDropdownOpen] = useState(false);
 
   const handleLogoClick = useCallback(() => {
-    navigate({ to: '/overview' });
+    navigate({ to: '/worktrees' });
   }, [navigate]);
 
   const handleProjectSelect = useCallback(
@@ -121,39 +121,11 @@ export function SidebarHeader({
               className="group flex flex-col items-center"
               data-testid="logo-button"
             >
-              <svg
-                xmlns="http://www.w3.org/2000/svg"
-                viewBox="0 0 256 256"
-                role="img"
-                aria-label="Automaker Logo"
+              <img
+                src="/automaker.svg"
+                alt="Automaker"
                 className="size-8 group-hover:rotate-12 transition-transform duration-300 ease-out"
-              >
-                <defs>
-                  <linearGradient
-                    id="bg-collapsed"
-                    x1="0"
-                    y1="0"
-                    x2="256"
-                    y2="256"
-                    gradientUnits="userSpaceOnUse"
-                  >
-                    <stop offset="0%" style={{ stopColor: 'var(--brand-400)' }} />
-                    <stop offset="100%" style={{ stopColor: 'var(--brand-600)' }} />
-                  </linearGradient>
-                </defs>
-                <rect x="16" y="16" width="224" height="224" rx="56" fill="url(#bg-collapsed)" />
-                <g
-                  fill="none"
-                  stroke="#FFFFFF"
-                  strokeWidth="20"
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                >
-                  <path d="M92 92 L52 128 L92 164" />
-                  <path d="M144 72 L116 184" />
-                  <path d="M164 92 L204 128 L164 164" />
-                </g>
-              </svg>
+              />
             </button>
           </TooltipTrigger>
           <TooltipContent side="right" sideOffset={8}>
@@ -290,39 +262,11 @@ export function SidebarHeader({
           title="Go to Dashboard"
           data-testid="logo-button"
         >
-          <svg
-            xmlns="http://www.w3.org/2000/svg"
-            viewBox="0 0 256 256"
-            role="img"
-            aria-label="Automaker Logo"
+          <img
+            src="/automaker.svg"
+            alt="Automaker"
             className="h-8 w-8 group-hover:rotate-12 transition-transform duration-300 ease-out"
-          >
-            <defs>
-              <linearGradient
-                id="bg-header"
-                x1="0"
-                y1="0"
-                x2="256"
-                y2="256"
-                gradientUnits="userSpaceOnUse"
-              >
-                <stop offset="0%" style={{ stopColor: 'var(--brand-400)' }} />
-                <stop offset="100%" style={{ stopColor: 'var(--brand-600)' }} />
-              </linearGradient>
-            </defs>
-            <rect x="16" y="16" width="224" height="224" rx="56" fill="url(#bg-header)" />
-            <g
-              fill="none"
-              stroke="#FFFFFF"
-              strokeWidth="20"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-            >
-              <path d="M92 92 L52 128 L92 164" />
-              <path d="M144 72 L116 184" />
-              <path d="M164 92 L204 128 L164 164" />
-            </g>
-          </svg>
+          />
         </button>
 
         {/* Project Dropdown */}

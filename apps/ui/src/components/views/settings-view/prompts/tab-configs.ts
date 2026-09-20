@@ -148,8 +148,7 @@ export const TAB_CONFIGS: TabConfig[] = [
       {
         key: 'systemPrompt',
         label: 'System Prompt',
-        description:
-          'Defines how the AI modifies the feature backlog (Plan button on Kanban board)',
+        description: 'Defines how the AI modifies the feature backlog (Plan button on Task Kanban)',
         defaultValue: DEFAULT_BACKLOG_PLAN_PROMPTS.systemPrompt,
         critical: true,
       },

@@ -26,6 +26,7 @@ import {
   OpenCodeIcon,
   GeminiIcon,
   CopilotIcon,
+  PiIcon,
 } from '@/components/ui/provider-icon';
 import type { SettingsViewId } from '../hooks/use-settings-view';
 
@@ -63,6 +64,7 @@ export const GLOBAL_NAV_GROUPS: NavigationGroup[] = [
           { id: 'opencode-provider', label: 'OpenCode', icon: OpenCodeIcon },
           { id: 'gemini-provider', label: 'Gemini', icon: GeminiIcon },
           { id: 'copilot-provider', label: 'Copilot', icon: CopilotIcon },
+          { id: 'pi-provider', label: 'Pi', icon: PiIcon },
         ],
       },
       { id: 'mcp-servers', label: 'MCP Servers', icon: Plug },

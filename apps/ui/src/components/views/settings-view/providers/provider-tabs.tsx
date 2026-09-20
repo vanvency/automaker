@@ -7,6 +7,7 @@ import {
   GeminiIcon,
   OpenCodeIcon,
   CopilotIcon,
+  PiIcon,
 } from '@/components/ui/provider-icon';
 import { CursorSettingsTab } from './cursor-settings-tab';
 import { ClaudeSettingsTab } from './claude-settings-tab';
@@ -14,15 +15,16 @@ import { CodexSettingsTab } from './codex-settings-tab';
 import { OpencodeSettingsTab } from './opencode-settings-tab';
 import { GeminiSettingsTab } from './gemini-settings-tab';
 import { CopilotSettingsTab } from './copilot-settings-tab';
+import { PiSettingsTab } from './pi-settings-tab';
 
 interface ProviderTabsProps {
-  defaultTab?: 'claude' | 'cursor' | 'codex' | 'opencode' | 'gemini' | 'copilot';
+  defaultTab?: 'claude' | 'cursor' | 'codex' | 'opencode' | 'gemini' | 'copilot' | 'pi';
 }
 
 export function ProviderTabs({ defaultTab = 'claude' }: ProviderTabsProps) {
   return (
     <Tabs defaultValue={defaultTab} className="w-full">
-      <TabsList className="grid w-full grid-cols-6 mb-6">
+      <TabsList className="grid w-full grid-cols-7 mb-6">
         <TabsTrigger value="claude" className="flex items-center gap-2">
           <AnthropicIcon className="w-4 h-4" />
           Claude
@@ -46,6 +48,10 @@ export function ProviderTabs({ defaultTab = 'claude' }: ProviderTabsProps) {
         <TabsTrigger value="copilot" className="flex items-center gap-2">
           <CopilotIcon className="w-4 h-4" />
           Copilot
+        </TabsTrigger>
+        <TabsTrigger value="pi" className="flex items-center gap-2">
+          <PiIcon className="w-4 h-4" />
+          Pi
         </TabsTrigger>
       </TabsList>
 
@@ -71,6 +77,9 @@ export function ProviderTabs({ defaultTab = 'claude' }: ProviderTabsProps) {
 
       <TabsContent value="copilot">
         <CopilotSettingsTab />
+      </TabsContent>
+      <TabsContent value="pi">
+        <PiSettingsTab />
       </TabsContent>
     </Tabs>
   );

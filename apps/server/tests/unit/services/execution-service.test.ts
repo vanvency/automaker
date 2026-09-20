@@ -29,6 +29,7 @@ import type {
 import type { WorktreeResolver } from '../../../src/services/worktree-resolver.js';
 import type { SettingsService } from '../../../src/services/settings-service.js';
 import { pipelineService } from '../../../src/services/pipeline-service.js';
+import { ProviderFactory } from '../../../src/providers/provider-factory.js';
 import * as secureFs from '../../../src/lib/secure-fs.js';
 import { getFeatureDir } from '@automaker/platform';
 import {
@@ -39,6 +40,11 @@ import {
 } from '../../../src/lib/settings-helpers.js';
 import { extractSummary } from '../../../src/services/spec-parser.js';
 import { resolveModelString } from '@automaker/model-resolver';
+import { collectAcceptanceEvidence } from '../../../src/services/acceptance-evidence-service.js';
+
+vi.mock('../../../src/services/acceptance-evidence-service.js', () => ({
+  collectAcceptanceEvidence: vi.fn().mockResolvedValue(null),
+}));
 
 // Mock pipelineService
 vi.mock('../../../src/services/pipeline-service.js', () => ({
@@ -266,7 +272,8 @@ describe('execution-service.ts', () => {
       mockSignalPauseFn,
       mockRecordSuccessFn,
       mockSaveExecutionStateFn,
-      mockLoadContextFilesFn
+      mockLoadContextFilesFn,
+      undefined as never
     );
   });
 
@@ -298,9 +305,100 @@ describe('execution-service.ts', () => {
         mockSignalPauseFn,
         mockRecordSuccessFn,
         mockSaveExecutionStateFn,
-        mockLoadContextFilesFn
+        mockLoadContextFilesFn,
+        undefined as never
       );
       expect(svc).toBeInstanceOf(ExecutionService);
+    });
+  });
+
+  describe('AgentSession mirroring', () => {
+    const createSink = () => ({
+      startFeatureConversation: vi.fn().mockResolvedValue({ sessionId: 'feature-feature-1' }),
+      updateFeatureConversation: vi.fn().mockResolvedValue(undefined),
+      finishFeatureConversation: vi.fn().mockResolvedValue(undefined),
+    });
+
+    const serviceWithSink = (sink: ReturnType<typeof createSink>) =>
+      new ExecutionService(
+        mockEventBus,
+        mockConcurrencyManager,
+        mockWorktreeResolver,
+        mockSettingsService,
+        mockRunAgentFn,
+        mockExecutePipelineFn,
+        mockUpdateFeatureStatusFn,
+        mockLoadFeatureFn,
+        mockGetPlanningPromptPrefixFn,
+        mockSaveFeatureSummaryFn,
+        mockRecordLearningsFn,
+        mockContextExistsFn,
+        mockResumeFeatureFn,
+        mockTrackFailureFn,
+        mockSignalPauseFn,
+        mockRecordSuccessFn,
+        mockSaveExecutionStateFn,
+        mockLoadContextFilesFn,
+        undefined as never,
+        sink
+      );
+
+    it('publishes a running feature as an AgentSession and syncs the transcript', async () => {
+      const sink = createSink();
+      const svc = serviceWithSink(sink);
+      vi.mocked(ProviderFactory.getProviderNameForModel).mockReturnValue('anthropic');
+
+      await svc.executeFeature('/test/project', 'feature-1');
+
+      expect(sink.startFeatureConversation).toHaveBeenCalledTimes(1);
+      expect(sink.startFeatureConversation).toHaveBeenCalledWith(
+        expect.objectContaining({
+          featureId: 'feature-1',
+          name: 'Test Feature',
+          projectPath: '/test/project',
+          workingDirectory: path.resolve('/test/project'),
+          model: 'claude-sonnet-4',
+          provider: 'anthropic',
+        })
+      );
+      // The transcript is flushed when the run ends
+      expect(sink.updateFeatureConversation).toHaveBeenCalledWith(
+        'feature-1',
+        expect.stringContaining('🔧 Tool: Edit')
+      );
+      expect(sink.finishFeatureConversation).toHaveBeenCalledWith('feature-1', undefined);
+    });
+
+    it('passes the run abort controller so the session can stop the feature', async () => {
+      const sink = createSink();
+      const svc = serviceWithSink(sink);
+      const abortController = new AbortController();
+      vi.mocked(mockConcurrencyManager.acquire).mockImplementation(({ featureId }) => ({
+        ...createRunningFeature(featureId),
+        abortController,
+      }));
+
+      await svc.executeFeature('/test/project', 'feature-1');
+
+      expect(sink.startFeatureConversation).toHaveBeenCalledWith(
+        expect.objectContaining({ abortController })
+      );
+    });
+
+    it('reports a failed run on the mirrored conversation', async () => {
+      const sink = createSink();
+      mockRunAgentFn = vi.fn().mockRejectedValue(new Error('provider exploded'));
+      const failingSvc = serviceWithSink(sink);
+
+      await failingSvc.executeFeature('/test/project', 'feature-1');
+
+      expect(sink.finishFeatureConversation).toHaveBeenCalledWith('feature-1', {
+        error: 'provider exploded',
+      });
+    });
+
+    it('does nothing when no conversation sink is configured', async () => {
+      await expect(service.executeFeature('/test/project', 'feature-1')).resolves.toBeUndefined();
     });
   });
 
@@ -394,7 +492,8 @@ describe('execution-service.ts', () => {
         mockSignalPauseFn,
         mockRecordSuccessFn,
         mockSaveExecutionStateFn,
-        mockLoadContextFilesFn
+        mockLoadContextFilesFn,
+        undefined as never
       );
 
       await svc.executeFeature('/test/project', 'nonexistent');
@@ -524,7 +623,8 @@ describe('execution-service.ts', () => {
         mockSignalPauseFn,
         mockRecordSuccessFn,
         mockSaveExecutionStateFn,
-        mockLoadContextFilesFn
+        mockLoadContextFilesFn,
+        undefined as never
       );
 
       await svc.executeFeature('/test/project', 'feature-1');
@@ -568,7 +668,8 @@ describe('execution-service.ts', () => {
         mockSignalPauseFn,
         mockRecordSuccessFn,
         mockSaveExecutionStateFn,
-        mockLoadContextFilesFn
+        mockLoadContextFilesFn,
+        undefined as never
       );
 
       await svc.executeFeature('/test/project', 'feature-1', true);
@@ -626,7 +727,8 @@ describe('execution-service.ts', () => {
         mockSignalPauseFn,
         mockRecordSuccessFn,
         mockSaveExecutionStateFn,
-        mockLoadContextFilesFn
+        mockLoadContextFilesFn,
+        undefined as never
       );
 
       await svc.executeFeature('/test/project', 'feature-1');
@@ -663,7 +765,8 @@ describe('execution-service.ts', () => {
         mockSignalPauseFn,
         mockRecordSuccessFn,
         mockSaveExecutionStateFn,
-        mockLoadContextFilesFn
+        mockLoadContextFilesFn,
+        undefined as never
       );
 
       await svc.executeFeature('/test/project', 'feature-1');
@@ -703,7 +806,8 @@ describe('execution-service.ts', () => {
         mockSignalPauseFn,
         mockRecordSuccessFn,
         mockSaveExecutionStateFn,
-        mockLoadContextFilesFn
+        mockLoadContextFilesFn,
+        undefined as never
       );
 
       await svc.executeFeature('/test/project', 'feature-1');
@@ -734,7 +838,8 @@ describe('execution-service.ts', () => {
         mockSignalPauseFn,
         mockRecordSuccessFn,
         mockSaveExecutionStateFn,
-        mockLoadContextFilesFn
+        mockLoadContextFilesFn,
+        undefined as never
       );
     };
 
@@ -1032,7 +1137,8 @@ describe('execution-service.ts', () => {
         mockSignalPauseFn,
         mockRecordSuccessFn,
         mockSaveExecutionStateFn,
-        mockLoadContextFilesFn
+        mockLoadContextFilesFn,
+        undefined as never
       );
 
       await svc.executeFeature('/test/project', 'feature-1');
@@ -1067,7 +1173,8 @@ describe('execution-service.ts', () => {
         mockSignalPauseFn,
         mockRecordSuccessFn,
         mockSaveExecutionStateFn,
-        mockLoadContextFilesFn
+        mockLoadContextFilesFn,
+        undefined as never
       );
 
       await svc.executeFeature('/test/project', 'feature-1');
@@ -1100,7 +1207,8 @@ describe('execution-service.ts', () => {
         mockSignalPauseFn,
         mockRecordSuccessFn,
         mockSaveExecutionStateFn,
-        mockLoadContextFilesFn
+        mockLoadContextFilesFn,
+        undefined as never
       );
 
       await svc.executeFeature('/test/project', 'feature-1');
@@ -1135,7 +1243,8 @@ describe('execution-service.ts', () => {
         mockSignalPauseFn,
         mockRecordSuccessFn,
         mockSaveExecutionStateFn,
-        mockLoadContextFilesFn
+        mockLoadContextFilesFn,
+        undefined as never
       );
 
       await svc.executeFeature('/test/project', 'feature-1');
@@ -1170,7 +1279,8 @@ describe('execution-service.ts', () => {
         mockSignalPauseFn,
         mockRecordSuccessFn,
         mockSaveExecutionStateFn,
-        mockLoadContextFilesFn
+        mockLoadContextFilesFn,
+        undefined as never
       );
 
       await svc.executeFeature('/test/project', 'feature-1', false, true);
@@ -1215,7 +1325,8 @@ describe('execution-service.ts', () => {
         mockSignalPauseFn,
         mockRecordSuccessFn,
         mockSaveExecutionStateFn,
-        mockLoadContextFilesFn
+        mockLoadContextFilesFn,
+        undefined as never
       );
 
       await svc.executeFeature('/test/project', 'feature-1', false, false);
@@ -1254,7 +1365,8 @@ describe('execution-service.ts', () => {
         mockSignalPauseFn,
         mockRecordSuccessFn,
         mockSaveExecutionStateFn,
-        mockLoadContextFilesFn
+        mockLoadContextFilesFn,
+        undefined as never
       );
 
       await svc.executeFeature('/test/project', 'feature-1');
@@ -1408,7 +1520,8 @@ describe('execution-service.ts', () => {
         mockSignalPauseFn,
         mockRecordSuccessFn,
         mockSaveExecutionStateFn,
-        mockLoadContextFilesFn
+        mockLoadContextFilesFn,
+        undefined as never
       );
 
       await svc.executeFeature('/test/project', 'feature-1');
@@ -1454,10 +1567,10 @@ describe('execution-service.ts', () => {
       // Should not throw (isAutoMode=true so event is emitted)
       await service.executeFeature('/test/project', 'feature-1', false, true);
 
-      // Feature should still complete successfully
+      // The turn ends, but missing implementation output is a failure
       expect(mockEventBus.emitAutoModeEvent).toHaveBeenCalledWith(
         'auto_mode_feature_complete',
-        expect.objectContaining({ passes: true })
+        expect.objectContaining({ passes: false })
       );
     });
 
@@ -1488,7 +1601,8 @@ describe('execution-service.ts', () => {
         mockSignalPauseFn,
         mockRecordSuccessFn,
         mockSaveExecutionStateFn,
-        mockLoadContextFilesFn
+        mockLoadContextFilesFn,
+        undefined as never
       );
     };
 
@@ -1571,6 +1685,124 @@ describe('execution-service.ts', () => {
   });
 
   describe('executeFeature - agent output validation', () => {
+    it('replaces old blockers with the actual runtime failure before moving back to backlog', async () => {
+      const updateFeatureFields = vi.fn().mockResolvedValue(undefined);
+      mockRunAgentFn.mockRejectedValueOnce(new Error('429: No deployments available'));
+      const svc = createServiceWithMocks({ updateFeatureFields });
+      await svc.executeFeature('/test/project', 'feature-1');
+      expect(updateFeatureFields).toHaveBeenCalledWith('/test/project', 'feature-1', {
+        error: undefined,
+        executionNotice: undefined,
+        completionSource: undefined,
+      });
+      expect(updateFeatureFields).toHaveBeenCalledWith('/test/project', 'feature-1', {
+        error: expect.stringContaining('429'),
+        executionNotice: expect.objectContaining({
+          source: 'execution',
+          kind: 'error',
+          message: expect.stringContaining('429'),
+        }),
+      });
+      expect(mockUpdateFeatureStatusFn).toHaveBeenCalledWith(
+        '/test/project',
+        'feature-1',
+        'backlog'
+      );
+    });
+
+    it('keeps a text-only Reply in review instead of treating it as failed implementation', async () => {
+      vi.mocked(secureFs.readFile).mockResolvedValue(
+        'Please confirm which deployment you want me to validate.'
+      );
+      const svc = createServiceWithMocks();
+      await svc.executeFeature('/test/project', 'feature-1', false, false, undefined, {
+        continuationPrompt: 'Explain the remaining work',
+      });
+      expect(mockUpdateFeatureStatusFn).toHaveBeenCalledWith(
+        '/test/project',
+        'feature-1',
+        'waiting_approval'
+      );
+      expect(mockUpdateFeatureStatusFn).not.toHaveBeenCalledWith(
+        '/test/project',
+        'feature-1',
+        'backlog'
+      );
+    });
+
+    it('refreshes delivery blockers from the receipt instead of keeping old errors', async () => {
+      const updateFeatureFields = vi.fn().mockResolvedValue(undefined);
+      vi.mocked(secureFs.readFile).mockImplementation(async (file: unknown) =>
+        String(file).endsWith('jira/feature-1/jira-result.json')
+          ? JSON.stringify({
+              outcome: 'mr_created',
+              blockers: ['Needs real environment acceptance'],
+            })
+          : makeAgentOutput(5)
+      );
+      await createServiceWithMocks({ updateFeatureFields }).executeFeature(
+        '/test/project',
+        'feature-1'
+      );
+      expect(updateFeatureFields).toHaveBeenCalledWith('/test/project', 'feature-1', {
+        error: 'Needs real environment acceptance',
+        executionNotice: expect.objectContaining({ source: 'delivery', kind: 'review' }),
+      });
+    });
+
+    it('imports current visual evidence and leaves the task for human approval', async () => {
+      const evidence = {
+        status: 'passed',
+        summary: 'Verified on k3s',
+        screenshots: [],
+        checks: [],
+        verifiedAt: new Date().toISOString(),
+        importedAt: new Date().toISOString(),
+      } as const;
+      vi.mocked(collectAcceptanceEvidence).mockResolvedValueOnce(evidence as never);
+      vi.mocked(secureFs.readFile).mockResolvedValue(makeAgentOutput(5));
+      const updateFeatureFields = vi.fn().mockResolvedValue(undefined);
+      const svc = createServiceWithMocks({ updateFeatureFields });
+      await svc.executeFeature('/test/project', 'feature-1');
+      expect(collectAcceptanceEvidence).toHaveBeenCalledWith(
+        '/test/project',
+        'feature-1',
+        expect.any(String),
+        expect.any(Number)
+      );
+      expect(updateFeatureFields).toHaveBeenCalledWith('/test/project', 'feature-1', {
+        acceptanceEvidence: evidence,
+      });
+      expect(mockUpdateFeatureStatusFn).toHaveBeenCalledWith(
+        '/test/project',
+        'feature-1',
+        'waiting_approval'
+      );
+      expect(mockUpdateFeatureStatusFn).not.toHaveBeenCalledWith(
+        '/test/project',
+        'feature-1',
+        'verified'
+      );
+    });
+
+    it('surfaces malformed evidence instead of marking the task verified', async () => {
+      vi.mocked(collectAcceptanceEvidence).mockRejectedValueOnce(
+        new Error('Screenshot escapes directory')
+      );
+      vi.mocked(secureFs.readFile).mockResolvedValue(makeAgentOutput(5));
+      const updateFeatureFields = vi.fn().mockResolvedValue(undefined);
+      const svc = createServiceWithMocks({ updateFeatureFields });
+      await svc.executeFeature('/test/project', 'feature-1');
+      expect(updateFeatureFields).toHaveBeenCalledWith('/test/project', 'feature-1', {
+        error: expect.stringContaining('Screenshot escapes directory'),
+      });
+      expect(mockUpdateFeatureStatusFn).toHaveBeenCalledWith(
+        '/test/project',
+        'feature-1',
+        'waiting_approval'
+      );
+    });
+
     // Helper to generate realistic agent output with tool markers
     const makeAgentOutput = (toolCount: number, extraText = ''): string => {
       let output = 'Starting implementation...\n\n';
@@ -1581,7 +1813,13 @@ describe('execution-service.ts', () => {
       return output;
     };
 
-    const createServiceWithMocks = () => {
+    const createServiceWithMocks = (featureStateManager?: {
+      updateFeatureFields: (
+        projectPath: string,
+        featureId: string,
+        fields: Partial<Feature>
+      ) => Promise<void>;
+    }) => {
       return new ExecutionService(
         mockEventBus,
         mockConcurrencyManager,
@@ -1600,7 +1838,8 @@ describe('execution-service.ts', () => {
         mockSignalPauseFn,
         mockRecordSuccessFn,
         mockSaveExecutionStateFn,
-        mockLoadContextFilesFn
+        mockLoadContextFilesFn,
+        featureStateManager
       );
     };
 
@@ -1617,8 +1856,17 @@ describe('execution-service.ts', () => {
       );
     });
 
-    it('sets waiting_approval when agent output is empty', async () => {
-      vi.mocked(secureFs.readFile).mockResolvedValue('');
+    it('sets waiting_approval when jira receipt outcome is blocked despite meaningful output', async () => {
+      const output = makeAgentOutput(
+        5,
+        'Investigation completed and delivery receipt was written.'
+      );
+      vi.mocked(secureFs.readFile).mockImplementation(async (readPath: unknown) => {
+        if (String(readPath).endsWith('jira/feature-1/jira-result.json')) {
+          return JSON.stringify({ outcome: 'blocked', blockers: ['Product decision pending'] });
+        }
+        return output;
+      });
 
       const svc = createServiceWithMocks();
       await svc.executeFeature('/test/project', 'feature-1');
@@ -1630,7 +1878,94 @@ describe('execution-service.ts', () => {
       );
     });
 
-    it('sets waiting_approval when agent output has no tool usage markers', async () => {
+    it('persists changed projects and MRs from a delivery receipt', async () => {
+      const output = makeAgentOutput(5, 'Implementation delivered with MRs.');
+      const updateFeatureFields = vi.fn().mockResolvedValue(undefined);
+      vi.mocked(secureFs.readFile).mockImplementation(async (readPath: unknown) => {
+        if (String(readPath).endsWith('jira/feature-1/jira-result.json')) {
+          return JSON.stringify({
+            outcome: 'mr_created',
+            changedProjects: [
+              {
+                name: 'backend/sophon-mind',
+                mrUrl: 'https://gitblue.example.com/group/sophon-mind/-/merge_requests/12',
+              },
+            ],
+            mergeRequests: ['https://gitblue.example.com/group/sophon-mind/-/merge_requests/12'],
+          });
+        }
+        return output;
+      });
+
+      const svc = createServiceWithMocks({ updateFeatureFields });
+      await svc.executeFeature('/test/project', 'feature-1');
+
+      expect(updateFeatureFields).toHaveBeenCalledWith('/test/project', 'feature-1', {
+        changedProjects: [
+          {
+            name: 'backend/sophon-mind',
+            mrUrl: 'https://gitblue.example.com/group/sophon-mind/-/merge_requests/12',
+          },
+        ],
+        mergeRequests: ['https://gitblue.example.com/group/sophon-mind/-/merge_requests/12'],
+      });
+    });
+
+    it('sets waiting_approval when jira receipt has blockers despite tests and MRs', async () => {
+      const output = makeAgentOutput(5, 'Partial implementation delivered behind MRs.');
+      vi.mocked(secureFs.readFile).mockImplementation(async (readPath: unknown) => {
+        if (String(readPath).endsWith('jira/feature-1/jira-result.json')) {
+          return JSON.stringify({
+            outcome: 'mr_created',
+            blockers: ['', 'Epic §4B remains unimplemented'],
+          });
+        }
+        return output;
+      });
+
+      const svc = createServiceWithMocks();
+      await svc.executeFeature('/test/project', 'feature-1');
+
+      expect(mockUpdateFeatureStatusFn).toHaveBeenCalledWith(
+        '/test/project',
+        'feature-1',
+        'waiting_approval'
+      );
+    });
+
+    it('sets waiting_approval when jira receipt outcome is needs_input', async () => {
+      const output = makeAgentOutput(3, 'Work stopped for a product decision.');
+      vi.mocked(secureFs.readFile).mockImplementation(async (readPath: unknown) => {
+        if (String(readPath).endsWith('jira/feature-1/jira-result.json')) {
+          return JSON.stringify({ outcome: 'needs_input', questions: [] });
+        }
+        return output;
+      });
+
+      const svc = createServiceWithMocks();
+      await svc.executeFeature('/test/project', 'feature-1');
+
+      expect(mockUpdateFeatureStatusFn).toHaveBeenCalledWith(
+        '/test/project',
+        'feature-1',
+        'waiting_approval'
+      );
+    });
+
+    it('sets backlog when agent output is empty', async () => {
+      vi.mocked(secureFs.readFile).mockResolvedValue('');
+
+      const svc = createServiceWithMocks();
+      await svc.executeFeature('/test/project', 'feature-1');
+
+      expect(mockUpdateFeatureStatusFn).toHaveBeenCalledWith(
+        '/test/project',
+        'feature-1',
+        'backlog'
+      );
+    });
+
+    it('sets backlog when agent output has no tool usage markers', async () => {
       // Long output but no tool markers - agent printed text but didn't use tools
       const longOutputNoTools = 'I analyzed the codebase and found several issues. '.repeat(20);
       vi.mocked(secureFs.readFile).mockResolvedValue(longOutputNoTools);
@@ -1641,11 +1976,11 @@ describe('execution-service.ts', () => {
       expect(mockUpdateFeatureStatusFn).toHaveBeenCalledWith(
         '/test/project',
         'feature-1',
-        'waiting_approval'
+        'backlog'
       );
     });
 
-    it('sets waiting_approval when agent output has tool markers but is too short', async () => {
+    it('sets backlog when agent output has tool markers but is too short', async () => {
       // Has a tool marker but total output is under 200 chars
       const shortWithTool = '🔧 Tool: Read\nInput: {"file_path": "/src/index.ts"}\nDone.';
       expect(shortWithTool.trim().length).toBeLessThan(200);
@@ -1658,11 +1993,11 @@ describe('execution-service.ts', () => {
       expect(mockUpdateFeatureStatusFn).toHaveBeenCalledWith(
         '/test/project',
         'feature-1',
-        'waiting_approval'
+        'backlog'
       );
     });
 
-    it('sets waiting_approval when agent output file is missing (ENOENT)', async () => {
+    it('sets backlog when agent output file is missing (ENOENT)', async () => {
       vi.mocked(secureFs.readFile).mockRejectedValue(new Error('ENOENT'));
 
       const svc = createServiceWithMocks();
@@ -1671,11 +2006,11 @@ describe('execution-service.ts', () => {
       expect(mockUpdateFeatureStatusFn).toHaveBeenCalledWith(
         '/test/project',
         'feature-1',
-        'waiting_approval'
+        'backlog'
       );
     });
 
-    it('sets waiting_approval when agent output is only whitespace', async () => {
+    it('sets backlog when agent output is only whitespace', async () => {
       vi.mocked(secureFs.readFile).mockResolvedValue('   \n\n\t  \n  ');
 
       const svc = createServiceWithMocks();
@@ -1684,7 +2019,7 @@ describe('execution-service.ts', () => {
       expect(mockUpdateFeatureStatusFn).toHaveBeenCalledWith(
         '/test/project',
         'feature-1',
-        'waiting_approval'
+        'backlog'
       );
     });
 
@@ -1707,7 +2042,7 @@ describe('execution-service.ts', () => {
       );
     });
 
-    it('sets waiting_approval when output is 199 chars with tool usage (below threshold)', async () => {
+    it('sets backlog when output is 199 chars with tool usage (below threshold)', async () => {
       const toolMarker = '🔧 Tool: Read\n';
       const padding = 'x'.repeat(199 - toolMarker.length);
       const output = toolMarker + padding;
@@ -1721,7 +2056,7 @@ describe('execution-service.ts', () => {
       expect(mockUpdateFeatureStatusFn).toHaveBeenCalledWith(
         '/test/project',
         'feature-1',
-        'waiting_approval'
+        'backlog'
       );
     });
 
@@ -1758,14 +2093,30 @@ describe('execution-service.ts', () => {
       );
     });
 
-    it('still records success even when output validation fails', async () => {
+    it('records a failure instead of success when output validation fails', async () => {
       vi.mocked(secureFs.readFile).mockResolvedValue('');
 
       const svc = createServiceWithMocks();
       await svc.executeFeature('/test/project', 'feature-1');
 
-      // recordSuccess should still be called - the agent ran without errors
-      expect(mockRecordSuccessFn).toHaveBeenCalled();
+      // The feature goes back to backlog, so the auto-mode failure counter must
+      // advance: recording success here would let the loop retry forever.
+      expect(mockRecordSuccessFn).not.toHaveBeenCalled();
+      expect(mockTrackFailureFn).toHaveBeenCalledWith(
+        expect.objectContaining({ type: 'insufficient_output' })
+      );
+    });
+
+    it('pauses auto mode when insufficient output reaches the failure threshold', async () => {
+      vi.mocked(secureFs.readFile).mockResolvedValue('');
+      mockTrackFailureFn = vi.fn().mockReturnValue(true);
+
+      const svc = createServiceWithMocks();
+      await svc.executeFeature('/test/project', 'feature-1');
+
+      expect(mockSignalPauseFn).toHaveBeenCalledWith(
+        expect.objectContaining({ type: 'insufficient_output' })
+      );
     });
 
     it('still extracts summary when output has content but no tool markers', async () => {
@@ -1784,16 +2135,16 @@ describe('execution-service.ts', () => {
       );
     });
 
-    it('emits feature_complete with passes=true even when output validation routes to waiting_approval', async () => {
+    it('emits failed completion when output validation rejects the run', async () => {
       vi.mocked(secureFs.readFile).mockResolvedValue('');
 
       const svc = createServiceWithMocks();
       await svc.executeFeature('/test/project', 'feature-1', false, true);
 
-      // The agent ran without error - it's still a "pass" from the execution perspective
+      // Insufficient output must not trigger success hooks or suppress error notifications.
       expect(mockEventBus.emitAutoModeEvent).toHaveBeenCalledWith(
         'auto_mode_feature_complete',
-        expect.objectContaining({ passes: true })
+        expect.objectContaining({ passes: false })
       );
     });
 
@@ -1811,7 +2162,7 @@ describe('execution-service.ts', () => {
       expect(mockUpdateFeatureStatusFn).toHaveBeenCalledWith(
         '/test/project',
         'feature-1',
-        'waiting_approval'
+        'backlog'
       );
     });
 
@@ -1954,7 +2305,7 @@ describe('execution-service.ts', () => {
       expect(mockUpdateFeatureStatusFn).toHaveBeenCalledWith(
         '/test/project',
         'feature-1',
-        'waiting_approval'
+        'backlog'
       );
     });
 
@@ -1972,7 +2323,7 @@ describe('execution-service.ts', () => {
       expect(mockUpdateFeatureStatusFn).toHaveBeenCalledWith(
         '/test/project',
         'feature-1',
-        'waiting_approval'
+        'backlog'
       );
     });
 
@@ -2057,6 +2408,164 @@ describe('execution-service.ts', () => {
         .mocked(mockUpdateFeatureStatusFn)
         .mock.calls.filter((call) => call[2] === 'backlog');
       expect(backlogCalls.length).toBe(1);
+    });
+  });
+
+  describe('executeFeature - provider conversation continuity', () => {
+    const createServiceForSession = (
+      feature: Feature,
+      featureStateManager?: {
+        updateFeatureFields: (
+          projectPath: string,
+          featureId: string,
+          fields: Partial<Feature>
+        ) => Promise<void>;
+      }
+    ): ExecutionService => {
+      mockLoadFeatureFn = vi.fn().mockResolvedValue(feature);
+      return new ExecutionService(
+        mockEventBus,
+        mockConcurrencyManager,
+        mockWorktreeResolver,
+        mockSettingsService,
+        mockRunAgentFn,
+        mockExecutePipelineFn,
+        mockUpdateFeatureStatusFn,
+        mockLoadFeatureFn,
+        mockGetPlanningPromptPrefixFn,
+        mockSaveFeatureSummaryFn,
+        mockRecordLearningsFn,
+        mockContextExistsFn,
+        mockResumeFeatureFn,
+        mockTrackFailureFn,
+        mockSignalPauseFn,
+        mockRecordSuccessFn,
+        mockSaveExecutionStateFn,
+        mockLoadContextFilesFn,
+        featureStateManager
+      );
+    };
+
+    it('ignores old Jira receipts and tells the agent which run ID to report', async () => {
+      const feature = {
+        ...testFeature,
+        jiraIssueId: '10001',
+        jiraDispatchRunId: 'current-run',
+      } as Feature;
+      const updateFeatureFields = vi.fn().mockResolvedValue(undefined);
+      vi.mocked(secureFs.readFile).mockImplementation(async (file: unknown) =>
+        String(file).endsWith('jira-result.json')
+          ? JSON.stringify({
+              runId: 'previous-run',
+              outcome: 'blocked',
+              blockers: ['stale blocker'],
+            })
+          : '🔧 Tool: read\n' + 'Implemented and tested. '.repeat(30)
+      );
+      await createServiceForSession(feature, { updateFeatureFields }).executeFeature(
+        '/test/project',
+        'feature-1'
+      );
+      expect(updateFeatureFields).toHaveBeenCalledWith('/test/project', 'feature-1', {
+        executionRunId: 'current-run',
+        jiraDispatchRunId: undefined,
+      });
+      expect(mockRunAgentFn.mock.calls[0][2]).toContain('Execution run ID: current-run');
+      expect(mockUpdateFeatureStatusFn).toHaveBeenCalledWith(
+        '/test/project',
+        'feature-1',
+        'verified'
+      );
+      expect(updateFeatureFields.mock.calls.some((call) => call[2].error === 'stale blocker')).toBe(
+        false
+      );
+    });
+
+    it('overrides stale import permission with the current no-auto-decomposition policy', async () => {
+      const feature = {
+        ...testFeature,
+        description: 'Historical import: decomposition explicitly authorized',
+        jiraDelivery: {
+          rule: 'parent-with-jira-subtasks',
+          issueKey: 'AIP-1',
+          subtaskKeys: [],
+          branch: 'story/aip-1',
+          worktree: '/worktree',
+          requiresDecision: true,
+        },
+      } as Feature;
+      await createServiceForSession(feature).executeFeature('/test/project', 'feature-1');
+      const prompt = mockRunAgentFn.mock.calls[0][2];
+      expect(prompt).toContain('Absence of Jira subtasks is not authorization to split');
+      expect(prompt).toContain('supersedes historical import instructions');
+    });
+
+    it('resumes the feature provider session instead of starting a clean one', async () => {
+      const feature = {
+        ...testFeature,
+        providerSessionId: 'ses_existing_conversation',
+      } as Feature;
+
+      const svc = createServiceForSession(feature);
+      await svc.executeFeature('/test/project', 'feature-1');
+
+      const runOptions = vi.mocked(mockRunAgentFn).mock.calls[0]?.[7];
+      expect(runOptions?.sdkSessionId).toBe('ses_existing_conversation');
+    });
+
+    it('starts without a session id when the feature has none yet', async () => {
+      const svc = createServiceForSession(testFeature);
+      await svc.executeFeature('/test/project', 'feature-1');
+
+      const runOptions = vi.mocked(mockRunAgentFn).mock.calls[0]?.[7];
+      expect(runOptions?.sdkSessionId).toBeUndefined();
+    });
+
+    it('clears a stale provider session so the next run can start fresh', async () => {
+      const feature = {
+        ...testFeature,
+        providerSessionId: 'ses_gone',
+      } as Feature;
+      const updateFeatureFields = vi.fn().mockResolvedValue(undefined);
+      mockRunAgentFn = vi.fn().mockRejectedValue(new Error('Session not found: ses_gone'));
+
+      const svc = createServiceForSession(feature, { updateFeatureFields });
+      await svc.executeFeature('/test/project', 'feature-1');
+
+      expect(updateFeatureFields).toHaveBeenCalledWith('/test/project', 'feature-1', {
+        providerSessionId: undefined,
+      });
+    });
+
+    it('sends the full task description on the first turn', async () => {
+      const feature = {
+        ...testFeature,
+        description: 'FIRST-TURN-DESCRIPTION-BODY',
+      } as Feature;
+
+      const svc = createServiceForSession(feature);
+      await svc.executeFeature('/test/project', 'feature-1');
+
+      const prompt = vi.mocked(mockRunAgentFn).mock.calls[0]?.[2] as string;
+      expect(prompt).toContain('FIRST-TURN-DESCRIPTION-BODY');
+    });
+
+    it('sends only a short anchor when the conversation already exists', async () => {
+      const feature = {
+        ...testFeature,
+        description: 'DUPLICATED-DESCRIPTION-BODY',
+        providerSessionId: 'ses_existing_conversation',
+      } as Feature;
+
+      const svc = createServiceForSession(feature);
+      await svc.executeFeature('/test/project', 'feature-1');
+
+      const prompt = vi.mocked(mockRunAgentFn).mock.calls[0]?.[2] as string;
+      // The session already holds the description and instructions.
+      expect(prompt).not.toContain('DUPLICATED-DESCRIPTION-BODY');
+      // The anchor and the machine-parsed summary contract must still be present.
+      expect(prompt).toContain('**Feature ID:** feature-1');
+      expect(prompt).toContain('<summary>');
     });
   });
 });

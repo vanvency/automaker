@@ -36,7 +36,7 @@ const BASE_STATUS_DISPLAY: Record<string, StatusDisplay> = {
     borderClass: 'border-[var(--status-in-progress)]/30',
   },
   waiting_approval: {
-    label: 'Waiting Approval',
+    label: 'Waiting Review',
     colorClass: 'text-[var(--status-waiting)]',
     bgClass: 'bg-[var(--status-waiting)]/15',
     borderClass: 'border-[var(--status-waiting)]/30',

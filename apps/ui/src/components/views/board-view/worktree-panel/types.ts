@@ -56,6 +56,14 @@ export interface TestSessionInfo {
 export interface FeatureInfo {
   id: string;
   branchName?: string;
+  /** Card title, matched by the worktree switcher keyword search */
+  title?: string;
+  /** Card status, used to classify the worktree (working / idle / done) */
+  status?: string;
+  /** Jira issue key shown on the card, matched by the keyword search */
+  jiraKey?: string;
+  /** Normalized Jira work type of the card, shown as the worktree badge */
+  jiraType?: string;
 }
 
 export interface PRInfo {

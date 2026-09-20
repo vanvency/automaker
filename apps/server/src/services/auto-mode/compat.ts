@@ -15,6 +15,7 @@ import type { SettingsService } from '../settings-service.js';
 import type { FeatureLoader } from '../feature-loader.js';
 import type { ClaudeUsageService } from '../claude-usage-service.js';
 import type { FacadeOptions, AutoModeStatus, RunningAgentInfo } from './types.js';
+import type { FeatureConversationSink } from '../agent-service.js';
 
 /**
  * AutoModeServiceCompat wraps GlobalAutoModeService and facades to provide
@@ -29,7 +30,8 @@ export class AutoModeServiceCompat {
     events: EventEmitter,
     settingsService: SettingsService | null,
     featureLoader: FeatureLoader,
-    claudeUsageService?: ClaudeUsageService | null
+    claudeUsageService?: ClaudeUsageService | null,
+    featureConversations?: FeatureConversationSink | null
   ) {
     this.globalService = new GlobalAutoModeService(events, settingsService, featureLoader);
     const sharedServices = this.globalService.getSharedServices();
@@ -40,6 +42,7 @@ export class AutoModeServiceCompat {
       featureLoader,
       sharedServices,
       claudeUsageService: claudeUsageService ?? null,
+      featureConversations: featureConversations ?? null,
     };
   }
 

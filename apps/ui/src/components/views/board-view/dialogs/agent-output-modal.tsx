@@ -1,24 +1,22 @@
 import { useCallback, useEffect, useRef, useState, useMemo } from 'react';
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogHeader,
-  DialogTitle,
-} from '@/components/ui/dialog';
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
 import {
   List,
   FileText,
+  History,
+  Zap,
+  Flag,
+  RefreshCw,
   GitBranch,
   ClipboardList,
   ChevronLeft,
   ChevronRight,
-  ExternalLink,
+  Bot,
   MessageSquare,
 } from 'lucide-react';
 import { Spinner } from '@/components/ui/spinner';
-import { getElectronAPI } from '@/lib/electron';
+import { getElectronAPI, isElectron } from '@/lib/electron';
 import { LogViewer } from '@/components/ui/log-viewer';
 import { GitDiffPanel } from '@/components/ui/git-diff-panel';
 import { TaskProgressPanel } from '@/components/ui/task-progress-panel';
@@ -31,6 +29,7 @@ import {
   type PhaseSummaryEntry,
 } from '@/lib/log-parser';
 import { getFirstNonEmptySummary } from '@/lib/summary-selection';
+import { withPageAuthParams } from '@/lib/api-fetch';
 import { useAgentOutput, useFeature } from '@/hooks/queries';
 import { cn } from '@/lib/utils';
 import { MODAL_CONSTANTS } from '@/components/views/board-view/dialogs/agent-output-modal.constants';
@@ -41,7 +40,6 @@ import { toast } from 'sonner';
 interface AgentOutputModalProps {
   open: boolean;
   onClose: () => void;
-  featureDescription: string;
   featureId: string;
   /** The status of the feature - used to determine if spinner should be shown */
   featureStatus?: string;
@@ -56,6 +54,30 @@ interface AgentOutputModalProps {
 }
 
 type ViewMode = (typeof MODAL_CONSTANTS.VIEW_MODES)[keyof typeof MODAL_CONSTANTS.VIEW_MODES];
+
+interface FeatureTimelineEntry {
+  id: string;
+  kind: 'session' | 'one-shot' | 'lifecycle' | 'jira';
+  at: string;
+  endedAt?: string | null;
+  title: string;
+  detail?: string;
+  model?: string;
+  turns?: number;
+  status?: 'ok' | 'error';
+}
+
+function formatTimelineTime(value: string): string {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value;
+  return date.toLocaleString(undefined, {
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+  });
+}
 
 /**
  * Renders a single phase entry card with header and content.
@@ -166,7 +188,6 @@ function StepNavigator({
 export function AgentOutputModal({
   open,
   onClose,
-  featureDescription,
   featureId,
   featureStatus,
   onNumberKeyPress,
@@ -182,6 +203,8 @@ export function AgentOutputModal({
   // Track view mode state
   const [viewMode, setViewMode] = useState<ViewMode | null>(null);
   const [streamedContent, setStreamedContent] = useState<string>('');
+  const [timeline, setTimeline] = useState<FeatureTimelineEntry[] | null>(null);
+  const [timelineLoading, setTimelineLoading] = useState(false);
 
   // Use React Query for initial output loading
   const {
@@ -199,8 +222,6 @@ export function AgentOutputModal({
     enabled: open && !!resolvedProjectPath && !isBacklogPlan,
   });
 
-  // Prefer fresh data from server over potentially stale props passed at open time.
-  const resolvedDescription = feature?.description ?? featureDescription;
   const resolvedStatus = feature?.status ?? featureStatus;
   const resolvedBranchName = feature?.branchName ?? branchName;
 
@@ -209,8 +230,32 @@ export function AgentOutputModal({
     if (open) {
       setStreamedContent('');
       setViewMode(null);
+      setTimeline(null);
     }
   }, [open, featureId]);
+
+  // The timeline merges this card's resident pi sessions with the one-shot
+  // calls that ran in the same worktree; it is only fetched when opened.
+  const loadTimeline = useCallback(async () => {
+    if (!resolvedProjectPath) return;
+    const api = getElectronAPI();
+    if (!api?.features?.timeline) return;
+    setTimelineLoading(true);
+    try {
+      const result = await api.features.timeline(resolvedProjectPath, featureId);
+      setTimeline(result.success ? (result.entries ?? []) : []);
+    } catch {
+      setTimeline([]);
+    } finally {
+      setTimelineLoading(false);
+    }
+  }, [resolvedProjectPath, featureId]);
+
+  useEffect(() => {
+    if (open && viewMode === MODAL_CONSTANTS.VIEW_MODES.TIMELINE && !timeline) {
+      void loadTimeline();
+    }
+  }, [open, viewMode, timeline, loadTimeline]);
 
   // Combine initial output from query with streamed content from WebSocket
   const output = initialOutput + streamedContent;
@@ -245,29 +290,28 @@ export function AgentOutputModal({
   const effectiveViewMode =
     viewMode ?? (summary ? MODAL_CONSTANTS.VIEW_MODES.SUMMARY : MODAL_CONSTANTS.VIEW_MODES.PARSED);
 
-  const handleOpenWeb = useCallback(async () => {
+  const handleOpenHerdr = useCallback(async () => {
     if (!resolvedProjectPath) return;
+    // Pre-open the tab so the browser keeps the user gesture: the API call can
+    // be slow while the server starts or reuses the attach PTY.
+    const pendingTab = isElectron() ? null : window.open('', '_blank');
     try {
       const api = getElectronAPI();
-      const getOpencodeWeb = api.features?.getOpencodeWeb;
-      if (!getOpencodeWeb) throw new Error('Open Web is not supported by this client');
-      const result = await getOpencodeWeb(resolvedProjectPath, featureId);
+      const getHerdrWeb = api.features?.getHerdrWeb;
+      if (!getHerdrWeb) throw new Error('Herdr is not supported by this client');
+      const result = await getHerdrWeb(resolvedProjectPath, featureId);
       if (!result?.success || !result.url) {
-        throw new Error(result?.error || 'No opencode session found for this worktree yet');
+        throw new Error(result?.error || 'Could not open the herdr terminal');
       }
-      window.open(result.url, '_blank', 'noopener,noreferrer');
-      if (result.password) {
-        try {
-          await navigator.clipboard.writeText(result.password);
-          toast.success('opencode 密码已复制，请在浏览器认证框粘贴');
-        } catch {
-          toast.message('opencode 需要登录', {
-            description: `用户名 ${result.username || 'opencode'}，密码请查看 /etc/opencode/server.env`,
-          });
-        }
+      const url = withPageAuthParams(new URL(result.url, window.location.origin));
+      if (pendingTab) {
+        pendingTab.location.replace(url.toString());
+      } else {
+        window.open(url.toString(), '_blank', 'noopener,noreferrer');
       }
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : 'Open opencode web failed');
+      pendingTab?.close();
+      toast.error(error instanceof Error ? error.message : 'Open herdr terminal failed');
     }
   }, [resolvedProjectPath, featureId]);
 
@@ -563,6 +607,7 @@ export function AgentOutputModal({
       <DialogContent
         className="w-full max-h-[85dvh] max-w-[calc(100%-2rem)] sm:w-[60vw] sm:max-w-[60vw] sm:max-h-[80vh] md:w-[90vw] md:max-w-[1200px] md:max-h-[85vh] rounded-xl flex flex-col"
         data-testid="agent-output-modal"
+        aria-describedby={undefined}
       >
         <DialogHeader className="shrink-0">
           <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 pr-10">
@@ -612,6 +657,18 @@ export function AgentOutputModal({
                 Changes
               </button>
               <button
+                onClick={() => setViewMode('timeline')}
+                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium transition-all whitespace-nowrap ${
+                  effectiveViewMode === MODAL_CONSTANTS.VIEW_MODES.TIMELINE
+                    ? 'bg-primary/20 text-primary shadow-sm'
+                    : 'text-muted-foreground hover:text-foreground hover:bg-accent'
+                }`}
+                data-testid="view-mode-timeline"
+              >
+                <History className="w-3.5 h-3.5" />
+                Timeline
+              </button>
+              <button
                 onClick={() => setViewMode('raw')}
                 className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium transition-all whitespace-nowrap ${
                   effectiveViewMode === 'raw'
@@ -624,12 +681,12 @@ export function AgentOutputModal({
                 Raw
               </button>
               <button
-                onClick={handleOpenWeb}
+                onClick={handleOpenHerdr}
                 className="flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium transition-all whitespace-nowrap text-muted-foreground hover:text-foreground hover:bg-accent"
-                data-testid="open-opencode-web"
+                data-testid="open-herdr-web"
               >
-                <ExternalLink className="w-3.5 h-3.5" />
-                Open Web
+                <Bot className="w-3.5 h-3.5" />
+                Agent
               </button>
               {onReply && featureStatus === 'waiting_approval' && (
                 <button
@@ -643,12 +700,6 @@ export function AgentOutputModal({
               )}
             </div>
           </div>
-          <DialogDescription
-            className="mt-1 max-h-24 overflow-y-auto wrap-break-word"
-            data-testid="agent-output-description"
-          >
-            {resolvedDescription}
-          </DialogDescription>
         </DialogHeader>
 
         {/* Task Progress Panel - shows when tasks are being executed */}
@@ -723,6 +774,61 @@ export function AgentOutputModal({
                 : 'Scroll to bottom to enable auto-scroll'}
             </div>
           </>
+        ) : effectiveViewMode === MODAL_CONSTANTS.VIEW_MODES.TIMELINE ? (
+          <div
+            className={`flex-1 min-h-0 ${MODAL_CONSTANTS.COMPONENT_HEIGHTS.SMALL_MIN} ${MODAL_CONSTANTS.COMPONENT_HEIGHTS.SMALL_MAX} overflow-y-auto scrollbar-visible space-y-2 p-1`}
+            data-testid="feature-timeline"
+          >
+            {timelineLoading && !timeline ? (
+              <div className="flex items-center justify-center h-full text-muted-foreground">
+                <Spinner size="lg" className="mr-2" />
+                Loading timeline...
+              </div>
+            ) : !timeline || timeline.length === 0 ? (
+              <div className="flex items-center justify-center h-full text-muted-foreground">
+                这张卡片还没有可展示的时间线。
+              </div>
+            ) : (
+              timeline.map((entry) => (
+                <div
+                  key={entry.id}
+                  className="rounded-lg border border-border/50 bg-card p-3"
+                  data-testid={`timeline-entry-${entry.kind}`}
+                >
+                  <div className="flex items-center gap-2 text-xs">
+                    {entry.kind === 'session' ? (
+                      <MessageSquare className="w-3.5 h-3.5 shrink-0 text-brand-500" />
+                    ) : entry.kind === 'one-shot' ? (
+                      <Zap className="w-3.5 h-3.5 shrink-0 text-amber-500" />
+                    ) : entry.kind === 'jira' ? (
+                      <RefreshCw className="w-3.5 h-3.5 shrink-0 text-purple-500" />
+                    ) : (
+                      <Flag className="w-3.5 h-3.5 shrink-0 text-muted-foreground" />
+                    )}
+                    <span className="truncate font-medium">{entry.title}</span>
+                    <span className="ml-auto shrink-0 text-[10px] text-muted-foreground">
+                      {formatTimelineTime(entry.at)}
+                    </span>
+                  </div>
+                  <div className="mt-1 flex flex-wrap items-center gap-2 text-[10px] text-muted-foreground">
+                    {entry.model && (
+                      <span className="rounded bg-muted px-1.5 py-0.5 font-mono">
+                        {entry.model}
+                      </span>
+                    )}
+                    {typeof entry.turns === 'number' && <span>{entry.turns} 轮</span>}
+                    {entry.endedAt && <span>结束 {formatTimelineTime(entry.endedAt)}</span>}
+                    {entry.status === 'error' && <span className="text-destructive">出错</span>}
+                  </div>
+                  {entry.detail && (
+                    <p className="mt-1 line-clamp-2 text-[11px] text-muted-foreground">
+                      {entry.detail}
+                    </p>
+                  )}
+                </div>
+              ))
+            )}
+          </div>
         ) : (
           <>
             <div

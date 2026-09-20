@@ -470,7 +470,7 @@ export function AddFeatureDialog({
           <DialogDescription>
             {isSpawnMode
               ? `Create a sub-task that depends on "${parentFeature?.title || parentFeature?.description.slice(0, 50)}..."`
-              : 'Create a new feature card for the Kanban board.'}
+              : 'Create a new feature card for the Task Kanban.'}
           </DialogDescription>
         </DialogHeader>
 

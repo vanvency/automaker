@@ -36,6 +36,8 @@ export type RunAgentFn = (
     reasoningEffort?: ReasoningEffort;
     providerId?: string;
     branchName?: string | null;
+    /** Provider-native conversation id, so follow-up runs continue the same session. */
+    sdkSessionId?: string;
   }
 ) => Promise<void>;
 

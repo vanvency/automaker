@@ -24,6 +24,7 @@ import {
   DEFAULT_OPENCODE_MODEL,
   DEFAULT_GEMINI_MODEL,
   DEFAULT_COPILOT_MODEL,
+  DEFAULT_PI_MODEL,
   DEFAULT_MAX_CONCURRENCY,
   DEFAULT_PHASE_MODELS,
   getAllOpencodeModelIds,
@@ -37,6 +38,7 @@ import {
   type CursorModelId,
   type GeminiModelId,
   type CopilotModelId,
+  type PiModelId,
   type PhaseModelEntry,
 } from '@automaker/types';
 
@@ -87,6 +89,8 @@ const SETTINGS_FIELDS_TO_SYNC = [
   'geminiDefaultModel',
   'enabledCopilotModels',
   'copilotDefaultModel',
+  'enabledPiModels',
+  'piDefaultModel',
   'enabledDynamicModelIds',
   'knownDynamicModelIds',
   'disabledProviders',
@@ -711,6 +715,23 @@ export async function refreshSettingsFromServer(): Promise<boolean> {
       sanitizedEnabledCopilotModels.push(sanitizedCopilotDefaultModel);
     }
 
+    // Sanitize Pi models. Model IDs are discovered from the LiteLLM gateway, so
+    // accept any canonical "pi:" (or legacy "pi-") prefixed ID instead of a static allowlist.
+    const sanitizedEnabledPiModels = (serverSettings.enabledPiModels ?? []).filter(
+      (id): id is PiModelId =>
+        typeof id === 'string' && (id.startsWith('pi:') || id.startsWith('pi-'))
+    );
+    const sanitizedPiDefaultModel =
+      typeof serverSettings.piDefaultModel === 'string' &&
+      (serverSettings.piDefaultModel.startsWith('pi:') ||
+        serverSettings.piDefaultModel.startsWith('pi-'))
+        ? (serverSettings.piDefaultModel as PiModelId)
+        : DEFAULT_PI_MODEL;
+
+    if (!sanitizedEnabledPiModels.includes(sanitizedPiDefaultModel)) {
+      sanitizedEnabledPiModels.push(sanitizedPiDefaultModel);
+    }
+
     const persistedDynamicModelIds =
       serverSettings.enabledDynamicModelIds ?? currentAppState.enabledDynamicModelIds;
     const sanitizedDynamicModelIds = persistedDynamicModelIds.filter(
@@ -749,6 +770,9 @@ export async function refreshSettingsFromServer(): Promise<boolean> {
           ideationModel: migratePhaseModelEntry(serverSettings.phaseModels.ideationModel),
           memoryExtractionModel: migratePhaseModelEntry(
             serverSettings.phaseModels.memoryExtractionModel
+          ),
+          jiraChangeSummaryModel: migratePhaseModelEntry(
+            serverSettings.phaseModels.jiraChangeSummaryModel
           ),
           commitMessageModel: migratePhaseModelEntry(serverSettings.phaseModels.commitMessageModel),
           prDescriptionModel: migratePhaseModelEntry(serverSettings.phaseModels.prDescriptionModel),
@@ -825,6 +849,8 @@ export async function refreshSettingsFromServer(): Promise<boolean> {
       geminiDefaultModel: sanitizedGeminiDefaultModel,
       enabledCopilotModels: sanitizedEnabledCopilotModels,
       copilotDefaultModel: sanitizedCopilotDefaultModel,
+      enabledPiModels: sanitizedEnabledPiModels,
+      piDefaultModel: sanitizedPiDefaultModel,
       enabledDynamicModelIds: sanitizedDynamicModelIds,
       knownDynamicModelIds: sanitizedKnownDynamicModelIds,
       disabledProviders: serverSettings.disabledProviders ?? [],

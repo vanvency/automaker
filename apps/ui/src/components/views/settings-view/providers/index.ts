@@ -5,3 +5,4 @@ export { CodexSettingsTab } from './codex-settings-tab';
 export { OpencodeSettingsTab } from './opencode-settings-tab';
 export { GeminiSettingsTab } from './gemini-settings-tab';
 export { CopilotSettingsTab } from './copilot-settings-tab';
+export { PiSettingsTab } from './pi-settings-tab';

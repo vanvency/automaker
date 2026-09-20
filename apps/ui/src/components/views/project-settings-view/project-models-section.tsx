@@ -86,6 +86,14 @@ const MEMORY_TASKS: PhaseConfig[] = [
   },
 ];
 
+const MAINTENANCE_TASKS: PhaseConfig[] = [
+  {
+    key: 'jiraChangeSummaryModel',
+    label: 'Jira Change Summary',
+    description: 'Summarises Jira requirement edits for a task that is running',
+  },
+];
+
 /**
  * Default feature model override section for per-project settings.
  */
@@ -497,6 +505,14 @@ export function ProjectModelsSection({ project }: ProjectModelsSectionProps) {
           title="Memory Tasks"
           subtitle="Fast models recommended for learning extraction"
           phases={MEMORY_TASKS}
+          project={project}
+        />
+
+        {/* Maintenance Tasks */}
+        <PhaseGroup
+          title="Maintenance Tasks"
+          subtitle="Keeps running tasks in sync with their source of truth"
+          phases={MAINTENANCE_TASKS}
           project={project}
         />
       </div>

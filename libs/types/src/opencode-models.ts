@@ -2,18 +2,26 @@
  * OpenCode Model IDs
  * Models available via OpenCode CLI (opencode models command)
  *
- * All OpenCode model IDs use 'opencode-' prefix for consistent provider routing.
- * This prevents naming collisions and ensures clear provider attribution.
+ * All OpenCode model IDs use the `agent:model` form with an `opencode:` prefix,
+ * e.g. `opencode:litellm/auto` (agent = opencode CLI, model = litellm/auto).
+ * The legacy dash form (`opencode-litellm/auto`) and slash form
+ * (`opencode/big-pickle`) are still parsed and migrated.
  */
 export type OpencodeModelId =
   // OpenCode Free Tier Models
-  | 'opencode-big-pickle'
-  | 'opencode-glm-5-free'
-  | 'opencode-gpt-5-nano'
-  | 'opencode-kimi-k2.5-free'
-  | 'opencode-minimax-m2.5-free'
+  | 'opencode:big-pickle'
+  | 'opencode:glm-5-free'
+  | 'opencode:gpt-5-nano'
+  | 'opencode:kimi-k2.5-free'
+  | 'opencode:minimax-m2.5-free'
   // Local LiteLLM gateway (OpenCode provider id 'litellm')
-  | 'opencode-litellm/auto';
+  | 'opencode:litellm/auto';
+
+/** Canonical OpenCode prefix (`agent:model`) */
+export const OPENCODE_MODEL_PREFIX = 'opencode:';
+
+/** Legacy dash prefix, kept for parsing/migration only */
+export const LEGACY_OPENCODE_MODEL_PREFIX = 'opencode-';
 
 /**
  * Legacy OpenCode model IDs (with slash format) for migration support
@@ -40,15 +48,15 @@ export type OpencodeProvider = 'opencode';
  */
 export const OPENCODE_MODEL_MAP: Record<string, OpencodeModelId> = {
   // OpenCode free tier aliases
-  'big-pickle': 'opencode-big-pickle',
-  pickle: 'opencode-big-pickle',
-  'glm-free': 'opencode-glm-5-free',
-  'glm-5': 'opencode-glm-5-free',
-  'gpt-nano': 'opencode-gpt-5-nano',
-  nano: 'opencode-gpt-5-nano',
-  'kimi-free': 'opencode-kimi-k2.5-free',
-  kimi: 'opencode-kimi-k2.5-free',
-  minimax: 'opencode-minimax-m2.5-free',
+  'big-pickle': 'opencode:big-pickle',
+  pickle: 'opencode:big-pickle',
+  'glm-free': 'opencode:glm-5-free',
+  'glm-5': 'opencode:glm-5-free',
+  'gpt-nano': 'opencode:gpt-5-nano',
+  nano: 'opencode:gpt-5-nano',
+  'kimi-free': 'opencode:kimi-k2.5-free',
+  kimi: 'opencode:kimi-k2.5-free',
+  minimax: 'opencode:minimax-m2.5-free',
 } as const;
 
 /**
@@ -57,15 +65,15 @@ export const OPENCODE_MODEL_MAP: Record<string, OpencodeModelId> = {
  */
 export const LEGACY_OPENCODE_MODEL_MAP: Record<LegacyOpencodeModelId, OpencodeModelId> = {
   // Current models
-  'opencode/big-pickle': 'opencode-big-pickle',
-  'opencode/glm-5-free': 'opencode-glm-5-free',
-  'opencode/gpt-5-nano': 'opencode-gpt-5-nano',
-  'opencode/kimi-k2.5-free': 'opencode-kimi-k2.5-free',
-  'opencode/minimax-m2.5-free': 'opencode-minimax-m2.5-free',
+  'opencode/big-pickle': 'opencode:big-pickle',
+  'opencode/glm-5-free': 'opencode:glm-5-free',
+  'opencode/gpt-5-nano': 'opencode:gpt-5-nano',
+  'opencode/kimi-k2.5-free': 'opencode:kimi-k2.5-free',
+  'opencode/minimax-m2.5-free': 'opencode:minimax-m2.5-free',
   // Retired models → mapped to replacements
-  'opencode/glm-4.7-free': 'opencode-glm-5-free',
-  'opencode/grok-code': 'opencode-big-pickle', // grok-code retired, fallback to default
-  'opencode/minimax-m2.1-free': 'opencode-minimax-m2.5-free',
+  'opencode/glm-4.7-free': 'opencode:glm-5-free',
+  'opencode/grok-code': 'opencode:big-pickle', // grok-code retired, fallback to default
+  'opencode/minimax-m2.1-free': 'opencode:minimax-m2.5-free',
 };
 
 /**
@@ -73,9 +81,22 @@ export const LEGACY_OPENCODE_MODEL_MAP: Record<LegacyOpencodeModelId, OpencodeMo
  * Used to migrate settings that reference models no longer available.
  */
 export const RETIRED_OPENCODE_MODEL_MAP: Record<string, OpencodeModelId> = {
-  'opencode-glm-4.7-free': 'opencode-glm-5-free',
-  'opencode-grok-code': 'opencode-big-pickle',
-  'opencode-minimax-m2.1-free': 'opencode-minimax-m2.5-free',
+  'opencode-glm-4.7-free': 'opencode:glm-5-free',
+  'opencode-grok-code': 'opencode:big-pickle',
+  'opencode-minimax-m2.1-free': 'opencode:minimax-m2.5-free',
+};
+
+/**
+ * Map from the pre-rename dash-format canonical IDs (`opencode-litellm/auto`,
+ * `opencode-big-pickle`, ...) to the current `agent:model` form.
+ */
+export const LEGACY_OPENCODE_DASH_MODEL_MAP: Record<string, OpencodeModelId> = {
+  'opencode-litellm/auto': 'opencode:litellm/auto',
+  'opencode-big-pickle': 'opencode:big-pickle',
+  'opencode-glm-5-free': 'opencode:glm-5-free',
+  'opencode-gpt-5-nano': 'opencode:gpt-5-nano',
+  'opencode-kimi-k2.5-free': 'opencode:kimi-k2.5-free',
+  'opencode-minimax-m2.5-free': 'opencode:minimax-m2.5-free',
 };
 
 /**
@@ -95,10 +116,11 @@ export interface OpencodeModelConfig {
  * All IDs use 'opencode-' prefix for consistent provider routing.
  */
 export const OPENCODE_MODELS: OpencodeModelConfig[] = [
-  // Local LiteLLM gateway (see /etc/litellm/config.yaml) - listed first so it
-  // is the default choice for dispatched work.
+  // Local LiteLLM gateway (see /etc/litellm/config.yaml). Listed first so the
+  // pickers fall back to it, but DEFAULT_OPENCODE_MODEL stays the free tier:
+  // change both if dispatched work should default to the gateway.
   {
-    id: 'opencode-litellm/auto',
+    id: 'opencode:litellm/auto',
     label: 'Auto',
     description: 'LiteLLM gateway: Kimi K3, falls back to DeepSeek Flash',
     supportsVision: false,
@@ -107,7 +129,7 @@ export const OPENCODE_MODELS: OpencodeModelConfig[] = [
   },
   // OpenCode Free Tier Models
   {
-    id: 'opencode-big-pickle',
+    id: 'opencode:big-pickle',
     label: 'Big Pickle',
     description: 'OpenCode free tier model - great for general coding',
     supportsVision: false,
@@ -115,7 +137,7 @@ export const OPENCODE_MODELS: OpencodeModelConfig[] = [
     tier: 'free',
   },
   {
-    id: 'opencode-glm-5-free',
+    id: 'opencode:glm-5-free',
     label: 'GLM 5 Free',
     description: 'OpenCode free tier GLM model',
     supportsVision: false,
@@ -123,7 +145,7 @@ export const OPENCODE_MODELS: OpencodeModelConfig[] = [
     tier: 'free',
   },
   {
-    id: 'opencode-gpt-5-nano',
+    id: 'opencode:gpt-5-nano',
     label: 'GPT-5 Nano',
     description: 'OpenCode free tier nano model - fast and lightweight',
     supportsVision: false,
@@ -131,7 +153,7 @@ export const OPENCODE_MODELS: OpencodeModelConfig[] = [
     tier: 'free',
   },
   {
-    id: 'opencode-kimi-k2.5-free',
+    id: 'opencode:kimi-k2.5-free',
     label: 'Kimi K2.5 Free',
     description: 'OpenCode free tier Kimi model for coding',
     supportsVision: false,
@@ -139,7 +161,7 @@ export const OPENCODE_MODELS: OpencodeModelConfig[] = [
     tier: 'free',
   },
   {
-    id: 'opencode-minimax-m2.5-free',
+    id: 'opencode:minimax-m2.5-free',
     label: 'MiniMax M2.5 Free',
     description: 'OpenCode free tier MiniMax model',
     supportsVision: false,
@@ -163,7 +185,7 @@ export const OPENCODE_MODEL_CONFIG_MAP: Record<OpencodeModelId, OpencodeModelCon
 /**
  * Default OpenCode model - OpenCode free tier
  */
-export const DEFAULT_OPENCODE_MODEL: OpencodeModelId = 'opencode-big-pickle';
+export const DEFAULT_OPENCODE_MODEL: OpencodeModelId = 'opencode:big-pickle';
 
 /**
  * Helper: Get display name for model
@@ -201,6 +223,11 @@ export function resolveOpencodeModelId(input: string): OpencodeModelId | undefin
   // Check if it's already a valid model ID
   if (OPENCODE_MODEL_CONFIG_MAP[input as OpencodeModelId]) {
     return input as OpencodeModelId;
+  }
+
+  // Pre-rename dash form (opencode-litellm/auto -> opencode:litellm/auto)
+  if (input in LEGACY_OPENCODE_DASH_MODEL_MAP) {
+    return LEGACY_OPENCODE_DASH_MODEL_MAP[input];
   }
 
   // Check retired model map (handles old canonical IDs like 'opencode-grok-code')

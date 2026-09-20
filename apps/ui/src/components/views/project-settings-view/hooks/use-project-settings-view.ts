@@ -1,6 +1,7 @@
 import { useState, useCallback } from 'react';
 
 export type ProjectSettingsViewId =
+  | 'jira'
   | 'identity'
   | 'theme'
   | 'worktrees'

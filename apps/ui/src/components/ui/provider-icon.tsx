@@ -20,6 +20,7 @@ const PROVIDER_ICON_KEYS = {
   glm: 'glm',
   bigpickle: 'bigpickle',
   copilot: 'copilot',
+  pi: 'pi',
 } as const;
 
 type ProviderIconKey = keyof typeof PROVIDER_ICON_KEYS;
@@ -120,6 +121,12 @@ const PROVIDER_ICON_DEFINITIONS: Record<ProviderIconKey, ProviderIconDefinition>
     // Official GitHub Octocat logo mark (theme-aware via currentColor)
     path: 'M48.854 0C21.839 0 0 22 0 49.217c0 21.756 13.993 40.172 33.405 46.69 2.427.49 3.316-1.059 3.316-2.362 0-1.141-.08-5.052-.08-9.127-13.59 2.934-16.42-5.867-16.42-5.867-2.184-5.704-5.42-7.17-5.42-7.17-4.448-3.015.324-3.015.324-3.015 4.934.326 7.523 5.052 7.523 5.052 4.367 7.496 11.404 5.378 14.235 4.074.404-3.178 1.699-5.378 3.074-6.6-10.839-1.141-22.243-5.378-22.243-24.283 0-5.378 1.94-9.778 5.014-13.2-.485-1.222-2.184-6.275.486-13.038 0 0 4.125-1.304 13.426 5.052a46.97 46.97 0 0 1 12.214-1.63c4.125 0 8.33.571 12.213 1.63 9.302-6.356 13.427-5.052 13.427-5.052 2.67 6.763.97 11.816.485 13.038 3.155 3.422 5.015 7.822 5.015 13.2 0 18.905-11.404 23.06-22.324 24.283 1.78 1.548 3.316 4.481 3.316 9.126 0 6.6-.08 11.897-.08 13.526 0 1.304.89 2.853 3.316 2.364 19.412-6.52 33.405-24.935 33.405-46.691C97.707 22 75.788 0 48.854 0z',
   },
+  pi: {
+    viewBox: '0 0 24 24',
+    // Pi symbol: top bar with two legs
+    path: 'M4 6h16v2.4h-3.8V18h-2.5V8.4H10.3V18H7.8V8.4H4V6z',
+    fill: '#94A3B8',
+  },
 };
 
 export interface ProviderIconProps extends Omit<SVGProps<SVGSVGElement>, 'viewBox'> {
@@ -215,6 +222,10 @@ export function GrokIcon(props: Omit<ProviderIconProps, 'provider'>) {
 
 export function OpenCodeIcon(props: Omit<ProviderIconProps, 'provider'>) {
   return <ProviderIcon provider={PROVIDER_ICON_KEYS.opencode} {...props} />;
+}
+
+export function PiIcon(props: Omit<ProviderIconProps, 'provider'>) {
+  return <ProviderIcon provider={PROVIDER_ICON_KEYS.pi} {...props} />;
 }
 
 export function DeepSeekIcon({
@@ -439,6 +450,7 @@ export const PROVIDER_ICON_COMPONENTS: Record<
   opencode: OpenCodeIcon,
   gemini: GeminiIcon,
   copilot: CopilotIcon,
+  pi: PiIcon,
 };
 
 /**
@@ -449,6 +461,11 @@ function getUnderlyingModelIcon(model?: AgentModel | string): ProviderIconKey {
   if (!model) return 'anthropic';
 
   const modelStr = typeof model === 'string' ? model.toLowerCase() : model;
+
+  // Pi models are always prefixed (e.g. "pi:litellm/auto")
+  if (typeof modelStr === 'string' && (modelStr.startsWith('pi:') || modelStr.startsWith('pi-'))) {
+    return 'pi';
+  }
 
   // Check for Amazon Bedrock models first (amazon-bedrock/...)
   if (modelStr.startsWith('openrouter/')) {
@@ -611,6 +628,7 @@ function getUnderlyingModelIcon(model?: AgentModel | string): ProviderIconKey {
   if (provider === 'cursor') return 'cursor';
   if (provider === 'opencode') return 'opencode';
   if (provider === 'copilot') return 'copilot';
+  if (provider === 'pi') return 'pi';
   return 'anthropic';
 }
 
@@ -636,6 +654,7 @@ export function getProviderIconForModel(
     glm: GlmIcon,
     bigpickle: BigPickleIcon,
     copilot: CopilotIcon,
+    pi: PiIcon,
   };
 
   return iconMap[iconKey] || AnthropicIcon;

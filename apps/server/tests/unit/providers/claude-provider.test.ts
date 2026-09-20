@@ -173,6 +173,32 @@ describe('claude-provider.ts', () => {
       });
     });
 
+    it('should resume from sdkSessionId even without local conversation history', async () => {
+      vi.mocked(sdk.query).mockReturnValue(
+        (async function* () {
+          yield { type: 'text', text: 'test' };
+        })()
+      );
+
+      const generator = provider.executeQuery({
+        prompt: 'Continue the feature implementation',
+        model: 'claude-opus-4-6',
+        cwd: '/test',
+        sdkSessionId: 'feature-session-id',
+      });
+
+      await collectAsyncGenerator(generator);
+
+      // Feature runs build their own prompts and pass no history; the session id
+      // alone must be enough to continue the same conversation.
+      expect(sdk.query).toHaveBeenCalledWith({
+        prompt: 'Continue the feature implementation',
+        options: expect.objectContaining({
+          resume: 'feature-session-id',
+        }),
+      });
+    });
+
     it('should handle array prompt (with images)', async () => {
       vi.mocked(sdk.query).mockReturnValue(
         (async function* () {

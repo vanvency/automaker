@@ -12,10 +12,15 @@ import {
   LEGACY_OPENCODE_MODEL_MAP,
   OPENCODE_MODEL_CONFIG_MAP,
   RETIRED_OPENCODE_MODEL_MAP,
+  LEGACY_OPENCODE_DASH_MODEL_MAP,
+  LEGACY_OPENCODE_MODEL_PREFIX,
+  OPENCODE_MODEL_PREFIX,
 } from './opencode-models.js';
 import type { ClaudeCanonicalId } from './model.js';
 import { LEGACY_CLAUDE_ALIAS_MAP, CLAUDE_CANONICAL_MAP, CLAUDE_MODEL_MAP } from './model.js';
 import type { PhaseModelEntry } from './settings.js';
+import { LEGACY_PI_MODEL_PREFIX, PI_MODEL_PREFIX } from './pi-models.js';
+import { LEGACY_PROVIDER_PREFIXES, PROVIDER_PREFIXES } from './provider-utils.js';
 
 /**
  * Check if a string is a legacy Cursor model ID (without prefix)
@@ -70,6 +75,11 @@ export function migrateModelId(legacyId: string | undefined | null): string {
     return legacyId;
   }
 
+  // Pre-rename dash form (opencode-litellm/auto) -> agent:model form
+  if (legacyId in LEGACY_OPENCODE_DASH_MODEL_MAP) {
+    return LEGACY_OPENCODE_DASH_MODEL_MAP[legacyId];
+  }
+
   // Retired opencode- canonical IDs (e.g., 'opencode-grok-code' → 'opencode-big-pickle')
   if (legacyId.startsWith('opencode-') && legacyId in RETIRED_OPENCODE_MODEL_MAP) {
     return RETIRED_OPENCODE_MODEL_MAP[legacyId];
@@ -90,6 +100,22 @@ export function migrateModelId(legacyId: string | undefined | null): string {
     return LEGACY_CLAUDE_ALIAS_MAP[legacyId];
   }
 
+  // Legacy Pi dash form (pi-litellm/worker) -> canonical agent:model form
+  if (legacyId.startsWith(LEGACY_PI_MODEL_PREFIX)) {
+    return `${PI_MODEL_PREFIX}${legacyId.slice(LEGACY_PI_MODEL_PREFIX.length)}`;
+  }
+
+  // Remaining legacy dash forms (cursor-auto, codex-gpt-5.2-codex,
+  // gemini-2.5-flash, copilot-gpt-4.1) -> agent:model
+  for (const [provider, prefix] of Object.entries(LEGACY_PROVIDER_PREFIXES)) {
+    if (legacyId.startsWith(prefix)) {
+      const canonicalPrefix = (PROVIDER_PREFIXES as Record<string, string>)[provider];
+      if (canonicalPrefix) {
+        return `${canonicalPrefix}${legacyId.slice(prefix.length)}`;
+      }
+    }
+  }
+
   // Unknown or already canonical - pass through
   return legacyId;
 }
@@ -106,23 +132,23 @@ export function migrateCursorModelIds(ids: string[]): CursorModelId[] {
   }
 
   return ids.map((id) => {
-    // Already canonical
-    if (id.startsWith('cursor-') && id in CURSOR_MODEL_MAP) {
+    // Already canonical (cursor:<model>)
+    if (id.startsWith('cursor:')) {
       return id as CursorModelId;
     }
 
-    // Legacy ID
+    // Legacy bare ID (auto, composer-1, ...)
     if (isLegacyCursorModelId(id)) {
       return LEGACY_CURSOR_MODEL_MAP[id];
     }
 
-    // Unknown - assume it might be a valid cursor model with prefix
+    // Pre-rename dash form (cursor-auto)
     if (id.startsWith('cursor-')) {
-      return id as CursorModelId;
+      return `cursor:${id.slice('cursor-'.length)}` as CursorModelId;
     }
 
     // Add prefix if not present
-    return `cursor-${id}` as CursorModelId;
+    return `cursor:${id}` as CursorModelId;
   });
 }
 
@@ -139,14 +165,14 @@ export function migrateOpencodeModelIds(ids: string[]): OpencodeModelId[] {
 
   return ids
     .map((id) => {
-      // Already canonical (dash format) and current
-      if (id.startsWith('opencode-') && id in OPENCODE_MODEL_CONFIG_MAP) {
+      // Already canonical (agent:model form)
+      if (id.startsWith(OPENCODE_MODEL_PREFIX)) {
         return id as OpencodeModelId;
       }
 
-      // Retired canonical IDs (e.g., 'opencode-grok-code') → replacement
-      if (id.startsWith('opencode-') && id in RETIRED_OPENCODE_MODEL_MAP) {
-        return RETIRED_OPENCODE_MODEL_MAP[id];
+      // Pre-rename dash form (opencode-litellm/auto) -> canonical
+      if (id in LEGACY_OPENCODE_DASH_MODEL_MAP) {
+        return LEGACY_OPENCODE_DASH_MODEL_MAP[id];
       }
 
       // Legacy ID (slash format)
@@ -154,14 +180,20 @@ export function migrateOpencodeModelIds(ids: string[]): OpencodeModelId[] {
         return LEGACY_OPENCODE_MODEL_MAP[id];
       }
 
-      // Convert slash to dash format for unknown models
-      if (id.startsWith('opencode/')) {
-        return id.replace('opencode/', 'opencode-') as OpencodeModelId;
+      // Retired canonical IDs (e.g., 'opencode-grok-code') → replacement
+      if (id in RETIRED_OPENCODE_MODEL_MAP) {
+        return RETIRED_OPENCODE_MODEL_MAP[id];
       }
 
-      // Add prefix if not present
-      if (!id.startsWith('opencode-')) {
-        return `opencode-${id}` as OpencodeModelId;
+      // Dynamic CLI model ids ("litellm/worker", "github-copilot/gpt-4o")
+      // become canonical by adding the agent prefix.
+      const bare = id.startsWith(LEGACY_OPENCODE_MODEL_PREFIX)
+        ? id.slice(LEGACY_OPENCODE_MODEL_PREFIX.length)
+        : id.startsWith('opencode/')
+          ? id.slice('opencode/'.length)
+          : id;
+      if (bare) {
+        return `${OPENCODE_MODEL_PREFIX}${bare}` as OpencodeModelId;
       }
 
       return id as OpencodeModelId;
@@ -211,22 +243,28 @@ export function migratePhaseModelEntry(
 export function getBareModelIdForCli(modelId: string): string {
   if (!modelId) return modelId;
 
-  // Cursor models
+  // Cursor models - canonical (cursor:gpt-5.2) and legacy (cursor-gpt-5.2)
+  if (modelId.startsWith('cursor:')) {
+    return modelId.slice('cursor:'.length);
+  }
   if (modelId.startsWith('cursor-')) {
-    const bareId = modelId.slice(7); // Remove 'cursor-'
-    // For GPT models, keep the gpt- prefix since that's what the CLI expects
-    // e.g., 'cursor-gpt-5.2' -> 'gpt-5.2'
-    return bareId;
+    return modelId.slice('cursor-'.length);
   }
 
   // OpenCode models - strip prefix
+  if (modelId.startsWith('opencode:')) {
+    return modelId.slice('opencode:'.length);
+  }
   if (modelId.startsWith('opencode-')) {
-    return modelId.slice(9); // Remove 'opencode-'
+    return modelId.slice('opencode-'.length);
   }
 
   // Codex models - strip prefix
+  if (modelId.startsWith('codex:')) {
+    return modelId.slice('codex:'.length);
+  }
   if (modelId.startsWith('codex-')) {
-    return modelId.slice(6); // Remove 'codex-'
+    return modelId.slice('codex-'.length);
   }
 
   // Claude and other models - pass through

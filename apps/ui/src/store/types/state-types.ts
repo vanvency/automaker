@@ -8,6 +8,7 @@ import type {
   OpencodeModelId,
   GeminiModelId,
   CopilotModelId,
+  PiModelId,
   PhaseModelConfig,
   PhaseModelKey,
   PhaseModelEntry,
@@ -238,6 +239,10 @@ export interface AppState {
   // Copilot SDK Settings (global)
   enabledCopilotModels: CopilotModelId[]; // Which Copilot models are available in feature modal
   copilotDefaultModel: CopilotModelId; // Default Copilot model selection
+
+  // Pi CLI Settings (global) - models come from the local LiteLLM gateway
+  enabledPiModels: PiModelId[]; // Which Pi models are available in feature modal
+  piDefaultModel: PiModelId; // Default Pi model selection
 
   // Provider Visibility Settings
   disabledProviders: ModelProvider[]; // Providers that are disabled and hidden from dropdowns
@@ -650,6 +655,11 @@ export interface AppActions {
   setEnabledCopilotModels: (models: CopilotModelId[]) => void;
   setCopilotDefaultModel: (model: CopilotModelId) => void;
   toggleCopilotModel: (model: CopilotModelId, enabled: boolean) => void;
+
+  // Pi CLI Settings actions
+  setEnabledPiModels: (models: PiModelId[]) => void;
+  setPiDefaultModel: (model: PiModelId) => void;
+  togglePiModel: (model: PiModelId, enabled: boolean) => void;
 
   // Provider Visibility Settings actions
   setDisabledProviders: (providers: ModelProvider[]) => void;

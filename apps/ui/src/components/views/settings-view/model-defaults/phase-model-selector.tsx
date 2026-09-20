@@ -1,4 +1,4 @@
-import { Fragment, useEffect, useMemo, useRef, useState } from 'react';
+import { Fragment, useEffect, useMemo, useRef, useState, type ComponentType } from 'react';
 import { cn } from '@/lib/utils';
 import { useAppStore } from '@/store/app-store';
 import { useShallow } from 'zustand/react/shallow';
@@ -11,6 +11,7 @@ import type {
   OpencodeModelId,
   GeminiModelId,
   CopilotModelId,
+  PiModelId,
   GroupedModel,
   PhaseModelEntry,
   ClaudeCompatibleProvider,
@@ -19,6 +20,7 @@ import type {
 } from '@automaker/types';
 import {
   STANDALONE_CURSOR_MODELS,
+  getModelProvider,
   getModelGroup,
   isGroupSelected,
   getSelectedVariant,
@@ -31,12 +33,13 @@ import {
   OPENCODE_MODELS,
   GEMINI_MODELS,
   COPILOT_MODELS,
+  PI_MODELS,
   THINKING_LEVEL_LABELS,
   REASONING_EFFORT_LEVELS,
   REASONING_EFFORT_LABELS,
   type ModelOption,
 } from '@/components/views/board-view/shared/model-constants';
-import { Check, ChevronsUpDown, Star, ChevronRight, ChevronDown } from 'lucide-react';
+import { Check, ChevronDown, ChevronLeft, ChevronRight, ChevronsUpDown, Star } from 'lucide-react';
 import {
   AnthropicIcon,
   CursorIcon,
@@ -46,6 +49,8 @@ import {
   MiniMaxIcon,
   GeminiIcon,
   CopilotIcon,
+  OpenCodeIcon,
+  PiIcon,
   getProviderIconForModel,
 } from '@/components/ui/provider-icon';
 import { Button } from '@/components/ui/button';
@@ -134,6 +139,24 @@ function getOpencodeGroupLabel(
   return OPENCODE_DYNAMIC_PROVIDER_LABELS[providerKey] || formatProviderLabel(providerKey);
 }
 
+/**
+ * The agents a model can belong to. Selecting a model id picks its agent
+ * implicitly (the id prefix routes the run server-side), so the picker asks for
+ * the agent first and then only offers that agent's models.
+ */
+type AgentId = 'claude' | 'cursor' | 'codex' | 'gemini' | 'copilot' | 'opencode' | 'pi';
+
+interface AgentOption {
+  id: AgentId;
+  label: string;
+  description: string;
+  icon: ComponentType<{ className?: string }>;
+  /** Number of models selectable for this agent right now */
+  modelCount: number;
+  disabled: boolean;
+  disabledReason?: string;
+}
+
 interface PhaseModelSelectorProps {
   /** Label shown in full mode */
   label?: string;
@@ -164,6 +187,13 @@ export function PhaseModelSelector({
   disabled = false,
 }: PhaseModelSelectorProps) {
   const [open, setOpen] = useState(false);
+  /**
+   * Two-stage selection: `null` shows the agent list, an agent id shows that
+   * agent's models. Reset to the agent list whenever the popover closes.
+   */
+  const [activeAgent, setActiveAgent] = useState<AgentId | null>(null);
+  /** cmdk search query, controlled so switching stages starts from a clean filter */
+  const [search, setSearch] = useState('');
   const [expandedGroup, setExpandedGroup] = useState<string | null>(null);
   const [expandedClaudeModel, setExpandedClaudeModel] = useState<ModelAlias | null>(null);
   const [expandedCodexModel, setExpandedCodexModel] = useState<CodexModelId | null>(null);
@@ -178,6 +208,7 @@ export function PhaseModelSelector({
     enabledGeminiModels,
     enabledCopilotModels,
     enabledOpencodeModels,
+    enabledPiModels,
     favoriteModels,
     toggleFavoriteModel,
     codexModels,
@@ -194,6 +225,7 @@ export function PhaseModelSelector({
       enabledGeminiModels: state.enabledGeminiModels,
       enabledCopilotModels: state.enabledCopilotModels,
       enabledOpencodeModels: state.enabledOpencodeModels,
+      enabledPiModels: state.enabledPiModels,
       favoriteModels: state.favoriteModels,
       toggleFavoriteModel: state.toggleFavoriteModel,
       codexModels: state.codexModels,
@@ -358,6 +390,11 @@ export function PhaseModelSelector({
     return enabledCopilotModels.includes(model.id as CopilotModelId);
   });
 
+  // Pi models (local LiteLLM gateway) - filtered by the enabled list
+  const availablePiModels = PI_MODELS.filter((model) => {
+    return (enabledPiModels as string[]).includes(model.id);
+  });
+
   // Helper to find current selected model details
   const currentModel = useMemo(() => {
     const claudeModel = CLAUDE_MODELS.find((m) => m.id === selectedModel);
@@ -427,6 +464,10 @@ export function PhaseModelSelector({
     // Check OpenCode models (static) - use dynamic icon resolution for provider-specific icons
     const opencodeModel = OPENCODE_MODELS.find((m) => m.id === selectedModel);
     if (opencodeModel) return { ...opencodeModel, icon: getProviderIconForModel(opencodeModel.id) };
+
+    // Check Pi models (pi:litellm/...)
+    const piModel = PI_MODELS.find((m) => m.id === selectedModel);
+    if (piModel) return { ...piModel, icon: PiIcon };
 
     // Check dynamic OpenCode models - use dynamic icon resolution for provider-specific icons
     const dynamicModel = dynamicOpencodeModels.find((m) => m.id === selectedModel);
@@ -601,25 +642,24 @@ export function PhaseModelSelector({
   }, [enabledOpencodeModels, dynamicOpencodeModels, enabledDynamicModelIds]);
 
   // Check if providers are disabled (needed for rendering conditions)
+  const isClaudeDisabled = disabledProviders.includes('claude');
   const isCursorDisabled = disabledProviders.includes('cursor');
+  const isCodexDisabled = disabledProviders.includes('codex');
   const isGeminiDisabled = disabledProviders.includes('gemini');
   const isCopilotDisabled = disabledProviders.includes('copilot');
+  const isOpencodeDisabled = disabledProviders.includes('opencode');
+  const isPiDisabled = disabledProviders.includes('pi');
 
   // Group models (filtering out disabled providers)
-  const { favorites, claude, codex, gemini, copilot, opencode } = useMemo(() => {
+  const { favorites, claude, codex, gemini, copilot, opencode, pi } = useMemo(() => {
     const favs: typeof CLAUDE_MODELS = [];
     const cModels: typeof CLAUDE_MODELS = [];
     const curModels: typeof CURSOR_MODELS = [];
     const codModels: typeof transformedCodexModels = [];
     const gemModels: typeof GEMINI_MODELS = [];
     const copModels: typeof COPILOT_MODELS = [];
+    const piModels: typeof PI_MODELS = [];
     const ocModels: ModelOption[] = [];
-
-    const isClaudeDisabled = disabledProviders.includes('claude');
-    const isCodexDisabled = disabledProviders.includes('codex');
-    const isGeminiDisabledInner = disabledProviders.includes('gemini');
-    const isCopilotDisabledInner = disabledProviders.includes('copilot');
-    const isOpencodeDisabled = disabledProviders.includes('opencode');
 
     // Process Claude Models (skip if provider is disabled)
     if (!isClaudeDisabled) {
@@ -655,7 +695,7 @@ export function PhaseModelSelector({
     }
 
     // Process Gemini Models (skip if provider is disabled)
-    if (!isGeminiDisabledInner) {
+    if (!isGeminiDisabled) {
       availableGeminiModels.forEach((model) => {
         if (favoriteModels.includes(model.id)) {
           favs.push(model);
@@ -666,7 +706,7 @@ export function PhaseModelSelector({
     }
 
     // Process Copilot Models (skip if provider is disabled)
-    if (!isCopilotDisabledInner) {
+    if (!isCopilotDisabled) {
       availableCopilotModels.forEach((model) => {
         if (favoriteModels.includes(model.id)) {
           favs.push(model);
@@ -687,6 +727,17 @@ export function PhaseModelSelector({
       });
     }
 
+    // Process Pi models (local LiteLLM gateway, skip if provider is disabled)
+    if (!isPiDisabled) {
+      availablePiModels.forEach((model) => {
+        if (favoriteModels.includes(model.id)) {
+          favs.push(model);
+        } else {
+          piModels.push(model);
+        }
+      });
+    }
+
     return {
       favorites: favs,
       claude: cModels,
@@ -694,17 +745,153 @@ export function PhaseModelSelector({
       gemini: gemModels,
       copilot: copModels,
       opencode: ocModels,
+      pi: piModels,
     };
   }, [
     favoriteModels,
     availableCursorModels,
     availableGeminiModels,
     availableCopilotModels,
+    availablePiModels,
     transformedCodexModels,
     allOpencodeModels,
-    disabledProviders,
+    isClaudeDisabled,
+    isCodexDisabled,
     isCursorDisabled,
+    isGeminiDisabled,
+    isCopilotDisabled,
+    isOpencodeDisabled,
+    isPiDisabled,
   ]);
+
+  /**
+   * Agent stage: one entry per agent, with the number of models it can offer
+   * right now. Agents without any selectable model, and agents disabled in
+   * settings, are shown but cannot be entered.
+   */
+  const agentOptions = useMemo<AgentOption[]>(() => {
+    const cursorModelCount = groupedModels.length + standaloneCursorModels.length;
+    const claudeCompatibleModelCount = enabledProviders.reduce(
+      (total, provider) => total + (provider.models?.length ?? 0),
+      0
+    );
+
+    const build = (
+      id: AgentId,
+      label: string,
+      description: string,
+      icon: AgentOption['icon'],
+      modelCount: number,
+      providerDisabled: boolean
+    ): AgentOption => {
+      const disabled = providerDisabled || modelCount === 0;
+      return {
+        id,
+        label,
+        description,
+        icon,
+        modelCount,
+        disabled,
+        disabledReason: providerDisabled
+          ? 'Disabled in AI providers'
+          : modelCount === 0
+            ? 'No models enabled'
+            : undefined,
+      };
+    };
+
+    return [
+      build(
+        'claude',
+        'Claude',
+        'Native Claude Agent SDK',
+        AnthropicIcon,
+        CLAUDE_MODELS.length + claudeCompatibleModelCount,
+        isClaudeDisabled
+      ),
+      build(
+        'cursor',
+        'Cursor CLI',
+        'Cursor agent CLI',
+        CursorIcon,
+        cursorModelCount,
+        isCursorDisabled
+      ),
+      build(
+        'codex',
+        'Codex CLI',
+        'OpenAI Codex CLI',
+        OpenAIIcon,
+        transformedCodexModels.length,
+        isCodexDisabled
+      ),
+      build(
+        'gemini',
+        'Gemini CLI',
+        'Google Gemini CLI',
+        GeminiIcon,
+        availableGeminiModels.length,
+        isGeminiDisabled
+      ),
+      build(
+        'copilot',
+        'Copilot CLI',
+        'GitHub Copilot CLI',
+        CopilotIcon,
+        availableCopilotModels.length,
+        isCopilotDisabled
+      ),
+      build(
+        'opencode',
+        'OpenCode',
+        'OpenCode CLI and its providers',
+        OpenCodeIcon,
+        allOpencodeModels.length,
+        isOpencodeDisabled
+      ),
+      build(
+        'pi',
+        'Pi (LiteLLM)',
+        'Pi CLI backed by the local LiteLLM gateway',
+        PiIcon,
+        availablePiModels.length,
+        isPiDisabled
+      ),
+    ];
+  }, [
+    allOpencodeModels.length,
+    availableCopilotModels.length,
+    availableGeminiModels.length,
+    availablePiModels.length,
+    enabledProviders,
+    groupedModels.length,
+    isClaudeDisabled,
+    isCodexDisabled,
+    isCopilotDisabled,
+    isCursorDisabled,
+    isGeminiDisabled,
+    isOpencodeDisabled,
+    isPiDisabled,
+    standaloneCursorModels.length,
+    transformedCodexModels.length,
+  ]);
+
+  const activeAgentOption = useMemo(
+    () => agentOptions.find((agent) => agent.id === activeAgent) ?? null,
+    [activeAgent, agentOptions]
+  );
+
+  /** Agent that owns the current selection, used to mark it in the agent list. */
+  const selectedAgentId: AgentId = useMemo(() => {
+    if (selectedProviderId) return 'claude';
+    return getModelProvider(selectedModel) as AgentId;
+  }, [selectedModel, selectedProviderId]);
+
+  /** Favorites belonging to the agent whose models are on screen. */
+  const activeAgentFavorites = useMemo(
+    () => (activeAgent ? favorites.filter((model) => model.provider === activeAgent) : []),
+    [activeAgent, favorites]
+  );
 
   // Group OpenCode models by model type for better organization
   const opencodeSections = useMemo(() => {
@@ -1272,6 +1459,59 @@ export function PhaseModelSelector({
       >
         <div className="flex items-center gap-3 overflow-hidden">
           <CopilotIcon
+            className={cn(
+              'h-4 w-4 shrink-0',
+              isSelected ? 'text-primary' : 'text-muted-foreground'
+            )}
+          />
+          <div className="flex flex-col truncate">
+            <span className={cn('truncate font-medium', isSelected && 'text-primary')}>
+              {model.label}
+            </span>
+            <span className="truncate text-xs text-muted-foreground">{model.description}</span>
+          </div>
+        </div>
+
+        <div className="flex items-center gap-1 ml-2">
+          <Button
+            variant="ghost"
+            size="icon"
+            className={cn(
+              'h-6 w-6 hover:bg-transparent hover:text-yellow-500 focus:ring-0',
+              isFavorite
+                ? 'text-yellow-500 opacity-100'
+                : 'opacity-0 group-hover:opacity-100 text-muted-foreground'
+            )}
+            onClick={(e) => {
+              e.stopPropagation();
+              toggleFavoriteModel(model.id);
+            }}
+          >
+            <Star className={cn('h-3.5 w-3.5', isFavorite && 'fill-current')} />
+          </Button>
+          {isSelected && <Check className="h-4 w-4 text-primary shrink-0" />}
+        </div>
+      </CommandItem>
+    );
+  };
+
+  // Render Pi model item (local LiteLLM gateway) - simple selector
+  const renderPiModelItem = (model: (typeof PI_MODELS)[0]) => {
+    const isSelected = selectedModel === model.id;
+    const isFavorite = favoriteModels.includes(model.id);
+
+    return (
+      <CommandItem
+        key={model.id}
+        value={model.label}
+        onSelect={() => {
+          onChange({ model: model.id as PiModelId });
+          setOpen(false);
+        }}
+        className="group flex items-center justify-between py-2"
+      >
+        <div className="flex items-center gap-3 overflow-hidden">
+          <PiIcon
             className={cn(
               'h-4 w-4 shrink-0',
               isSelected ? 'text-primary' : 'text-muted-foreground'
@@ -2276,10 +2516,95 @@ export function PhaseModelSelector({
     </Button>
   );
 
+  /** Move between the agent list (`null`) and an agent's model list. */
+  const goToStage = (agent: AgentId | null) => {
+    setActiveAgent(agent);
+    setSearch('');
+    setExpandedGroup(null);
+    setExpandedClaudeModel(null);
+    setExpandedCodexModel(null);
+    setExpandedProviderModel(null);
+  };
+
+  // Reset the two-stage navigation whenever the picker closes, so it always
+  // reopens on the agent list.
+  const handleOpenChange = (nextOpen: boolean) => {
+    setOpen(nextOpen);
+    if (!nextOpen) {
+      goToStage(null);
+    }
+  };
+
+  /** Stage 1 row: an agent, with how many models it can offer. */
+  const renderAgentItem = (agent: AgentOption) => {
+    const Icon = agent.icon;
+    const isCurrent = agent.id === selectedAgentId;
+
+    return (
+      <CommandItem
+        key={agent.id}
+        value={`${agent.label} ${agent.id} ${agent.description}`}
+        disabled={agent.disabled}
+        onSelect={() => goToStage(agent.id)}
+        className="group flex items-center justify-between py-2"
+        data-testid={`model-selector-agent-${agent.id}`}
+      >
+        <div className="flex items-center gap-3 overflow-hidden">
+          <Icon
+            className={cn('h-4 w-4 shrink-0', isCurrent ? 'text-primary' : 'text-muted-foreground')}
+          />
+          <div className="flex flex-col truncate">
+            <span className={cn('truncate font-medium', isCurrent && 'text-primary')}>
+              {agent.label}
+            </span>
+            <span className="truncate text-xs text-muted-foreground">
+              {agent.disabledReason ??
+                `${agent.modelCount} model${agent.modelCount === 1 ? '' : 's'} · ${agent.description}`}
+            </span>
+          </div>
+        </div>
+
+        <div className="flex items-center gap-1 ml-2 shrink-0">
+          {isCurrent && <Check className="h-4 w-4 text-primary" />}
+          <ChevronRight className="h-4 w-4 text-muted-foreground" />
+        </div>
+      </CommandItem>
+    );
+  };
+
+  /** Stage 2 favorites row: dispatch to the renderer that owns the model type. */
+  const renderFavoriteItem = (model: ModelOption) => {
+    if (model.provider === 'codex') {
+      return renderCodexModelItem(model as (typeof transformedCodexModels)[0]);
+    }
+    if (model.provider === 'gemini') {
+      return renderGeminiModelItem(model as (typeof GEMINI_MODELS)[0]);
+    }
+    if (model.provider === 'copilot') {
+      return renderCopilotModelItem(model as (typeof COPILOT_MODELS)[0]);
+    }
+    if (model.provider === 'pi') {
+      return renderPiModelItem(model as (typeof PI_MODELS)[0]);
+    }
+    if (model.provider === 'opencode') {
+      return renderOpencodeModelItem(model);
+    }
+    if (model.provider === 'cursor') {
+      return renderCursorModelItem(model);
+    }
+    return renderClaudeModelItem(model);
+  };
+
   // The popover content (shared between both modes)
   const popoverContent = (
     <PopoverContent
-      className="w-[min(calc(100vw-2rem),320px)] p-0"
+      className={cn(
+        'p-0',
+        // Desktop: the agent rail and the model list sit side by side. Mobile:
+        // keep the stacked stage flow, the narrow rail would squeeze the models.
+        'w-[min(calc(100vw-2rem),640px)]',
+        isMobile && 'w-[min(calc(100vw-2rem),320px)]'
+      )}
       align={isMobile ? 'start' : align}
       onWheel={(e) => e.stopPropagation()}
       onTouchMove={(e) => e.stopPropagation()}
@@ -2291,170 +2616,273 @@ export function PhaseModelSelector({
         }
       }}
     >
-      <Command>
-        <CommandInput placeholder="Search models..." />
-        <CommandList
-          ref={commandListRef}
-          className="max-h-[300px] overflow-y-auto overscroll-contain touch-pan-y"
-        >
-          <CommandEmpty>No model found.</CommandEmpty>
-
-          {favorites.length > 0 && (
-            <>
-              <CommandGroup heading="Favorites">
-                {(() => {
-                  const renderedGroups = new Set<string>();
-                  return favorites.map((model) => {
-                    // Check if this favorite is part of a grouped model
-                    if (model.provider === 'cursor') {
-                      const cursorId = model.id as CursorModelId;
-                      const group = getModelGroup(cursorId);
-                      if (group) {
-                        // Skip if we already rendered this group
-                        if (renderedGroups.has(group.baseId)) {
-                          return null;
-                        }
-                        renderedGroups.add(group.baseId);
-                        // Find the group in groupedModels (which has filtered variants)
-                        const filteredGroup = groupedModels.find((g) => g.baseId === group.baseId);
-                        if (filteredGroup) {
-                          return renderGroupedModelItem(filteredGroup);
-                        }
-                      }
-                      // Standalone Cursor model
-                      return renderCursorModelItem(model);
-                    }
-                    // Codex model
-                    if (model.provider === 'codex') {
-                      return renderCodexModelItem(model as (typeof transformedCodexModels)[0]);
-                    }
-                    // Gemini model
-                    if (model.provider === 'gemini') {
-                      return renderGeminiModelItem(model as (typeof GEMINI_MODELS)[0]);
-                    }
-                    // Copilot model
-                    if (model.provider === 'copilot') {
-                      return renderCopilotModelItem(model as (typeof COPILOT_MODELS)[0]);
-                    }
-                    // OpenCode model
-                    if (model.provider === 'opencode') {
-                      return renderOpencodeModelItem(model);
-                    }
-                    // Claude model
-                    return renderClaudeModelItem(model);
-                  });
-                })()}
-              </CommandGroup>
-              <CommandSeparator />
-            </>
-          )}
-
-          {claude.length > 0 && (
-            <CommandGroup heading="Claude Models">
-              {claude.map((model) => renderClaudeModelItem(model))}
-            </CommandGroup>
-          )}
-
-          {/* ClaudeCompatibleProvider Models - each provider as separate group */}
-          {enabledProviders.map((provider) => {
-            if (!provider.models || provider.models.length === 0) return null;
-
-            // Check if we need provider suffix (multiple providers of same type)
-            const sameTypeCount = enabledProviders.filter(
-              (p) => p.providerType === provider.providerType
-            ).length;
-            const showSuffix = sameTypeCount > 1;
-
-            // Group models by ID and collect all mapped Claude models for each
-            const modelsByIdMap = new Map<
-              string,
-              { model: ProviderModel; mappedModels: ClaudeModelAlias[] }
-            >();
-            for (const model of provider.models) {
-              const existing = modelsByIdMap.get(model.id);
-              if (existing) {
-                // Add this mapped model if not already present
-                if (
-                  model.mapsToClaudeModel &&
-                  !existing.mappedModels.includes(model.mapsToClaudeModel)
-                ) {
-                  existing.mappedModels.push(model.mapsToClaudeModel);
-                }
-              } else {
-                // First occurrence of this model ID
-                modelsByIdMap.set(model.id, {
-                  model,
-                  mappedModels: model.mapsToClaudeModel ? [model.mapsToClaudeModel] : [],
-                });
-              }
-            }
-            const uniqueModelsWithMappings = Array.from(modelsByIdMap.values());
-
-            return (
-              <CommandGroup key={provider.id} heading={`${provider.name} (via Claude)`}>
-                {uniqueModelsWithMappings.map(({ model, mappedModels }) =>
-                  renderProviderModelItem(provider, model, showSuffix, mappedModels)
-                )}
-              </CommandGroup>
-            );
-          })}
-
-          {!isCursorDisabled && (groupedModels.length > 0 || standaloneCursorModels.length > 0) && (
-            <CommandGroup heading="Cursor Models">
-              {/* Grouped models with secondary popover */}
-              {groupedModels.map((group) => renderGroupedModelItem(group))}
-              {/* Standalone models */}
-              {standaloneCursorModels.map((model) => renderCursorModelItem(model))}
-            </CommandGroup>
-          )}
-
-          {codex.length > 0 && (
-            <CommandGroup heading="Codex Models">
-              {codex.map((model) => renderCodexModelItem(model))}
-            </CommandGroup>
-          )}
-
-          {!isGeminiDisabled && gemini.length > 0 && (
-            <CommandGroup heading="Gemini Models">
-              {gemini.map((model) => renderGeminiModelItem(model))}
-            </CommandGroup>
-          )}
-
-          {!isCopilotDisabled && copilot.length > 0 && (
-            <CommandGroup heading="Copilot Models">
-              {copilot.map((model) => renderCopilotModelItem(model))}
-            </CommandGroup>
-          )}
-
-          {opencodeSections.length > 0 && (
-            <CommandGroup heading={OPENCODE_CLI_GROUP_LABEL}>
-              {opencodeSections.map((section, _sectionIndex) => (
-                <Fragment key={section.key}>
-                  <div className="px-2 pt-2 text-xs font-medium text-muted-foreground">
-                    {section.label}
-                  </div>
-                  <div
+      <Command className={isMobile ? 'flex-col' : 'flex-row'}>
+        {/* Stage rail - always visible on desktop so the two stages read as one
+            connected picker: left is the agent, right is its models. On mobile
+            the rail is hidden and the previous stage becomes a back button. */}
+        {!isMobile && (
+          <div
+            className="w-48 shrink-0 border-r border-border/50"
+            data-testid="model-selector-agent-rail"
+          >
+            <div className="px-2 pb-1 pt-2 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+              Agent
+            </div>
+            <div className="flex flex-col p-1">
+              {agentOptions.map((agent) => {
+                const Icon = agent.icon;
+                return (
+                  <button
+                    key={agent.id}
+                    type="button"
+                    onClick={() => goToStage(agent.id)}
+                    disabled={agent.disabled}
+                    title={agent.disabledReason ?? undefined}
                     className={cn(
-                      'space-y-2',
-                      section.key === 'dynamic' && OPENCODE_SECTION_GROUP_PADDING
+                      'flex items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm transition-colors',
+                      'disabled:cursor-not-allowed disabled:opacity-40',
+                      activeAgent === agent.id
+                        ? 'bg-accent text-accent-foreground'
+                        : 'hover:bg-accent/50',
+                      agent.id === selectedAgentId && !activeAgent && 'text-primary'
                     )}
+                    data-testid={`model-selector-agent-${agent.id}`}
+                    data-active={activeAgent === agent.id || undefined}
+                    data-selected={agent.id === selectedAgentId || undefined}
                   >
-                    {section.groups.map((group) => (
-                      <div key={group.key} className="space-y-1">
-                        {section.showGroupLabels && (
-                          <div className="px-2 py-1 text-xs font-medium text-muted-foreground">
-                            {group.label}
-                          </div>
-                        )}
-                        {group.models.map((model) => renderOpencodeModelItem(model))}
-                      </div>
-                    ))}
+                    <Icon
+                      className={cn(
+                        'h-4 w-4 shrink-0',
+                        agent.id === selectedAgentId ? 'text-primary' : 'text-muted-foreground'
+                      )}
+                    />
+                    <span className="flex-1 truncate">{agent.label}</span>
+                    <span className="shrink-0 text-[10px] tabular-nums text-muted-foreground">
+                      {agent.disabled ? undefined : agent.modelCount}
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        )}
+
+        {/* Model stage - the models of the agent picked in the rail. On mobile
+            the rail is hidden and the previous stage becomes a back button. */}
+        <div className="flex min-w-0 flex-1 flex-col">
+          <CommandInput
+            value={search}
+            onValueChange={setSearch}
+            placeholder={
+              activeAgentOption ? `Search ${activeAgentOption.label} models...` : 'Search agents...'
+            }
+          />
+          <CommandList
+            ref={commandListRef}
+            className="max-h-[300px] min-h-[200px] overflow-y-auto overscroll-contain touch-pan-y"
+          >
+            {activeAgentOption === null ? (
+              <>
+                {isMobile && <CommandEmpty>No agent found.</CommandEmpty>}
+                {isMobile && (
+                  <div className="px-2 pb-1 pt-2 text-xs text-muted-foreground">
+                    Pick an agent, then choose one of its models.
                   </div>
-                </Fragment>
-              ))}
-            </CommandGroup>
-          )}
-        </CommandList>
+                )}
+                {isMobile && (
+                  <CommandGroup heading="Agents">{agentOptions.map(renderAgentItem)}</CommandGroup>
+                )}
+                {!isMobile && (
+                  <div className="flex min-h-[200px] flex-col items-center justify-center gap-1 px-4 text-center text-muted-foreground">
+                    <span className="text-sm">Select an agent on the left</span>
+                    <span className="text-xs">
+                      The list on the right will show only that agent's models.
+                    </span>
+                  </div>
+                )}
+              </>
+            ) : (
+              <>
+                {!isMobile && (
+                  <div className="sticky top-0 z-10 flex items-center justify-between border-b border-border/60 bg-popover px-2 py-1.5">
+                    <span className="truncate text-xs font-medium">{activeAgentOption.label}</span>
+                    <span className="shrink-0 text-[11px] tabular-nums text-muted-foreground">
+                      {activeAgentOption.modelCount} model
+                      {activeAgentOption.modelCount === 1 ? '' : 's'}
+                    </span>
+                  </div>
+                )}
+                {isMobile && (
+                  <div className="sticky top-0 z-10 -mt-1 mb-1 flex items-center gap-2 border-b border-border/60 bg-popover px-2 py-1.5">
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="h-6 gap-1 px-1.5 text-xs"
+                      onClick={() => goToStage(null)}
+                      data-testid="model-selector-back-to-agents"
+                    >
+                      <ChevronLeft className="h-3.5 w-3.5" />
+                      {activeAgentOption.label}
+                    </Button>
+                    <span className="ml-auto text-[11px] text-muted-foreground">
+                      {activeAgentOption.modelCount} model
+                      {activeAgentOption.modelCount === 1 ? '' : 's'}
+                    </span>
+                  </div>
+                )}
+                <CommandEmpty>No model found.</CommandEmpty>
+
+                {activeAgentFavorites.length > 0 && (
+                  <>
+                    <CommandGroup heading="Favorites">
+                      {(() => {
+                        const renderedGroups = new Set<string>();
+                        return activeAgentFavorites.map((model) => {
+                          // Check if this favorite is part of a grouped model
+                          if (model.provider === 'cursor') {
+                            const cursorId = model.id as CursorModelId;
+                            const group = getModelGroup(cursorId);
+                            if (group) {
+                              // Skip if we already rendered this group
+                              if (renderedGroups.has(group.baseId)) {
+                                return null;
+                              }
+                              renderedGroups.add(group.baseId);
+                              // Find the group in groupedModels (which has filtered variants)
+                              const filteredGroup = groupedModels.find(
+                                (g) => g.baseId === group.baseId
+                              );
+                              if (filteredGroup) {
+                                return renderGroupedModelItem(filteredGroup);
+                              }
+                            }
+                            // Standalone Cursor model
+                            return renderCursorModelItem(model);
+                          }
+                          return renderFavoriteItem(model);
+                        });
+                      })()}
+                    </CommandGroup>
+                    <CommandSeparator />
+                  </>
+                )}
+
+                {activeAgent === 'claude' && claude.length > 0 && (
+                  <CommandGroup heading="Claude Models">
+                    {claude.map((model) => renderClaudeModelItem(model))}
+                  </CommandGroup>
+                )}
+
+                {/* ClaudeCompatibleProvider Models - each provider as separate group */}
+                {activeAgent === 'claude' &&
+                  enabledProviders.map((provider) => {
+                    if (!provider.models || provider.models.length === 0) return null;
+
+                    // Check if we need provider suffix (multiple providers of same type)
+                    const sameTypeCount = enabledProviders.filter(
+                      (p) => p.providerType === provider.providerType
+                    ).length;
+                    const showSuffix = sameTypeCount > 1;
+
+                    // Group models by ID and collect all mapped Claude models for each
+                    const modelsByIdMap = new Map<
+                      string,
+                      { model: ProviderModel; mappedModels: ClaudeModelAlias[] }
+                    >();
+                    for (const model of provider.models) {
+                      const existing = modelsByIdMap.get(model.id);
+                      if (existing) {
+                        // Add this mapped model if not already present
+                        if (
+                          model.mapsToClaudeModel &&
+                          !existing.mappedModels.includes(model.mapsToClaudeModel)
+                        ) {
+                          existing.mappedModels.push(model.mapsToClaudeModel);
+                        }
+                      } else {
+                        // First occurrence of this model ID
+                        modelsByIdMap.set(model.id, {
+                          model,
+                          mappedModels: model.mapsToClaudeModel ? [model.mapsToClaudeModel] : [],
+                        });
+                      }
+                    }
+                    const uniqueModelsWithMappings = Array.from(modelsByIdMap.values());
+
+                    return (
+                      <CommandGroup key={provider.id} heading={`${provider.name} (via Claude)`}>
+                        {uniqueModelsWithMappings.map(({ model, mappedModels }) =>
+                          renderProviderModelItem(provider, model, showSuffix, mappedModels)
+                        )}
+                      </CommandGroup>
+                    );
+                  })}
+
+                {activeAgent === 'cursor' && (
+                  <CommandGroup heading="Cursor Models">
+                    {/* Grouped models with secondary popover */}
+                    {groupedModels.map((group) => renderGroupedModelItem(group))}
+                    {/* Standalone models */}
+                    {standaloneCursorModels.map((model) => renderCursorModelItem(model))}
+                  </CommandGroup>
+                )}
+
+                {activeAgent === 'codex' && codex.length > 0 && (
+                  <CommandGroup heading="Codex Models">
+                    {codex.map((model) => renderCodexModelItem(model))}
+                  </CommandGroup>
+                )}
+
+                {activeAgent === 'gemini' && gemini.length > 0 && (
+                  <CommandGroup heading="Gemini Models">
+                    {gemini.map((model) => renderGeminiModelItem(model))}
+                  </CommandGroup>
+                )}
+
+                {activeAgent === 'copilot' && copilot.length > 0 && (
+                  <CommandGroup heading="Copilot Models">
+                    {copilot.map((model) => renderCopilotModelItem(model))}
+                  </CommandGroup>
+                )}
+
+                {activeAgent === 'pi' && pi.length > 0 && (
+                  <CommandGroup heading="Pi (LiteLLM)">
+                    {pi.map((model) => renderPiModelItem(model))}
+                  </CommandGroup>
+                )}
+
+                {activeAgent === 'opencode' && opencodeSections.length > 0 && (
+                  <CommandGroup heading={OPENCODE_CLI_GROUP_LABEL}>
+                    {opencodeSections.map((section, _sectionIndex) => (
+                      <Fragment key={section.key}>
+                        <div className="px-2 pt-2 text-xs font-medium text-muted-foreground">
+                          {section.label}
+                        </div>
+                        <div
+                          className={cn(
+                            'space-y-2',
+                            section.key === 'dynamic' && OPENCODE_SECTION_GROUP_PADDING
+                          )}
+                        >
+                          {section.groups.map((group) => (
+                            <div key={group.key} className="space-y-1">
+                              {section.showGroupLabels && (
+                                <div className="px-2 py-1 text-xs font-medium text-muted-foreground">
+                                  {group.label}
+                                </div>
+                              )}
+                              {group.models.map((model) => renderOpencodeModelItem(model))}
+                            </div>
+                          ))}
+                        </div>
+                      </Fragment>
+                    ))}
+                  </CommandGroup>
+                )}
+              </>
+            )}
+          </CommandList>
+        </div>
       </Command>
     </PopoverContent>
   );
@@ -2462,7 +2890,7 @@ export function PhaseModelSelector({
   // Compact mode - just the popover with compact trigger
   if (compact) {
     return (
-      <Popover open={open} onOpenChange={setOpen} modal={false}>
+      <Popover open={open} onOpenChange={handleOpenChange} modal={false}>
         <PopoverTrigger asChild>{compactTrigger}</PopoverTrigger>
         {popoverContent}
       </Popover>
@@ -2485,7 +2913,7 @@ export function PhaseModelSelector({
       </div>
 
       {/* Model Selection Popover */}
-      <Popover open={open} onOpenChange={setOpen} modal={false}>
+      <Popover open={open} onOpenChange={handleOpenChange} modal={false}>
         <PopoverTrigger asChild>{fullTrigger}</PopoverTrigger>
         {popoverContent}
       </Popover>

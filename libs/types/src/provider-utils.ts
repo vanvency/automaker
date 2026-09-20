@@ -12,19 +12,36 @@ import { CLAUDE_MODEL_MAP, CODEX_MODEL_MAP } from './model.js';
 import {
   OPENCODE_MODEL_CONFIG_MAP,
   LEGACY_OPENCODE_MODEL_MAP,
+  LEGACY_OPENCODE_DASH_MODEL_MAP,
   RETIRED_OPENCODE_MODEL_MAP,
+  LEGACY_OPENCODE_MODEL_PREFIX,
 } from './opencode-models.js';
 import { GEMINI_MODEL_MAP } from './gemini-models.js';
 import { COPILOT_MODEL_MAP } from './copilot-models.js';
+import { LEGACY_PI_MODEL_PREFIX, isPiModelId } from './pi-models.js';
 
 /** Provider prefix constants */
 export const PROVIDER_PREFIXES = {
+  cursor: 'cursor:',
+  codex: 'codex:',
+  opencode: 'opencode:',
+  gemini: 'gemini:',
+  copilot: 'copilot:',
+  pi: 'pi:',
+} as const;
+
+/**
+ * Pre-rename dash prefixes, kept for parsing/migration of stored IDs.
+ * Order matters: longer/more specific prefixes must be stripped first.
+ */
+export const LEGACY_PROVIDER_PREFIXES: Record<string, string> = {
   cursor: 'cursor-',
   codex: 'codex-',
   opencode: 'opencode-',
   gemini: 'gemini-',
   copilot: 'copilot-',
-} as const;
+  pi: 'pi-',
+};
 
 /**
  * Provider prefix exceptions map
@@ -58,8 +75,13 @@ export const PROVIDER_PREFIX_EXCEPTIONS: Partial<
 export function isCursorModel(model: string | undefined | null): boolean {
   if (!model || typeof model !== 'string') return false;
 
-  // Canonical format: all Cursor models have cursor- prefix
+  // Canonical format: cursor:<model>
   if (model.startsWith(PROVIDER_PREFIXES.cursor)) {
+    return true;
+  }
+
+  // Pre-rename dash form (cursor-auto)
+  if (model.startsWith(LEGACY_PROVIDER_PREFIXES.cursor)) {
     return true;
   }
 
@@ -99,8 +121,13 @@ export function isClaudeModel(model: string | undefined | null): boolean {
 export function isCodexModel(model: string | undefined | null): boolean {
   if (!model || typeof model !== 'string') return false;
 
-  // Check for explicit codex- prefix
+  // Canonical format: codex:<model>
   if (model.startsWith(PROVIDER_PREFIXES.codex)) {
+    return true;
+  }
+
+  // Pre-rename dash form (codex-gpt-5.3-codex)
+  if (model.startsWith(LEGACY_PROVIDER_PREFIXES.codex)) {
     return true;
   }
 
@@ -127,8 +154,13 @@ export function isCodexModel(model: string | undefined | null): boolean {
 export function isGeminiModel(model: string | undefined | null): boolean {
   if (!model || typeof model !== 'string') return false;
 
-  // Canonical format: gemini- prefix (e.g., "gemini-2.5-flash")
+  // Canonical format: gemini:<model>
   if (model.startsWith(PROVIDER_PREFIXES.gemini)) {
+    return true;
+  }
+
+  // Pre-rename dash form (gemini-2.5-flash)
+  if (model.startsWith(LEGACY_PROVIDER_PREFIXES.gemini)) {
     return true;
   }
 
@@ -149,8 +181,13 @@ export function isGeminiModel(model: string | undefined | null): boolean {
 export function isCopilotModel(model: string | undefined | null): boolean {
   if (!model || typeof model !== 'string') return false;
 
-  // Canonical format: copilot- prefix (e.g., "copilot-gpt-4o")
+  // Canonical format: copilot:<model>
   if (model.startsWith(PROVIDER_PREFIXES.copilot)) {
+    return true;
+  }
+
+  // Pre-rename dash form (copilot-gpt-4o)
+  if (model.startsWith(LEGACY_PROVIDER_PREFIXES.copilot)) {
     return true;
   }
 
@@ -180,8 +217,13 @@ export function isCopilotModel(model: string | undefined | null): boolean {
 export function isOpencodeModel(model: string | undefined | null): boolean {
   if (!model || typeof model !== 'string') return false;
 
-  // Canonical format: opencode- prefix for static models
+  // Canonical format: opencode: prefix (agent:model)
   if (model.startsWith(PROVIDER_PREFIXES.opencode)) {
+    return true;
+  }
+
+  // Pre-rename dash form (opencode-litellm/auto) - migrated on read
+  if (model in LEGACY_OPENCODE_DASH_MODEL_MAP) {
     return true;
   }
 
@@ -190,7 +232,7 @@ export function isOpencodeModel(model: string | undefined | null): boolean {
     return true;
   }
 
-  // Legacy format: opencode/ prefix (will be migrated to opencode-)
+  // Legacy format: opencode/ prefix (migrated to opencode:)
   // Also supports amazon-bedrock/ for AWS Bedrock models
   if (model.startsWith('opencode/') || model.startsWith('amazon-bedrock/')) {
     return true;
@@ -217,6 +259,23 @@ export function isOpencodeModel(model: string | undefined | null): boolean {
 }
 
 /**
+ * Check if a model string represents a Pi model
+ *
+ * Pi models always carry the `pi-` prefix followed by the upstream provider and
+ * model name (e.g. "pi:litellm/auto").
+ *
+ * @param model - Model string to check
+ * @returns true if the model is a Pi model
+ */
+export function isPiModel(model: string | undefined | null): boolean {
+  if (!model || typeof model !== 'string') return false;
+
+  // Canonical IDs only - aliases like "auto" must not be hijacked from other
+  // providers; use resolvePiModelId() to expand aliases explicitly.
+  return isPiModelId(model);
+}
+
+/**
  * Get the provider for a model string
  *
  * @param model - Model string to check
@@ -226,6 +285,11 @@ export function getModelProvider(model: string | undefined | null): ModelProvide
   // Check Copilot first since it has a unique prefix
   if (isCopilotModel(model)) {
     return 'copilot';
+  }
+  // Check Pi before OpenCode: Pi model IDs contain a slash and would otherwise
+  // be claimed by OpenCode's dynamic provider/model format.
+  if (isPiModel(model)) {
+    return 'pi';
   }
   // Check Gemini since it uses gemini- prefix
   if (isGeminiModel(model)) {
@@ -264,6 +328,26 @@ export function stripProviderPrefix(model: string): string {
       return model.slice(prefix.length);
     }
   }
+
+  // Legacy dash-form Pi IDs (`pi-litellm/worker`) still resolve to the bare
+  // gateway model so old settings keep running.
+  if (model.startsWith(LEGACY_PI_MODEL_PREFIX)) {
+    return model.slice(LEGACY_PI_MODEL_PREFIX.length);
+  }
+
+  // Same for the pre-rename OpenCode dash form (`opencode-litellm/auto`).
+  if (model.startsWith(LEGACY_OPENCODE_MODEL_PREFIX)) {
+    return model.slice(LEGACY_OPENCODE_MODEL_PREFIX.length);
+  }
+
+  // Pre-rename dash forms for the remaining agents (`cursor-auto`,
+  // `codex-gpt-5.3-codex`, `gemini-2.5-flash`, `copilot-gpt-4.1`).
+  for (const prefix of Object.values(LEGACY_PROVIDER_PREFIXES)) {
+    if (model.startsWith(prefix)) {
+      return model.slice(prefix.length);
+    }
+  }
+
   return model;
 }
 
@@ -285,24 +369,43 @@ export function addProviderPrefix(model: string, provider: ModelProvider): strin
   if (!model || typeof model !== 'string') return model;
 
   if (provider === 'cursor') {
-    if (!model.startsWith(PROVIDER_PREFIXES.cursor)) {
+    if (
+      !model.startsWith(PROVIDER_PREFIXES.cursor) &&
+      !model.startsWith(LEGACY_PROVIDER_PREFIXES.cursor)
+    ) {
       return `${PROVIDER_PREFIXES.cursor}${model}`;
     }
   } else if (provider === 'codex') {
-    if (!model.startsWith(PROVIDER_PREFIXES.codex)) {
+    if (
+      !model.startsWith(PROVIDER_PREFIXES.codex) &&
+      !model.startsWith(LEGACY_PROVIDER_PREFIXES.codex)
+    ) {
       return `${PROVIDER_PREFIXES.codex}${model}`;
     }
   } else if (provider === 'opencode') {
-    if (!model.startsWith(PROVIDER_PREFIXES.opencode)) {
+    if (
+      !model.startsWith(PROVIDER_PREFIXES.opencode) &&
+      !model.startsWith(LEGACY_OPENCODE_MODEL_PREFIX)
+    ) {
       return `${PROVIDER_PREFIXES.opencode}${model}`;
     }
   } else if (provider === 'gemini') {
-    if (!model.startsWith(PROVIDER_PREFIXES.gemini)) {
+    if (
+      !model.startsWith(PROVIDER_PREFIXES.gemini) &&
+      !model.startsWith(LEGACY_PROVIDER_PREFIXES.gemini)
+    ) {
       return `${PROVIDER_PREFIXES.gemini}${model}`;
     }
   } else if (provider === 'copilot') {
-    if (!model.startsWith(PROVIDER_PREFIXES.copilot)) {
+    if (
+      !model.startsWith(PROVIDER_PREFIXES.copilot) &&
+      !model.startsWith(LEGACY_PROVIDER_PREFIXES.copilot)
+    ) {
       return `${PROVIDER_PREFIXES.copilot}${model}`;
+    }
+  } else if (provider === 'pi') {
+    if (!model.startsWith(PROVIDER_PREFIXES.pi) && !model.startsWith(LEGACY_PI_MODEL_PREFIX)) {
+      return `${PROVIDER_PREFIXES.pi}${model}`;
     }
   }
   // Claude models don't use prefixes

@@ -104,17 +104,17 @@ describe('provider-factory.ts', () => {
 
     describe('Cursor models (cursor-* prefix)', () => {
       it('should return CursorProvider for cursor-auto', () => {
-        const provider = ProviderFactory.getProviderForModel('cursor-auto');
+        const provider = ProviderFactory.getProviderForModel('cursor:auto');
         expect(provider).toBeInstanceOf(CursorProvider);
       });
 
       it('should return CursorProvider for cursor-sonnet-4.5', () => {
-        const provider = ProviderFactory.getProviderForModel('cursor-sonnet-4.5');
+        const provider = ProviderFactory.getProviderForModel('cursor:sonnet-4.5');
         expect(provider).toBeInstanceOf(CursorProvider);
       });
 
       it('should return CursorProvider for cursor-gpt-5.2', () => {
-        const provider = ProviderFactory.getProviderForModel('cursor-gpt-5.2');
+        const provider = ProviderFactory.getProviderForModel('cursor:gpt-5.2');
         expect(provider).toBeInstanceOf(CursorProvider);
       });
 
@@ -160,7 +160,7 @@ describe('provider-factory.ts', () => {
       });
 
       it('should return CursorProvider for gemini-3-pro (valid Cursor model)', () => {
-        const provider = ProviderFactory.getProviderForModel('gemini-3-pro');
+        const provider = ProviderFactory.getProviderForModel('cursor:gemini-3-pro');
         expect(provider).toBeInstanceOf(CursorProvider);
       });
     });
@@ -178,9 +178,9 @@ describe('provider-factory.ts', () => {
       expect(hasClaudeProvider).toBe(true);
     });
 
-    it('should return exactly 6 providers', () => {
+    it('should return exactly 7 providers', () => {
       const providers = ProviderFactory.getAllProviders();
-      expect(providers).toHaveLength(6);
+      expect(providers).toHaveLength(7);
     });
 
     it('should include CopilotProvider', () => {
@@ -232,7 +232,8 @@ describe('provider-factory.ts', () => {
       expect(keys).toContain('opencode');
       expect(keys).toContain('gemini');
       expect(keys).toContain('copilot');
-      expect(keys).toHaveLength(6);
+      expect(keys).toContain('pi');
+      expect(keys).toHaveLength(7);
     });
 
     it('should include cursor status', async () => {

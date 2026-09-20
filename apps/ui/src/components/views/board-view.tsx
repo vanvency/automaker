@@ -1,3 +1,7 @@
+import { AcceptanceEvidenceDialog } from './board-view/components/acceptance-evidence';
+import { useWorktreeUrlSync } from './board-view/hooks/use-worktree-url-sync';
+import { CompleteTaskDialog } from './board-view/dialogs/complete-task-dialog';
+import { ArchiveTaskDialog } from './board-view/dialogs/archive-task-dialog';
 import { useEffect, useState, useCallback, useMemo, useRef, startTransition } from 'react';
 import { createLogger } from '@automaker/utils/logger';
 import type { PointerEvent as ReactPointerEvent } from 'react';
@@ -28,8 +32,9 @@ class DialogAwarePointerSensor extends PointerSensor {
   ];
 }
 import { useAppStore, Feature, type ModelAlias, type ThinkingLevel } from '@/store/app-store';
-import { getElectronAPI } from '@/lib/electron';
+import { getElectronAPI, isElectron } from '@/lib/electron';
 import { getHttpApiClient } from '@/lib/http-api-client';
+import { withPageAuthParams } from '@/lib/api-fetch';
 import type {
   BacklogPlanResult,
   FeatureStatusWithPipeline,
@@ -51,13 +56,18 @@ import { useWindowState } from '@/hooks/use-window-state';
 // Board-view specific imports
 import { BoardHeader } from './board-view/board-header';
 import { KanbanBoard } from './board-view/kanban-board';
+import { getBoardTaskTreeFeatures } from './board-view/lib/child-features';
+import { getChildFeaturesForParent, hasChildFeatures } from '@automaker/types';
+import { TaskScopeBar, type BoardTaskScope } from './board-view/task-scope-bar';
+import { BoardWorktreePreview } from './worktree-preview';
+import { isActiveFeatureStatus } from './board-view/worktree-panel/components/worktree-category-utils';
+import { useNavigate } from '@tanstack/react-router';
 import {
   AddFeatureDialog,
   AgentOutputModal,
   BacklogPlanDialog,
   CompletedFeaturesModal,
   ArchiveAllVerifiedDialog,
-  DeleteCompletedFeatureDialog,
   DependencyLinkDialog,
   DuplicateCountDialog,
   EditFeatureDialog,
@@ -120,9 +130,16 @@ interface BoardViewProps {
   initialFeatureId?: string;
   /** Project path from URL parameter - if provided, switches to this project before handling deep link */
   initialProjectPath?: string;
+  /** Worktree branch from URL parameter - restores the shared work line on load. */
+  initialWorktreeBranch?: string;
 }
 
-export function BoardView({ initialFeatureId, initialProjectPath }: BoardViewProps) {
+export function BoardView({
+  initialFeatureId,
+  initialProjectPath,
+  initialWorktreeBranch,
+}: BoardViewProps) {
+  const navigate = useNavigate();
   const {
     currentProject,
     defaultSkipTests,
@@ -193,11 +210,11 @@ export function BoardView({ initialFeatureId, initialProjectPath }: BoardViewPro
   const [isMounted, setIsMounted] = useState(false);
   const [showOutputModal, setShowOutputModal] = useState(false);
   const [outputFeature, setOutputFeature] = useState<Feature | null>(null);
+  const [locatedFeatureId, setLocatedFeatureId] = useState<string | null>(null);
   const [featuresWithContext, setFeaturesWithContext] = useState<Set<string>>(new Set());
   const [showArchiveAllVerifiedDialog, setShowArchiveAllVerifiedDialog] = useState(false);
   const [showBoardBackgroundModal, setShowBoardBackgroundModal] = useState(false);
   const [showCompletedModal, setShowCompletedModal] = useState(false);
-  const [deleteCompletedFeature, setDeleteCompletedFeature] = useState<Feature | null>(null);
   // State for viewing plan in read-only mode
   const [viewPlanFeature, setViewPlanFeature] = useState<Feature | null>(null);
 
@@ -797,6 +814,7 @@ export function BoardView({ initialFeatureId, initialProjectPath }: BoardViewPro
   }, [autoMode, currentProject, queryClient]);
   // Get runningTasks from the hook (scoped to current project/worktree)
   const runningAutoTasks = autoMode.runningTasks;
+
   // Get worktree-specific maxConcurrency from the hook
   const maxConcurrency = autoMode.maxConcurrency;
   // Get worktree-specific setter
@@ -811,6 +829,23 @@ export function BoardView({ initialFeatureId, initialProjectPath }: BoardViewPro
   // Use the branch from selectedWorktree, or fall back to main worktree's branch
   const selectedWorktreeBranch =
     currentWorktreeBranch || worktrees.find((w) => w.isMain)?.branch || 'main';
+
+  const navigateToWorktree = useCallback(
+    (projectPath: string, branch: string) => {
+      void navigate({ to: '/board', search: { projectPath, worktree: branch }, replace: true });
+    },
+    [navigate]
+  );
+  useWorktreeUrlSync({
+    projectPath: currentProject?.path,
+    urlProjectPath: initialProjectPath,
+    urlBranch: initialWorktreeBranch,
+    selectedBranch: currentWorktreeBranch,
+    worktrees,
+    loading: isLoading,
+    select: setCurrentWorktree,
+    navigate: navigateToWorktree,
+  });
 
   // Aggregate running auto tasks across all worktrees for this project.
   // IMPORTANT: Use a derived selector with shallow equality instead of subscribing
@@ -902,20 +937,24 @@ export function BoardView({ initialFeatureId, initialProjectPath }: BoardViewPro
     handleAddFeature,
     handleUpdateFeature,
     handleDeleteFeature,
+    archiveFeatureIds,
+    setArchiveFeatureIds,
     handleStartImplementation,
     handleVerifyFeature,
     handleResumeFeature,
     handleManualVerify,
     handleMoveBackToInProgress,
     handleOpenFollowUp,
+    handleRequestChanges,
     handleSendFollowUp,
     handleCompleteFeature,
+    completionFeature,
+    setCompletionFeature,
     handleUnarchiveFeature,
     handleViewOutput,
     handleOutputModalNumberKeyPress,
     handleForceStopFeature,
     handleStartNextFeatures,
-    handleArchiveAllVerified,
     handleDuplicateFeature,
     handleDuplicateAsChildMultiple,
   } = useBoardActions({
@@ -947,36 +986,60 @@ export function BoardView({ initialFeatureId, initialProjectPath }: BoardViewPro
     stopFeature: autoMode.stopFeature,
   });
 
-  // The conversation itself lives in the OpenCode web UI, so the card action
-  // deep-links straight to the feature's session instead of opening a modal.
-  const handleOpenOpencodeWeb = useCallback(
+  // The shared automaker herdr session holds one workspace per task. The card
+  // asks the server to restore and focus this feature's conversation (its pi
+  // pane), then opens the hosted page that renders that session's TUI, so the
+  // browser lands on the task itself instead of an empty worktree shell.
+  const handleOpenHerdr = useCallback(
     async (feature: Feature) => {
       const projectPath = currentProject?.path;
       if (!projectPath) return;
+      const pendingTab = isElectron() ? null : window.open('', '_blank');
       try {
         const api = getElectronAPI();
-        const getOpencodeWeb = api.features?.getOpencodeWeb;
-        if (!getOpencodeWeb) throw new Error('OpenCode Web is not supported by this client');
-        const result = await getOpencodeWeb(projectPath, feature.id);
+        const getHerdrWeb = api.features?.getHerdrWeb;
+        if (!getHerdrWeb) throw new Error('Herdr is not supported by this client');
+        const result = await getHerdrWeb(projectPath, feature.id);
         if (!result?.success || !result.url) {
-          throw new Error(result?.error || 'No OpenCode session found for this worktree yet');
+          throw new Error(result?.error || 'Could not open the herdr terminal');
         }
-        window.open(result.url, '_blank', 'noopener,noreferrer');
-        if (result.password) {
-          try {
-            await navigator.clipboard.writeText(result.password);
-            toast.success('OpenCode 密码已复制，请在浏览器认证框粘贴');
-          } catch {
-            toast.message('OpenCode 需要登录', {
-              description: `用户名 ${result.username || 'opencode'}，密码见 /etc/opencode/server.env`,
-            });
-          }
+
+        // The page and its xterm assets are served by the server, so the tab
+        // needs its own credentials.
+        const url = withPageAuthParams(new URL(result.url, window.location.origin));
+
+        if (pendingTab) {
+          pendingTab.location.replace(url.toString());
+        } else {
+          window.open(url.toString(), '_blank', 'noopener,noreferrer');
         }
       } catch (error) {
-        toast.error(error instanceof Error ? error.message : 'Open OpenCode Web failed');
+        pendingTab?.close();
+        toast.error(error instanceof Error ? error.message : 'Open herdr terminal failed');
       }
     },
     [currentProject?.path]
+  );
+
+  // Parent cards use this to jump straight to one of their child cards. A deep
+  // link already opens the output modal; this handler highlights the card on the
+  // board as well so the user sees where the child lives.
+  const handleLocateFeature = useCallback(
+    (featureId: string) => {
+      const feature = hookFeatures.find((item) => item.id === featureId);
+      if (!feature) {
+        toast.error('Child task card was not found');
+        return;
+      }
+      setOutputFeature(feature);
+      setShowOutputModal(true);
+      setLocatedFeatureId(featureId);
+      window.setTimeout(() => {
+        const card = document.querySelector(`[data-testid="kanban-card-${featureId}"]`);
+        card?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      }, 100);
+    },
+    [hookFeatures]
   );
 
   // Handler for bulk updating multiple features
@@ -1082,44 +1145,10 @@ export function BoardView({ initialFeatureId, initialProjectPath }: BoardViewPro
     ]
   );
 
-  // Handler for bulk deleting multiple features
+  // Both individual and bulk archival use the same required-reason dialog.
   const handleBulkDelete = useCallback(async () => {
-    if (!currentProject || selectedFeatureIds.size === 0) return;
-
-    try {
-      const api = getHttpApiClient();
-      const featureIds = Array.from(selectedFeatureIds);
-      const result = await api.features.bulkDelete(currentProject.path, featureIds);
-
-      const successfullyDeletedIds =
-        result.results?.filter((r) => r.success).map((r) => r.featureId) ?? [];
-
-      if (successfullyDeletedIds.length > 0) {
-        // Delete from local state without calling the API again
-        successfullyDeletedIds.forEach((featureId) => {
-          useAppStore.getState().removeFeature(featureId);
-        });
-        toast.success(`Deleted ${successfullyDeletedIds.length} features`);
-      }
-
-      if (result.failedCount && result.failedCount > 0) {
-        toast.error('Failed to delete some features', {
-          description: `${result.failedCount} features failed to delete`,
-        });
-      }
-
-      // Exit selection mode and reload if the operation was at least partially processed.
-      if (result.results) {
-        exitSelectionMode();
-        loadFeatures();
-      } else if (!result.success) {
-        toast.error('Failed to delete features', { description: result.error });
-      }
-    } catch (error) {
-      logger.error('Bulk delete failed:', error);
-      toast.error('Failed to delete features');
-    }
-  }, [currentProject, selectedFeatureIds, exitSelectionMode, loadFeatures]);
+    if (selectedFeatureIds.size) setArchiveFeatureIds(Array.from(selectedFeatureIds));
+  }, [selectedFeatureIds, setArchiveFeatureIds]);
 
   // Get selected features for mass edit dialog
   const selectedFeatures = useMemo(() => {
@@ -1704,9 +1733,54 @@ export function BoardView({ initialFeatureId, initialProjectPath }: BoardViewPro
     currentProject,
   });
 
+  // Parent and child cards are all visible. The parent is pinned first in its
+  // lane and also aggregates child progress through ChildTaskSummary.
+  const boardFeatures = useMemo(() => getBoardTaskTreeFeatures(hookFeatures), [hookFeatures]);
+
+  /**
+   * Scope of the level-2 board: the selected work line's task and its cards.
+   *
+   * The parent card wins as the scope title when the task was decomposed, so the
+   * bar matches the pinned card at the top of each lane.
+   */
+  const taskScope = useMemo<BoardTaskScope | null>(() => {
+    const branch = currentWorktreeBranch || null;
+    if (!branch) return null;
+
+    const cards = hookFeatures.filter((feature) => feature.branchName === branch);
+    if (cards.length === 0) return null;
+
+    const task = cards.find((card) => hasChildFeatures(card, hookFeatures)) ?? cards[0];
+    // Compare the raw status strings: the UI status union is a subset of what
+    // the server writes (failed / error / done / merged all occur in practice).
+    const statusOf = (card: Feature) => String(card.status ?? '');
+    const completedCards = cards.filter((card) =>
+      ['verified', 'completed', 'complete', 'done', 'merged'].includes(statusOf(card))
+    ).length;
+    const waitingCards = cards.filter((card) =>
+      ['waiting_approval', 'ready_for_review', 'review'].includes(statusOf(card))
+    ).length;
+    const failedCards = cards.filter((card) =>
+      ['failed', 'error', 'cancelled', 'canceled', 'interrupted'].includes(statusOf(card))
+    ).length;
+
+    return {
+      branch,
+      title: task.title || task.id,
+      jiraKey: typeof task.jiraKey === 'string' ? task.jiraKey : undefined,
+      jiraUrl: typeof task.jiraUrl === 'string' ? task.jiraUrl : undefined,
+      totalCards: cards.length,
+      completedCards,
+      runningCards: cards.filter((card) => isActiveFeatureStatus(statusOf(card))).length,
+      waitingCards,
+      failedCards,
+      hasChildren: getChildFeaturesForParent(task, hookFeatures).length > 0,
+    };
+  }, [currentWorktreeBranch, hookFeatures]);
+
   // Use column features hook
   const { getColumnFeatures, completedFeatures } = useBoardColumnFeatures({
-    features: hookFeatures,
+    features: boardFeatures,
     runningAutoTasks,
     runningAutoTasksAllWorktrees,
     searchQuery,
@@ -1994,12 +2068,28 @@ export function BoardView({ initialFeatureId, initialProjectPath }: BoardViewPro
               features={hookFeatures.map((f) => ({
                 id: f.id,
                 branchName: f.branchName,
+                title: f.title,
+                status: f.status,
+                jiraKey: typeof f.jiraKey === 'string' ? f.jiraKey : undefined,
+                jiraType: typeof f.jiraType === 'string' ? f.jiraType : undefined,
               }))}
             />
           )}
 
           {/* Main Content Area */}
           <div className="flex-1 flex flex-col overflow-hidden">
+            <BoardWorktreePreview
+              projectPath={currentProject.path}
+              worktreePath={currentWorktreePath ?? currentProject.path}
+              branch={selectedWorktreeBranch}
+            />
+            {/* Level-2 scope: which task this board shows, plus the way back up */}
+            {taskScope && (
+              <TaskScopeBar
+                task={taskScope}
+                onBackToOverview={() => navigate({ to: '/worktrees' })}
+              />
+            )}
             {/* View Content - Kanban Board or List View */}
             {isListView ? (
               <ListView
@@ -2054,18 +2144,21 @@ export function BoardView({ initialFeatureId, initialProjectPath }: BoardViewPro
               <KanbanBoard
                 activeFeature={activeFeature}
                 getColumnFeatures={getColumnFeatures}
+                allFeatures={hookFeatures}
                 backgroundImageStyle={backgroundImageStyle}
                 backgroundSettings={backgroundSettings}
                 onEdit={(feature) => setEditingFeature(feature)}
                 onDelete={(featureId) => handleDeleteFeature(featureId)}
                 onViewOutput={handleViewOutput}
-                onOpenWeb={handleOpenOpencodeWeb}
+                onOpenHerdr={handleOpenHerdr}
+                onLocateFeature={handleLocateFeature}
                 onVerify={handleVerifyFeature}
                 onResume={handleResumeFeature}
                 onForceStop={handleForceStopFeature}
                 onManualVerify={handleManualVerify}
                 onMoveBackToInProgress={handleMoveBackToInProgress}
                 onFollowUp={handleOpenFollowUp}
+                onRequestChanges={handleRequestChanges}
                 onComplete={handleCompleteFeature}
                 onImplement={handleStartImplementation}
                 onViewPlan={(feature) => setViewPlanFeature(feature)}
@@ -2151,20 +2244,47 @@ export function BoardView({ initialFeatureId, initialProjectPath }: BoardViewPro
         onOpenChange={setShowCompletedModal}
         completedFeatures={completedFeatures}
         onUnarchive={handleUnarchiveFeature}
-        onDelete={(feature) => setDeleteCompletedFeature(feature)}
-      />
-
-      {/* Delete Completed Feature Confirmation Dialog */}
-      <DeleteCompletedFeatureDialog
-        feature={deleteCompletedFeature}
-        onClose={() => setDeleteCompletedFeature(null)}
-        onConfirm={async () => {
-          if (deleteCompletedFeature) {
-            await handleDeleteFeature(deleteCompletedFeature.id);
-            setDeleteCompletedFeature(null);
-          }
+        onDelete={(feature) => {
+          setShowCompletedModal(false);
+          void handleDeleteFeature(feature.id);
         }}
       />
+
+      {completionFeature &&
+        currentProject &&
+        (completionFeature.completionSource !== 'human' ? (
+          <AcceptanceEvidenceDialog
+            evidence={completionFeature.acceptanceEvidence}
+            projectPath={currentProject.path}
+            open
+            onOpenChange={(open) => {
+              if (!open) setCompletionFeature(null);
+            }}
+            onConfirm={() => handleManualVerify(completionFeature)}
+          />
+        ) : (
+          <CompleteTaskDialog
+            feature={completionFeature}
+            projectPath={currentProject.path}
+            onClose={() => setCompletionFeature(null)}
+            onCompleted={() => {
+              void loadFeatures();
+            }}
+          />
+        ))}
+      {archiveFeatureIds.length > 0 && currentProject && (
+        <ArchiveTaskDialog
+          key={archiveFeatureIds.join('|')}
+          projectPath={currentProject.path}
+          featureIds={archiveFeatureIds}
+          features={hookFeatures}
+          onClose={() => setArchiveFeatureIds([])}
+          onArchived={() => {
+            exitSelectionMode();
+            void loadFeatures();
+          }}
+        />
+      )}
 
       {/* Add Feature Dialog */}
       <AddFeatureDialog
@@ -2235,7 +2355,6 @@ export function BoardView({ initialFeatureId, initialProjectPath }: BoardViewPro
           setShowOutputModal(false);
           handledFeatureIdRef.current = undefined;
         }}
-        featureDescription={outputFeature?.description || ''}
         featureId={outputFeature?.id || ''}
         featureStatus={outputFeature?.status}
         onNumberKeyPress={handleOutputModalNumberKeyPress}
@@ -2264,7 +2383,7 @@ export function BoardView({ initialFeatureId, initialProjectPath }: BoardViewPro
         onOpenChange={setShowArchiveAllVerifiedDialog}
         verifiedCount={getColumnFeatures('verified').length}
         onConfirm={async () => {
-          await handleArchiveAllVerified();
+          setArchiveFeatureIds(getColumnFeatures('verified').map((feature) => feature.id));
           setShowArchiveAllVerifiedDialog(false);
         }}
       />

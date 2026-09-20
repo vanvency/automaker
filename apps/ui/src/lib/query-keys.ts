@@ -28,6 +28,9 @@ export const queryKeys = {
     /** Agent output for a feature */
     agentOutput: (projectPath: string, featureId: string) =>
       ['features', projectPath, featureId, 'output'] as const,
+    /** Delivery merge requests GitLab reports as conflicting for a feature */
+    mergeConflicts: (projectPath: string, featureId: string) =>
+      ['features', projectPath, featureId, 'merge-conflicts'] as const,
   },
 
   // ============================================
@@ -36,6 +39,8 @@ export const queryKeys = {
   worktrees: {
     /** All worktrees for a project */
     all: (projectPath: string) => ['worktrees', projectPath] as const,
+    /** Aggregated progress rows for a project */
+    progress: (projectPath: string) => ['worktrees', projectPath, 'progress'] as const,
     /** Single worktree info */
     single: (projectPath: string, featureId: string) =>
       ['worktrees', projectPath, featureId] as const,
@@ -183,6 +188,7 @@ export const queryKeys = {
     codex: () => ['cli', 'codex'] as const,
     /** OpenCode CLI status */
     opencode: () => ['cli', 'opencode'] as const,
+    pi: () => ['cli', 'pi'] as const,
     /** Gemini CLI status */
     gemini: () => ['cli', 'gemini'] as const,
     /** Copilot SDK status */

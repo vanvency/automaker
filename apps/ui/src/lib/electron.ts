@@ -493,6 +493,19 @@ export interface SpecRegenerationAPI {
   onEvent: (callback: (event: SpecRegenerationEvent) => void) => () => void;
 }
 
+/** One task conversation that mentions a search keyword */
+export interface ConversationSearchMatch {
+  /** Card this session was dispatched for, null for app-internal calls */
+  featureId: string | null;
+  sessionId: string;
+  filePath: string;
+  cwd: string;
+  role: 'user' | 'assistant' | 'toolResult' | 'other';
+  at: string | null;
+  hitCount: number;
+  snippet: string;
+}
+
 // Features API types
 export interface FeaturesAPI {
   getAll: (
@@ -529,12 +542,142 @@ export interface FeaturesAPI {
     password?: string;
     sessionId?: string;
     slug?: string | null;
+    turnCount?: number | null;
+    error?: string;
+  }>;
+  getPiWeb?: (
+    projectPath: string,
+    featureId: string
+  ) => Promise<{
+    success: boolean;
+    /** 'pi-web' = standalone Pi Web UI, 'builtin' = Automaker's own viewer */
+    backend?: 'pi-web' | 'builtin';
+    url?: string;
+    path?: string;
+    sessionId?: string;
+    turnCount?: number | null;
+    model?: string | null;
+    username?: string;
+    password?: string;
+    error?: string;
+  }>;
+  getHerdrWeb?: (
+    projectPath: string,
+    featureId: string
+  ) => Promise<{
+    success: boolean;
+    /** Page that renders the worktree's herdr session in the browser */
+    url?: string;
+    /** Herdr session name (one session per worktree) */
+    sessionName?: string;
+    /** PTY session rendered by that page */
+    terminalSessionId?: string;
+    workDir?: string;
+    /** True when an existing attach client was reused */
+    reused?: boolean;
+    error?: string;
+  }>;
+  getHerdrTask?: (
+    projectPath: string,
+    featureId: string
+  ) => Promise<{
+    success: boolean;
+    /** Null when the feature has not been dispatched through herdr yet */
+    status?: {
+      workspaceId: string;
+      label: string;
+      leaderPaneId: string | null;
+      agents: Array<{
+        paneId: string;
+        name: string | null;
+        agent: string | null;
+        status: 'idle' | 'working' | 'blocked' | 'done' | 'unknown';
+      }>;
+    } | null;
+    error?: string;
+  }>;
+  dispatchHerdr?: (
+    projectPath: string,
+    featureId: string,
+    workDir?: string
+  ) => Promise<{
+    success: boolean;
+    status?: 'planned' | 'executed' | 'aborted' | 'awaiting_approval';
+    workspaceId?: string;
+    tasks?: Array<{ id: string; description: string }>;
+    error?: string;
+  }>;
+  /** Delivery merge requests GitLab reports as conflicting for this card */
+  getMergeConflicts?: (
+    projectPath: string,
+    featureId: string
+  ) => Promise<{
+    success: boolean;
+    conflicts?: Array<{
+      name: string;
+      mrUrl: string;
+      iid: number;
+      sourceBranch: string;
+      targetBranch: string;
+    }>;
+    error?: string;
+  }>;
+  /** Hand the conflicted repositories to the agents of the tasks that own them */
+  resolveConflicts?: (
+    projectPath: string,
+    featureId: string
+  ) => Promise<{
+    success: boolean;
+    dispatched?: Array<{ featureId: string; title: string; repositories: string[] }>;
+    error?: string;
+  }>;
+  /** Import the task's acceptance manifest (screenshots + checks) from its worktree */
+  collectAcceptanceEvidence?: (
+    projectPath: string,
+    featureId: string
+  ) => Promise<{
+    success: boolean;
+    feature?: unknown;
+    error?: string;
+  }>;
+  /** Resident sessions + one-shot calls that ran for this card */
+  timeline?: (
+    projectPath: string,
+    featureId: string
+  ) => Promise<{
+    success: boolean;
+    workDir?: string;
+    entries?: Array<{
+      id: string;
+      kind: 'session' | 'one-shot' | 'lifecycle' | 'jira';
+      at: string;
+      endedAt?: string | null;
+      title: string;
+      detail?: string;
+      model?: string;
+      turns?: number;
+      status?: 'ok' | 'error';
+    }>;
     error?: string;
   }>;
   generateTitle: (
     description: string,
     projectPath?: string
   ) => Promise<{ success: boolean; title?: string; error?: string }>;
+  /** Keyword search across every task transcript of the project */
+  searchConversations?: (
+    projectPath: string,
+    query: string,
+    limit?: number
+  ) => Promise<{
+    success: boolean;
+    data?: {
+      matches: ConversationSearchMatch[];
+      scannedSessions: number;
+      truncated: boolean;
+    };
+    error?: string;
+  }>;
   getOrphaned: (projectPath: string) => Promise<{
     success: boolean;
     orphanedFeatures?: Array<{ feature: Feature; missingBranch: string }>;
@@ -726,6 +869,34 @@ export interface EventHistoryAPI {
   }>;
 }
 
+export interface HerdrAPI {
+  getStatus: () => Promise<{
+    success: boolean;
+    status?: {
+      available: boolean;
+      version: string | null;
+      sessionName: string;
+      sessionRunning: boolean;
+      piIntegrationReady: boolean;
+      problems: string[];
+    };
+    error?: string;
+  }>;
+  getPreview: (
+    projectPath: string,
+    workDir?: string,
+    cols?: number,
+    rows?: number
+  ) => Promise<{
+    success: boolean;
+    sessionName?: string;
+    terminalSessionId?: string;
+    workDir?: string;
+    reused?: boolean;
+    error?: string;
+  }>;
+}
+
 export interface ElectronAPI {
   ping: () => Promise<string>;
   getApiKey?: () => Promise<string | null>;
@@ -798,6 +969,7 @@ export interface ElectronAPI {
   autoMode?: AutoModeAPI;
   features?: FeaturesAPI;
   runningAgents?: RunningAgentsAPI;
+  herdr?: HerdrAPI;
   github?: GitHubAPI;
   enhancePrompt?: {
     enhance: (
@@ -1454,6 +1626,12 @@ const _getMockElectronAPI = (): ElectronAPI => {
     // Mock Spec Regeneration API
     specRegeneration: createMockSpecRegenerationAPI(),
 
+    // Mock Herdr API
+    herdr: {
+      getStatus: async () => ({ success: false, status: undefined }),
+      getPreview: async () => ({ success: false, error: 'Herdr is unavailable in mock mode' }),
+    },
+
     // Mock Features API
     features: createMockFeaturesAPI(),
 
@@ -1559,7 +1737,30 @@ interface InstallProgressEvent {
 }
 
 // Setup API interface
+export interface PiStatusResponse {
+  success: boolean;
+  installed?: boolean;
+  version?: string | null;
+  path?: string | null;
+  auth?: {
+    authenticated: boolean;
+    method: string;
+    hasApiKey: boolean;
+    hasOAuthToken: boolean;
+  };
+  litellm?: {
+    baseUrl: string;
+    hasApiKey: boolean;
+    modelsConfigPath: string;
+  };
+  recommendation?: string;
+  installCommand?: string;
+  loginCommand?: string;
+  error?: string;
+}
+
 interface SetupAPI {
+  getPiStatus?: () => Promise<PiStatusResponse>;
   getClaudeStatus: () => Promise<{
     success: boolean;
     status?: string;
@@ -2179,6 +2380,9 @@ function createMockSetupAPI(): SetupAPI {
 // Mock Worktree API implementation
 function createMockWorktreeAPI(): WorktreeAPI {
   return {
+    previewStatus: async () => ({ success: true, configured: false, preview: null }),
+    previewStart: async () => ({ success: false, error: 'Preview deployment requires the server' }),
+    previewStop: async () => ({ success: false, error: 'Preview deployment requires the server' }),
     mergeFeature: async (
       projectPath: string,
       branchName: string,
@@ -2224,6 +2428,17 @@ function createMockWorktreeAPI(): WorktreeAPI {
     list: async (projectPath: string) => {
       console.log('[Mock] Listing worktrees:', { projectPath });
       return { success: true, worktrees: [] };
+    },
+
+    progress: async (projectPath: string) => {
+      console.log('[Mock] Loading worktree progress:', { projectPath });
+      return {
+        success: true,
+        projectPath,
+        baseBranch: 'main',
+        generatedAt: new Date().toISOString(),
+        worktrees: [],
+      };
     },
 
     listAll: async (

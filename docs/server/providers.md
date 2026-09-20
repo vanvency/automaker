@@ -1,6 +1,6 @@
 # Provider Architecture Reference
 
-This document describes the modular provider architecture in `apps/server/src/providers/` that enables support for multiple AI model providers (Claude SDK, OpenAI Codex CLI, and future providers like Cursor, OpenCode, etc.).
+This document describes the modular provider architecture in `apps/server/src/providers/` that enables support for seven registered providers: Claude, Codex, Cursor, Gemini, Copilot, OpenCode and Pi. Pi feature execution additionally uses Herdr to share the interactive task conversation.
 
 ---
 
@@ -156,6 +156,169 @@ export interface ContentBlock {
 
 ## Available Providers
 
+### Model ID convention (`agent:model`)
+
+Every provider prefixes its canonical model IDs so the provider factory can pick
+the right CLI from the model string alone:
+
+| Agent    | Canonical form                                    | Example                                          |
+| -------- | ------------------------------------------------- | ------------------------------------------------ |
+| Pi       | `pi:<gateway>/<model>`                            | `pi:litellm/worker`                              |
+| OpenCode | `opencode:<model>` / `opencode:<gateway>/<model>` | `opencode:litellm/worker`, `opencode:big-pickle` |
+| Cursor   | `cursor:<model>`                                  | `cursor:auto`, `cursor:composer-1`               |
+| Codex    | `codex:<model>`                                   | `codex:gpt-5.3-codex`                            |
+| Gemini   | `gemini:<model>`                                  | `gemini:2.5-pro`                                 |
+| Copilot  | `copilot:<model>`                                 | `copilot:gpt-4.1`                                |
+| Claude   | no prefix (native SDK models)                     | `claude-opus`, `claude-sonnet`                   |
+
+The agent segment is Automaker's routing tag; it is stripped before the CLI runs
+(`pi:litellm/worker` → `pi --provider litellm --model worker`). Pre-rename forms
+(`cursor-auto`, `codex-gpt-5.3-codex`, `gemini-2.5-pro`, `copilot-gpt-4.1`,
+`opencode-litellm/auto`, `pi-litellm/worker`) are still parsed and migrated on
+read, so existing settings keep working.
+
+OpenCode only knows the models declared in `~/.config/opencode/opencode.jsonc`,
+so run `npm run init:opencode-litellm` to copy the local LiteLLM model list into
+that config — the same idea as `npm run init:pi-litellm` for Pi's
+`~/.pi/agent/models.json`.
+
+### Feature ↔ provider session mapping
+
+One Automaker feature owns exactly one provider session for its whole life, so a
+card shows one conversation with a full history instead of a new clean session
+per run:
+
+- Before a run, `ExecutionService` seeds `sdkSessionId` from the feature's
+  `providerSessionId`.
+- After a run, `AgentExecutor` persists the provider session id back onto the
+  feature, whether or not the run used planning.
+- Follow-ups (approval replies, Jira monitor replies, resume) therefore land in
+  the same conversation, and each reply is another user turn.
+- If a provider reports a missing/expired session, the stale id is cleared so the
+  next run starts fresh instead of failing the same way repeatedly.
+
+Providers resume via their native mechanism: Claude SDK `resume`, Codex
+`resume <id>`, Cursor/Gemini `--resume`, OpenCode `--session`, Copilot
+`resumeSession`, Pi session store.
+
+### Pi Provider (CLI-based, LiteLLM-backed)
+
+**Location**: `apps/server/src/providers/pi-provider.ts`
+
+Integrates the `pi` coding agent (`@earendil-works/pi-coding-agent`) with models
+from the local LiteLLM gateway. Non-feature calls use CLI JSON mode; feature
+execution uses `HerdrFeaturePiProvider` and an interactive Herdr pane.
+Canonical model IDs are `pi:litellm/<model>` (e.g. `pi:litellm/auto`).
+
+#### Model discovery
+
+`PiProvider` reads the gateway's OpenAI-compatible `/v1/models` endpoint
+(default `http://127.0.0.1:4000/v1`) and registers the result in
+`~/.pi/agent/models.json` as a `litellm` provider, preserving any other providers
+the user configured. The static list in `libs/types/src/pi-models.ts` acts as a
+fallback when the gateway is unreachable.
+
+Every registered model declares `contextWindow: 1000000`
+(`PI_MODEL_CONTEXT_WINDOW`) and `maxTokens: 64000`
+(`PI_MODEL_MAX_OUTPUT_TOKENS`): Pi's defaults for a provider model that omits
+them are 128k context and 16k output, which makes the CLI compact early and cap
+answers well below what the gateway serves.
+
+Run the sync manually with:
+
+```bash
+node scripts/init-pi-litellm-models.mjs          # writes ~/.pi/agent/models.json
+node scripts/init-pi-litellm-models.mjs --dry-run
+```
+
+The LiteLLM master key is resolved from (in order) `LITELLM_MASTER_KEY`,
+`/etc/litellm/litellm.env`, or the existing OpenCode provider config. Only the
+environment reference `$LITELLM_MASTER_KEY` is written to `models.json`; the
+actual key is injected into the Pi subprocess environment at run time.
+
+#### Execution
+
+Feature execution, Reply and pipeline steps use `HerdrFeaturePiProvider` from
+`AutoMode`'s facade. It restores the task's Herdr pane, submits to the idle Pi
+process and reads newly appended messages from the exact Pi JSONL session file.
+A busy pane rejects duplicate dispatch. Missing Herdr or its Pi integration is
+an error; task execution does not silently fall back to a hidden CLI process.
+See [Herdr session architecture](../herdr-session-architecture.md).
+
+Non-feature Pi calls are spawned as:
+
+```
+pi --print --mode json --provider litellm --model <model> [--thinking <level>] \
+   [--session-id <id>] [--tools <names>] [--approve]
+```
+
+The prompt is passed via stdin, `message_update` deltas are streamed as
+assistant text/thinking blocks, and `message_end`/`agent_end` produce the
+authoritative result. Session ids from the `session` event are reused as
+`--session-id` for follow-up turns.
+
+#### Environment variables
+
+| Variable                        | Purpose                           | Default                              |
+| ------------------------------- | --------------------------------- | ------------------------------------ |
+| `AUTOMAKER_LITELLM_BASE_URL`    | LiteLLM gateway base URL          | `http://127.0.0.1:4000/v1`           |
+| `LITELLM_MASTER_KEY`            | Gateway API key                   | read from `/etc/litellm/litellm.env` |
+| `AUTOMAKER_PI_NO_PROJECT_TRUST` | Set to `true` to drop `--approve` | unset                                |
+
+#### HTTP routes
+
+- `GET /api/setup/pi-status` - CLI installation + LiteLLM connectivity
+- `GET /api/setup/pi/models` - available models (`?refresh=true` to force)
+- `POST /api/setup/pi/models/refresh` - re-read LiteLLM and update `models.json`
+- `POST /api/setup/pi/cache/clear` - clear the in-memory model cache
+
+#### Pi web conversation
+
+The current task **Conversation** action and **Agent** page use Herdr. The
+following Pi Web routes remain available for compatibility; they are not the
+fallback execution path for Herdr-backed tasks. Two viewer backends exist:
+
+1. **Pi Web UI** ([agegr/pi-web](https://github.com/agegr/pi-web)) - preferred.
+   It reads the same `~/.pi` configuration and session files, can resume
+   conversations, configure models and inspect project files, and deep-links with
+   `/?session=<id>`.
+2. **Built-in viewer** (`/api/pi-web/view`) - a minimal fallback Automaker serves
+   itself when the standalone Pi Web server is not running.
+
+| Route                       | Purpose                                                           |
+| --------------------------- | ----------------------------------------------------------------- |
+| `POST /api/features/pi-web` | Resolve the feature's worktree + session and return the deep link |
+| `GET /api/pi-web/view`      | Built-in HTML conversation page (fallback backend)                |
+| `GET /api/pi-web/session`   | Parsed transcript (messages, reasoning, tool calls, turn count)   |
+| `POST /api/pi-web/send`     | Run a follow-up turn and append it to the same Pi session         |
+
+The session is resolved from `providerSessionId` persisted on the feature,
+falling back to the newest session in the worktree directory
+(`~/.pi/agent/sessions/--<project-path>--/`). The response includes
+`backend: 'pi-web' | 'builtin'` so clients know whether to append Automaker's API
+key (built-in viewer only) or expect Pi Web's own login.
+
+##### Running the Pi Web server
+
+```bash
+npm install -g @agegr/pi-web@latest
+PI_WEB_PASSWORD='<long-random-password>' pi-web --port 30141 --hostname 0.0.0.0
+```
+
+A ready-made unit lives at `scripts/systemd/pi-web.service`; it reads
+`/etc/pi-web/pi-web.env` (password, optional allowed hosts) and binds
+`0.0.0.0:30141`.
+
+| Variable          | Purpose                                                                | Default                  |
+| ----------------- | ---------------------------------------------------------------------- | ------------------------ |
+| `PI_WEB_URL`      | Pi Web base URL used for the reachability probe and deep links         | `http://127.0.0.1:30141` |
+| `PI_WEB_HOST`     | Browser-facing host:port substituted into the deep link                | request host             |
+| `PI_WEB_PASSWORD` | Returned to the UI so it can be copied into Pi Web's login (user `pi`) | unset                    |
+
+The OpenCode web integration remains available and uses
+`OPENCODE_SERVER_URL` / `OPENCODE_WEB_HOST`. Canonical Pi model IDs use
+`pi:<provider>/<model>`; older model spellings are migrated for compatibility.
+
 ### 1. Claude Provider (SDK-based)
 
 **Location**: `apps/server/src/providers/claude-provider.ts`
@@ -212,14 +375,11 @@ for await (const msg of stream) {
 
 #### Conversation History Handling
 
-Uses `convertHistoryToMessages()` utility to convert history to SDK format:
-
-```typescript
-const historyMessages = convertHistoryToMessages(conversationHistory);
-for (const msg of historyMessages) {
-  yield msg; // Yield to SDK
-}
-```
+Continuation is delegated to the SDK: when `sdkSessionId` is present the provider
+passes it as the SDK `resume` option and the SDK replays its own transcript. The
+previous behaviour — converting a locally supplied `conversationHistory` into
+history messages — is gone, so a feature run (which builds its own prompt and
+passes no history) still resumes the same conversation.
 
 ---
 
