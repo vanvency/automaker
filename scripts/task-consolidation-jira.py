@@ -7,6 +7,10 @@ import os
 from pathlib import Path
 import re
 import sys
+import socket
+import ssl
+import time
+import urllib.error
 import urllib.request
 import urllib.parse
 
@@ -61,6 +65,61 @@ def transition_fields(choice, supplied):
     return result
 
 
+def jira_error_message(error):
+    # Do not echo URLs, headers or response bodies: they can contain credentials.
+    if isinstance(error, urllib.error.HTTPError):
+        return f'Jira returned HTTP {error.code}; check authentication, permissions or Jira availability'
+    if isinstance(error, FileNotFoundError):
+        return 'Jira CLI configuration file is missing; configure JIRA_CONFIG_FILE'
+    reason = error.reason if isinstance(error, urllib.error.URLError) else error
+    if isinstance(reason, (TimeoutError, socket.timeout)):
+        return 'Jira request timed out'
+    if isinstance(reason, socket.gaierror):
+        return 'Jira hostname could not be resolved'
+    if isinstance(reason, ssl.SSLError):
+        return 'Jira TLS certificate or handshake failed'
+    if isinstance(error, urllib.error.URLError):
+        return 'Could not connect to Jira; check server connectivity'
+    if isinstance(error, (KeyError, TypeError, json.JSONDecodeError)):
+        return 'Jira returned an unexpected response format'
+    return str(error) if isinstance(error, ValueError) else f'Jira request failed ({type(error).__name__})'
+
+
+def request_json(opener, request, read_attempts=3):
+    # Only GET is retryable. A timed-out transition might already have succeeded.
+    attempts = read_attempts if request.get_method() == 'GET' else 1
+    for attempt in range(attempts):
+        try:
+            with opener.open(request, timeout=15) as response:
+                content = response.read()
+                return json.loads(content) if content else {}
+        except (urllib.error.URLError, TimeoutError, ConnectionError) as error:
+            transient = not isinstance(error, urllib.error.HTTPError) or error.code in (429, 502, 503, 504)
+            if attempt + 1 == attempts or not transient:
+                raise
+            time.sleep(0.3 * (attempt + 1))
+
+
+def close_and_confirm(api, payload):
+    write_error = None
+    try:
+        api('/transitions', payload)
+    except Exception as error:
+        write_error = error
+    # Even if POST's reply was lost, a read can prove it succeeded. Never retry POST.
+    try:
+        fields = api('?fields=status,updated,summary')['fields']
+        if fields['status'].get('statusCategory', {}).get('key') == 'done':
+            return fields
+    except Exception as error:
+        raise ValueError('Jira closure was submitted but its final state could not be confirmed: '
+                         + jira_error_message(error) + '. Refresh Complete to reconcile; the transition will not be blindly repeated.') from error
+    if write_error:
+        raise ValueError('Jira closure is not confirmed: ' + jira_error_message(write_error)
+                         + '. Refresh Complete before retrying.') from write_error
+    raise ValueError('Jira transition returned, but the issue is not Closed/Done. Refresh Complete before retrying.')
+
+
 def main():
     request = json.load(sys.stdin)
     key = request.get('key', '')
@@ -103,9 +162,7 @@ def main():
             server + '/rest/api/2/issue/' + key + suffix,
             headers={'Authorization': auth, 'Content-Type': 'application/json', 'Accept': 'application/json'},
             data=json.dumps(body).encode() if body is not None else None)
-        with opener.open(req, timeout=25) as response:
-            content = response.read()
-            return json.loads(content) if content else {}
+        return request_json(opener, req)
 
     issue = api('?fields=status,updated,summary')
     fields = issue['fields']
@@ -129,8 +186,7 @@ def main():
             payload = {'transition': {'id': transition['id']}}
             if include_fields:
                 payload['fields'] = transition_fields(transition, json.loads(request.get('fields', '{}')))
-            api('/transitions', payload)
-            fields = api('?fields=status,updated,summary')['fields']
+            fields = close_and_confirm(api, payload)
             status = fields['status']
             done = status.get('statusCategory', {}).get('key') == 'done'
             if not done:
@@ -144,7 +200,5 @@ def main():
 if __name__ == '__main__':
     try:
         print(json.dumps({'success': True, 'result': main()}, ensure_ascii=False))
-    except urllib.error.HTTPError as error:
-        print(json.dumps({'success': False, 'error': f'Jira returned HTTP {error.code}; verify authentication and permissions'}))
     except Exception as error:
-        print(json.dumps({'success': False, 'error': str(error) if isinstance(error, ValueError) else 'Jira connection failed'}))
+        print(json.dumps({'success': False, 'error': jira_error_message(error)}))

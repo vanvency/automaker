@@ -174,6 +174,11 @@ export function CompleteTaskDialog({
                 <p>
                   {plan.jira.key} · {plan.jira.status}
                 </p>
+                {plan.jira.done && (
+                  <p className="text-muted-foreground">
+                    Jira 已完成，确认后仅核对 MR 并补齐 Automaker 状态，不会再次关闭 Jira。
+                  </p>
+                )}
                 {!plan.jira.done && plan.jira.transitions.length > 0 && (
                   <select
                     aria-label="Jira completion status"

@@ -204,15 +204,21 @@ export function createCompleteHandler(
           throw new Error(merged.error || `MR merge not confirmed: ${entry.mrUrl}`);
       }
       if (jira && !jira.done) {
-        jira = await external.jira({
-          action: 'close',
-          includeFields: 'true',
-          fields: JSON.stringify(jiraFields),
-          server: config!.jiraUrl,
-          key: feature.jiraKey!,
-          expectedUpdated: jira.updated,
-          transitionId,
-        });
+        try {
+          jira = await external.jira({
+            action: 'close',
+            includeFields: 'true',
+            fields: JSON.stringify(jiraFields),
+            server: config!.jiraUrl,
+            key: feature.jiraKey!,
+            expectedUpdated: jira.updated,
+            transitionId,
+          });
+        } catch (error) {
+          throw new Error(
+            `MR 已全部合并；Jira 完成状态尚未确认。请刷新 Complete 核对并收尾：${(error as Error).message}`
+          );
+        }
         if (!jira.done) throw new Error('Jira completion was not confirmed');
       }
       const updated = await loader.update(projectPath, featureId, {

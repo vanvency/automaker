@@ -186,10 +186,30 @@ describe('human Complete delivery endpoint', () => {
   });
   it('leaves the task in Done if Jira closing fails after merging', async () => {
     const s = setup({ jiraFailure: true });
-    expect((await s.apply()).success).toBe(false);
+    const result = await s.apply();
+    expect(result.success).toBe(false);
+    expect(result.error).toContain('MR 已全部合并');
     expect(s.gitlab.merge).toHaveBeenCalledTimes(2);
     expect(s.loader.update).not.toHaveBeenCalled();
   });
+  it('reconciles completed external operations without merging or closing again', async () => {
+    const s = setup();
+    const state = await s.gitlab.getMergeRequest('https://git.test/g/sub/-/merge_requests/1');
+    s.gitlab.getMergeRequest.mockResolvedValue({ ...state, state: 'merged' });
+    const issue = await s.jira({ action: 'inspect' });
+    s.jira.mockClear();
+    s.jira.mockResolvedValue({ ...issue, done: true, status: 'Closed', transitions: [] });
+    expect((await s.apply()).success).toBe(true);
+    expect(s.gitlab.markReady).not.toHaveBeenCalled();
+    expect(s.gitlab.merge).not.toHaveBeenCalled();
+    expect(s.jira.mock.calls.every(([input]) => input.action === 'inspect')).toBe(true);
+    expect(s.loader.update).toHaveBeenCalledWith(
+      '/root',
+      'task',
+      expect.objectContaining({ status: 'completed', jiraStatus: 'Closed' })
+    );
+  });
+
   it('validates required Jira fields before merging anything', async () => {
     const s = setup({ requiredFields: true });
     const preview = await s.call();

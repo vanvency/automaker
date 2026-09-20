@@ -47,3 +47,47 @@ class CompletionFieldsTests(unittest.TestCase):
     def test_nonterminal_transitions_are_excluded(self):
         self.transition['to']['statusCategory']['key'] = 'indeterminate'
         self.assertEqual(worker.completion_choices([self.transition], self.issue, True), [])
+
+class JiraRecoveryTests(unittest.TestCase):
+    def test_reads_retry_transient_timeouts_but_writes_never_retry(self):
+        from unittest.mock import Mock, patch
+        import urllib.request
+        opener = Mock()
+        response = Mock()
+        response.__enter__ = Mock(return_value=response)
+        response.__exit__ = Mock(return_value=False)
+        response.read.return_value = b'{"ok":true}'
+        opener.open.side_effect = [TimeoutError(), response]
+        with patch.object(worker.time, 'sleep'):
+            self.assertEqual(worker.request_json(opener, urllib.request.Request('https://jira.test')), {'ok': True})
+        self.assertEqual(opener.open.call_count, 2)
+        opener.reset_mock(side_effect=True)
+        opener.open.side_effect = TimeoutError()
+        with self.assertRaises(TimeoutError):
+            worker.request_json(opener, urllib.request.Request('https://jira.test', data=b'{}'))
+        self.assertEqual(opener.open.call_count, 1)
+
+    def test_lost_transition_response_is_reconciled_by_read_without_reposting(self):
+        from unittest.mock import Mock
+        fields = {'status': {'name': 'Closed', 'statusCategory': {'key': 'done'}}, 'updated': 'now'}
+        api = Mock(side_effect=[TimeoutError(), {'fields': fields}])
+        self.assertEqual(worker.close_and_confirm(api, {'transition': {'id': '121'}}), fields)
+        self.assertEqual(api.call_count, 2)
+        self.assertEqual(api.call_args_list[1].args, ('?fields=status,updated,summary',))
+
+    def test_read_failure_after_success_explains_uncertainty(self):
+        from unittest.mock import Mock
+        with self.assertRaisesRegex(ValueError, 'closure was submitted.*timed out'):
+            worker.close_and_confirm(Mock(side_effect=[{}, TimeoutError()]), {})
+
+    def test_post_failure_does_not_claim_closure_if_still_open(self):
+        from unittest.mock import Mock
+        with self.assertRaisesRegex(ValueError, 'closure is not confirmed'):
+            worker.close_and_confirm(Mock(side_effect=[TimeoutError(), {'fields': {'status': {'statusCategory': {'key': 'new'}}}}]), {})
+
+    def test_errors_are_actionable_and_do_not_leak_urls(self):
+        import socket
+        import urllib.error
+        self.assertIn('resolved', worker.jira_error_message(urllib.error.URLError(socket.gaierror())))
+        self.assertIn('response format', worker.jira_error_message(KeyError('secret')))
+        self.assertNotIn('password', worker.jira_error_message(urllib.error.URLError('https://user:password@jira.test')))
