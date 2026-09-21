@@ -47,6 +47,7 @@ import { AgentExecutor } from '../agent-executor.js';
 import { TestRunnerService } from '../test-runner-service.js';
 import { ProviderFactory } from '../../providers/provider-factory.js';
 import { HerdrFeaturePiProvider } from '../../providers/herdr-feature-pi-provider.js';
+import { WorktreeRetentionService } from '../worktree-retention-service.js';
 import { FeatureLoader } from '../feature-loader.js';
 import {
   featurePromptBlock,
@@ -474,6 +475,7 @@ export class AutoModeServiceFacade {
     };
 
     // ExecutionService - runAgentFn delegates to AgentExecutor via shared helper
+    const worktreeRetention = new WorktreeRetentionService(featureLoader);
     const executionService = new ExecutionService(
       eventBus,
       concurrencyManager,
@@ -546,7 +548,9 @@ export class AutoModeServiceFacade {
       (_pPath) => getFacade().saveExecutionState(),
       loadContextFiles,
       featureStateManager,
-      featureConversations ?? undefined
+      featureConversations ?? undefined,
+      // Reply/Agent on a card whose checkout was released rebuilds it first.
+      worktreeRetention
     );
 
     // RecoveryService

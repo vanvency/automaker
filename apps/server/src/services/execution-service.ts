@@ -63,6 +63,8 @@ import type {
   LoadContextFilesFn,
 } from './execution-types.js';
 
+import { DEVELOPMENT_COMPLETION_POLICY } from './continuation-prompt.js';
+
 const logger = createLogger('ExecutionService');
 
 /** Marker written by agent-executor for each tool invocation. */
@@ -220,7 +222,11 @@ export class ExecutionService {
      * Optional sink that publishes the run as an AgentSession so the Agent view
      * lists feature conversations while they are still in progress.
      */
-    private featureConversations?: FeatureConversationSink
+    private featureConversations?: FeatureConversationSink,
+    /** Rebuilds a checkout that the Done lane's retention job released. */
+    private worktreeRetention?: {
+      ensureWorktree: (projectPath: string, feature: Feature) => Promise<string | null>;
+    }
   ) {}
 
   private acquireRunningFeature(options: {
@@ -420,8 +426,16 @@ requires:
 
       let worktreePath: string | null = providedWorktreePath ?? null;
       const branchName = feature.branchName;
-      if (!worktreePath && useWorktrees && branchName) {
+      // A card whose checkout was released (Done longer than the retention
+      // window) is rebuilt from its branch here: the work belongs on that
+      // branch, so running it in the main checkout would edit the wrong tree.
+      const needsCheckout = useWorktrees || !!feature.worktreeRelease;
+      if (!worktreePath && needsCheckout && branchName) {
         worktreePath = await this.worktreeResolver.findWorktreeForBranch(projectPath, branchName);
+        if (!worktreePath && feature.worktreeRelease) {
+          const rebuilt = await this.worktreeRetention?.ensureWorktree(projectPath, feature);
+          if (rebuilt) worktreePath = rebuilt;
+        }
         if (!worktreePath) {
           throw new Error(
             `Worktree enabled but no worktree found for feature branch "${branchName}".`
@@ -509,6 +523,7 @@ requires:
       const imagePaths = feature.imagePaths?.map((img) =>
         typeof img === 'string' ? img : img.path
       );
+      prompt += `\n\n${DEVELOPMENT_COMPLETION_POLICY}`;
       if (feature.executionRunId && feature.jiraIssueId) {
         prompt += `\n\nExecution run ID: ${feature.executionRunId}\nWrite this exact runId in the feature-scoped jira-result.json receipt. Old receipts must not be reused.`;
       }
@@ -726,6 +741,8 @@ Please continue from where you left off and complete all remaining tasks. Use th
             )
           : [];
       const receiptRequiresReview = receiptOutcome !== null && receiptOutcome !== 'mr_created';
+      const receiptNeedsAttention =
+        receiptOutcome !== null && !['development_complete', 'mr_created'].includes(receiptOutcome);
       const receiptHasBlockers = receiptBlockers.length > 0;
       const receiptChangedProjects = executionReceipt
         ? normalizeReceiptChangedProjects(executionReceipt)
@@ -815,9 +832,9 @@ Please continue from where you left off and complete all remaining tasks. Use th
             : '');
         if (reviewMessage) {
           await this.featureStateManager.updateFeatureFields(projectPath, featureId, {
-            error: reviewMessage,
+            error: receiptNeedsAttention ? reviewMessage : undefined,
             executionNotice: {
-              kind: 'review',
+              kind: receiptNeedsAttention ? 'error' : 'review',
               source: 'delivery',
               message: reviewMessage,
               occurredAt: new Date().toISOString(),

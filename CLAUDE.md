@@ -177,6 +177,26 @@ conflict there is a fixable state rather than a dead end:
 - The Complete preview returns `conflicts` separately from `blockers`, and Complete
   stays disabled while conflicts exist.
 
+### Done Lane Worktree Retention
+
+The Done lane keeps the last `DONE_WORKTREE_RETENTION_DAYS` (7) days on the board:
+
+- A card stamps `verifiedAt` when it enters Done (`FeatureLoader.update` and
+  `FeatureStateManager.updateFeatureStatus`); `featureDoneAt()` falls back to the
+  delivery receipt / `updatedAt` / `createdAt` for cards verified before that.
+- `WorktreeRetentionService` (hourly from `index.ts`, or
+  `POST /api/features/release-stale-worktrees` with `dryRun` to preview) removes a
+  checkout once every card on its branch is done and the newest one is past the
+  window - and only when the branch is on `origin` and the checkout is clean. It
+  records `feature.worktreeRelease` and keeps the branch, the task record and the
+  pi conversations.
+- Rebuilding happens on the next Reply/Agent run (`ExecutionService`), when the
+  conversation is opened (`herdr-web`, `pi-web`, `opencode-web`) or through
+  `POST /api/features/rebuild-worktree`. It restores the recorded path so pi still
+  finds the card's session directory.
+- The board hides cards past the window; the Done header toggle (`+N 更早` /
+  `近 7 天`) reveals them, and a search always shows its matches.
+
 ### Model Resolution
 
 Use `resolveModelString()` from `@automaker/model-resolver` to convert model aliases:

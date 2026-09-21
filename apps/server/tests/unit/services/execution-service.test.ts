@@ -1745,7 +1745,7 @@ describe('execution-service.ts', () => {
         'feature-1'
       );
       expect(updateFeatureFields).toHaveBeenCalledWith('/test/project', 'feature-1', {
-        error: 'Needs real environment acceptance',
+        error: undefined,
         executionNotice: expect.objectContaining({ source: 'delivery', kind: 'review' }),
       });
     });
@@ -1876,6 +1876,21 @@ describe('execution-service.ts', () => {
         'feature-1',
         'waiting_approval'
       );
+    });
+
+    it('accepts completed development without requiring MRs', async () => {
+      vi.mocked(secureFs.readFile).mockImplementation(async (readPath: unknown) =>
+        String(readPath).endsWith('jira/feature-1/jira-result.json')
+          ? JSON.stringify({ outcome: 'development_complete', blockers: [], mergeRequests: [] })
+          : makeAgentOutput(5)
+      );
+      await createServiceWithMocks().executeFeature('/test/project', 'feature-1');
+      expect(mockUpdateFeatureStatusFn).toHaveBeenCalledWith(
+        '/test/project',
+        'feature-1',
+        'waiting_approval'
+      );
+      expect(mockRunAgentFn.mock.calls[0][2]).toContain('no MR is required');
     });
 
     it('persists changed projects and MRs from a delivery receipt', async () => {

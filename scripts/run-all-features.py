@@ -811,7 +811,7 @@ def main():
     parser.add_argument(
         "--no-draft-audit",
         action="store_true",
-        help="skip the post-feature merge-request draft audit",
+        help=argparse.SUPPRESS,  # Legacy flag; MR handling is now separate from task execution.
     )
     parser.add_argument("--dry-run", action="store_true")
     args = parser.parse_args()
@@ -939,23 +939,6 @@ def main():
                             feature, worktree, config, run_dir, "http://127.0.0.1:3001"
                         )
                         log(f"  parity routes: {[r['route'] for r in record['parity'].get('routes', [])]}")
-                if not args.no_draft_audit:
-                    # Agents create MRs through the GitLab API on this host (push
-                    # options are rejected), which yields "ready" MRs unless the
-                    # title keeps the Draft: prefix. Re-assert draft after every run.
-                    audit = subprocess.run(
-                        [sys.executable, str(SCRIPT_DIR / "audit-mr-drafts.py"), "--apply"],
-                        capture_output=True,
-                        text=True,
-                        timeout=600,
-                    )
-                    summary = audit.stdout.strip().splitlines()
-                    try:
-                        summary = json.loads(audit.stdout).get("summary")
-                    except ValueError:
-                        summary = {"raw": (audit.stdout.strip() or audit.stderr.strip())[:200]}
-                    record["draftAudit"] = summary
-                    log(f"  draft audit: {json.dumps(summary, ensure_ascii=False)}")
             except Exception as error:
                 record["finalStatus"] = "error"
                 record["error"] = str(error)

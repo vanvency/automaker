@@ -2,6 +2,7 @@
 import { useMemo, useCallback, useEffect } from 'react';
 import { isNeedsAttentionStatus } from '../constants';
 import { Feature, useAppStore } from '@/store/app-store';
+import { hasFeatureAttentionError, isWorktreeRetentionExpired } from '@automaker/types';
 import {
   createFeatureMap,
   getBlockingDependenciesFromMap,
@@ -173,6 +174,12 @@ interface UseBoardColumnFeaturesProps {
   currentWorktreeBranch: string | null; // Branch name of the selected worktree (null = main)
   projectPath: string | null; // Main project path (for main worktree)
   sortNewestCardOnTop?: boolean; // When true, sort cards by most recent (createdAt desc) in all columns
+  /**
+   * Done lane retention view: when true (the default) cards whose worktree
+   * retention window has passed are hidden, because their checkout is released
+   * and the history they need is on the branch.
+   */
+  hideStaleDoneCards?: boolean;
 }
 
 export function useBoardColumnFeatures({
@@ -184,6 +191,7 @@ export function useBoardColumnFeatures({
   currentWorktreeBranch,
   projectPath,
   sortNewestCardOnTop = false,
+  hideStaleDoneCards = true,
 }: UseBoardColumnFeaturesProps) {
   const taskParentIds = useMemo(() => parentFeatureIdsOf(features), [features]);
   // Get recently completed features from store for race condition protection
@@ -225,7 +233,7 @@ export function useBoardColumnFeatures({
   }, [features, clearRecentlyCompletedFeatures]);
 
   // Memoize column features to prevent unnecessary re-renders
-  const columnFeaturesMap = useMemo(() => {
+  const { columnFeaturesMap, hiddenDoneCount } = useMemo(() => {
     // Use a more flexible type to support dynamic pipeline statuses
     const map: Record<string, Feature[]> = {
       backlog: [],
@@ -244,6 +252,15 @@ export function useBoardColumnFeatures({
     // Get recently completed features for additional race condition protection
     // These features should not appear in backlog even if cache has stale status
     const recentlyCompleted = recentlyCompletedFeatures;
+    const now = new Date();
+    // A search is an explicit request for a card, so it always shows its matches.
+    const hideStaleDone = hideStaleDoneCards && searchQuery.trim() === '';
+    let hiddenDone = 0;
+    /** Done keeps a week on the board; older cards wait behind the lane toggle. */
+    const pushDone = (card: Feature) => {
+      if (hideStaleDone && isWorktreeRetentionExpired(card, { now })) hiddenDone += 1;
+      else map.verified.push(card);
+    };
 
     // Filter features by search query (case-insensitive)
     const normalizedQuery = searchQuery.toLowerCase().trim();
@@ -305,7 +322,7 @@ export function useBoardColumnFeatures({
       const status = f.status || 'backlog';
       // Keep the three-stage completion receipt on Done until explicitly archived.
       if (status === 'completed' && f.deliveryCompletion && !f.archive && matchesWorktree) {
-        map.verified.push(f);
+        pushDone(f);
         return;
       }
 
@@ -359,10 +376,8 @@ export function useBoardColumnFeatures({
       // Needs Attention lane: nothing here is waiting for an agent, it is waiting
       // for a human (failure, conflict, interruption). Keep the running-task race
       // protection so a restarting card never flashes into this lane either.
-      // A card carrying an `error` is waiting on a human answer (needs_input, a
-      // decomposition that has to be confirmed, ...), so it belongs in the same
-      // lane as failures - exactly what the Work Board's attention signal does.
-      const hasError = typeof f.error === 'string' && f.error.trim() !== '';
+      // Delivery review notices belong in Waiting Review; input/errors need attention.
+      const hasError = hasFeatureAttentionError(f);
       // Done is terminal: a human already decided, so a leftover notice (or a
       // stale needs-input message kept for the record) must not yank the card
       // back into Needs Attention.
@@ -405,7 +420,8 @@ export function useBoardColumnFeatures({
       } else if (map[status]) {
         // Only show if matches current worktree or has no worktree assigned
         if (matchesWorktree) {
-          map[status].push(f);
+          if (status === 'verified') pushDone(f);
+          else map[status].push(f);
         }
       } else if (status.startsWith('pipeline_')) {
         // Handle pipeline statuses - initialize array if needed
@@ -483,7 +499,7 @@ export function useBoardColumnFeatures({
       map[columnId] = pinTaskRootsFirst(map[columnId], taskParentIds);
     }
 
-    return map;
+    return { columnFeaturesMap: map, hiddenDoneCount: hiddenDone };
   }, [
     features,
     runningAutoTasks,
@@ -495,6 +511,7 @@ export function useBoardColumnFeatures({
     recentlyCompletedFeatures,
     sortNewestCardOnTop,
     taskParentIds,
+    hideStaleDoneCards,
   ]);
 
   const getColumnFeatures = useCallback(
@@ -513,5 +530,7 @@ export function useBoardColumnFeatures({
     columnFeaturesMap,
     getColumnFeatures,
     completedFeatures,
+    /** Done cards the retention window is currently hiding */
+    hiddenDoneCount,
   };
 }

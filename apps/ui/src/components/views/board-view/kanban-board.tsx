@@ -75,6 +75,12 @@ interface KanbanBoardProps {
   addFeatureShortcut?: string;
   onShowCompletedModal: () => void;
   completedCount: number;
+  /** Done lane retention view: cards older than the window, and the toggle for them */
+  doneLane?: {
+    hiddenCount: number;
+    showAll: boolean;
+    onToggleShowAll: () => void;
+  };
   pipelineConfig: PipelineConfig | null;
   onOpenPipelineSettings?: () => void;
   // Selection mode props
@@ -327,6 +333,7 @@ export const KanbanBoard = memo(function KanbanBoard({
   addFeatureShortcut: addFeatureShortcutProp,
   onShowCompletedModal,
   completedCount,
+  doneLane,
   pipelineConfig,
   onOpenPipelineSettings,
   isSelectionMode = false,
@@ -400,6 +407,31 @@ export const KanbanBoard = memo(function KanbanBoard({
                   headerAction={
                     column.id === 'verified' ? (
                       <div className="flex items-center gap-1">
+                        {/* The Done lane keeps the retention window on the board; a
+                            card older than that still exists (branch + history) but
+                            its checkout was released, so it waits behind this toggle. */}
+                        {doneLane && (doneLane.hiddenCount > 0 || doneLane.showAll) && (
+                          <Tooltip>
+                            <TooltipTrigger asChild>
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                className="h-6 px-1.5 text-[10px] text-muted-foreground"
+                                onClick={doneLane.onToggleShowAll}
+                                data-testid="done-lane-retention-toggle"
+                              >
+                                {doneLane.showAll ? '近 7 天' : `+${doneLane.hiddenCount} 更早`}
+                              </Button>
+                            </TooltipTrigger>
+                            <TooltipContent>
+                              <p>
+                                {doneLane.showAll
+                                  ? '只看最近 7 天完成的卡片'
+                                  : `还有 ${doneLane.hiddenCount} 张超过 7 天的卡片，worktree 已释放（分支与历史保留）`}
+                              </p>
+                            </TooltipContent>
+                          </Tooltip>
+                        )}
                         {columnFeatures.length > 0 && (
                           <Tooltip>
                             <TooltipTrigger asChild>

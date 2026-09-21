@@ -6,6 +6,7 @@ import { apiFetch } from '@/lib/api-fetch';
 import { useAppStore } from '@/store/app-store';
 import { queryKeys } from '@/lib/query-keys';
 import { Button } from '@/components/ui/button';
+import { Autocomplete } from '@/components/ui/autocomplete';
 import {
   Dialog,
   DialogContent,
@@ -106,20 +107,18 @@ export function ArchiveTaskDialog({
         {reason === 'duplicate' && (
           <label className="space-y-1 text-sm">
             Duplicate of
-            <select
-              aria-label="Duplicate of"
-              className="block w-full rounded border bg-background p-2"
+            <Autocomplete
               value={duplicateOf}
               disabled={busy}
-              onChange={(e) => setDuplicateOf(e.target.value)}
-            >
-              <option value="">Select the existing task</option>
-              {targets.map((f) => (
-                <option key={f.id} value={f.id}>
-                  {f.title || f.jiraKey || f.id}
-                </option>
-              ))}
-            </select>
+              onChange={setDuplicateOf}
+              placeholder="Select the existing task"
+              searchPlaceholder="Search by title, Jira key or task ID..."
+              emptyMessage="No matching tasks."
+              options={targets.map((f) => ({
+                value: f.id,
+                label: [f.jiraKey, f.title || f.id].filter(Boolean).join(' · '),
+              }))}
+            />
           </label>
         )}
         <label className="space-y-1 text-sm">

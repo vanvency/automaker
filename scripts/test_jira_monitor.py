@@ -196,14 +196,31 @@ class MonitorTests(unittest.TestCase):
         self.assertNotIn('Autonomous decomposition', prompt)
         self.assertNotIn('Manual decomposition only', prompt)
 
-    def test_prompt_requires_draft_merge_requests(self):
+    def test_prompt_hands_off_development_without_requiring_merge_requests(self):
         task = dict(self.issue, fields=dict(
             self.issue['fields'], issueType={'name': 'Task', 'subtask': False},
             Subtasks=[]))
         prompt = monitor.task_description(task, self.config, '/tmp/wt', 'jira/aip-123-kaka')
-        self.assertIn('merge_request.draft', prompt)
-        self.assertIn("'Draft: '", prompt)
-        self.assertIn('never be merged', prompt)
+        self.assertIn('Development completion does not', prompt)
+        self.assertIn('Do not create/update MRs', prompt)
+        self.assertIn('development_complete', prompt)
+
+    def test_development_receipt_requires_checks_but_not_mrs(self):
+        log = self.root / 'tests.log'
+        log.write_text('checks passed')
+        receipt = {
+            'issueKey': 'AIP-123', 'outcome': 'development_complete',
+            'tests': [{'command': 'npm test', 'exitCode': 0}],
+            'testLog': str(log), 'mergeRequests': [], 'blockers': [],
+        }
+        self.assertTrue(monitor.validate_receipt(
+            receipt, 'AIP-123', str(self.root), self.config['gitlabHost']))
+        for updates in ({'blockers': ['Missing authorization check']},
+                        {'tests': []}, {'issueKey': 'AIP-999'},
+                        {'mergeRequests': ['https://unrelated.example/mr/1']},
+                        {'tests': [{'command': 'npm test', 'exitCode': 1}]}):
+            self.assertFalse(monitor.validate_receipt(
+                dict(receipt, **updates), 'AIP-123', str(self.root), self.config['gitlabHost']))
 
     def test_prompt_requires_changed_project_mr_metadata(self):
         task = dict(self.issue, fields=dict(
@@ -684,7 +701,7 @@ class MonitorTests(unittest.TestCase):
         self.assertIsNone(reviewer)
         self.assertIn('not a GitLab user', error)
 
-    def test_subtask_issue_prompt_forbids_decomposition_and_sets_reviewer(self):
+    def test_subtask_issue_prompt_forbids_decomposition_and_mr_assignment(self):
         story = dict(self.issue, fields=dict(
             self.issue['fields'], issueType={'name': 'Story', 'subtask': False},
             Subtasks=[{'key': 'AIP-124', 'fields': {'summary': 'Backend', 'issueType': {'name': 'Backend-Task'},
@@ -701,9 +718,8 @@ class MonitorTests(unittest.TestCase):
         self.assertNotIn('features/create', prompt)
         self.assertIn('AIP-124', prompt)
         self.assertIn('AIP-125', prompt)
-        self.assertIn('reviewer_ids: [1930]', prompt)
-        self.assertIn('no `merge_request.reviewer` push option', prompt)
-        self.assertIn('ChenAnkang 陈安康', prompt)
+        self.assertNotIn('reviewer_ids', prompt)
+        self.assertIn('review and merge are handled separately', prompt)
 
     def test_epic_prompt_without_subtasks_asks_for_manual_decomposition(self):
         epic = dict(self.issue, fields=dict(
@@ -744,7 +760,7 @@ class MonitorTests(unittest.TestCase):
         self.assertEqual(entry['childrenKept'], [])
         self.assertTrue(entry['restoreBacklog'])
         self.assertIn('already split into Jira subtasks', entry['description'])
-        self.assertIn('reviewer_ids: [1930]', entry['description'])
+        self.assertNotIn('reviewer_ids', entry['description'])
 
     def test_subtask_reconcile_keeps_started_children(self):
         detail = {'key': 'AIP-123', 'fields': dict(

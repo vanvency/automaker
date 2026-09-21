@@ -522,43 +522,29 @@ D1. Implement every acceptance criterion and run meaningful relevant tests/build
     regression coverage for bugs where appropriate. Record exact commands and actual
     results in .automaker/jira-tests.log in the root worktree; never claim unrun tests
     passed and never deploy to shared/production infrastructure without approval.
-D2. Commit and push each affected subproject branch. Create one MR per changed
-    repository targeting dev, always as a DRAFT so it can never be merged by accident.
-    Include {key} in titles, the Jira URL, the concrete change and actual validation in
-    MR descriptions. This host (gitblue.transwarp.io, GitLab 15.0.2) rejects the
-    `merge_request.draft` push option and the REST `draft=true` parameter, so a draft
-    exists only as the title prefix: create or rename the MR through REST with a title
-    starting with 'Draft: '. Never PUT a bare title, which silently converts a draft
-    back to "ready". After every create/rename, GET the MR and confirm `draft == true`
-    before recording its URL. Reuse an existing MR for the branch and convert it to a
-    draft instead of creating a duplicate. Never invent URLs.
+D2. Commit and push each affected subproject branch. Development completion does not
+    require an MR. Do not create/update MRs, assign reviewers, resolve MR conflicts,
+    or merge branches as part of this task; review and merge are handled separately.
 D3. This worktree and branch may be shared by several issues of the same hierarchy, so
     EVERY commit MUST start with this issue's key, e.g. "[{key}] feat: ..."; never
-    commit without that prefix. Update root gitlinks for changed submodules, commit
-    them on {branch}, and create a root MR to dev when the root changed. Cross-link
-    dependent MRs. Never mark an MR ready for review and never enable auto-merge; only
-    the human reporter does that.
+    commit without that prefix. Update root gitlinks for changed submodules and commit
+    them on {branch}.
 D4. If a human product decision is required, do not guess and do not stop as a generic
     failure: write outcome "needs_input" with a "questions" array (question, context,
     options) to the receipt, then stop. The monitor notifies the Jira reporter and
     resumes you with the answer.
 D5. Write {worktree}/.automaker/jira/{feature_id}/jira-result.json (keep automation
-    artifacts out of commits) containing JSON with issueKey, outcome ('mr_created',
-    'needs_input' or 'blocked'), summary, tests (array of command/exitCode objects),
-    testLog (absolute log path), mergeRequests (array of actual URL strings), blockers
-    (array of strings), and for needs_input a questions array (question, context,
-    options). Also include changedProjects (array of objects with name and mrUrl) with
-    exactly one entry per changed repository or root project; mergeRequests remains the
-    flat array of actual MR URLs.
-    CRITICAL: mergeRequests and changedProjects must list ONLY the merge requests this
-    task created on its own branch. When other tickets' work is relevant (duplicate
-    scope, dependency, evidence for a decision), record it under a separate
-    "relatedMergeRequests" array and explain it in the summary - never copy another
-    task's MR into mergeRequests. A task that created no MR must not claim outcome
-    "mr_created"; use "needs_input" or "blocked" instead. For failures, preserve work,
-    report the cause and write a blocked result instead of claiming done. Every URL
-    recorded in mergeRequests must point to an MR you re-read and saw with
-    `draft == true`; an MR that is "ready" is a delivery defect, not a completion.
+    artifacts out of commits) containing JSON with issueKey, outcome
+    ('development_complete', 'needs_input' or 'blocked'), summary, tests (array of
+    command/exitCode objects), testLog (absolute log path), blockers (array of strings),
+    and for needs_input a questions array (question, context, options). Include
+    changedProjects with exactly one entry per changed repository or root project
+    (name, optional mrUrl). Existing task-owned MR URLs may be recorded in
+    mergeRequests; an empty array is valid. Never invent URLs or claim another task's
+    MRs as your delivery. Use relatedMergeRequests for references to other tasks.
+    Report development_complete once implementation and relevant checks are complete;
+    pending MR creation/review/merge is not a blocker. For unfinished development or
+    failed checks, preserve work and report blocked instead of claiming done.
 D6. Write the acceptance evidence next to the receipt: {worktree}/.automaker/acceptance/{feature_id}/manifest.json
     with status ('passed', 'failed' or 'blocked'), summary, checks (name/status/details)
     and screenshots (kind 'prototype' or 'actual', path relative to that directory,
@@ -573,24 +559,6 @@ D7. Keep the card's `goals` list to DEVELOPMENT goals only (what has to be built
     verified). MR review and the merge into dev happen in the Verified lane after a
     human presses Complete, so never add an MR/merge/merge-request goal to `goals`; the
     monitor tracks the MR state itself.'''
-
-
-def reviewer_directive(reviewer, display=''):
-    """MR reviewer requirement for the Jira assignee."""
-    if not reviewer:
-        return ''
-    assignee = display or reviewer['username']
-    return f"""
-MR reviewer (required):
-R. The Jira assignee {assignee} reviews this work. Set the MR reviewer to GitLab user
-   {reviewer['username']} (id {reviewer['id']}) through REST (this GitLab 15.0.2 has
-   no `merge_request.reviewer` push option): POST/PUT /projects/:id/merge_requests[/:iid]
-   with `reviewer_ids: [{reviewer['id']}]`. `reviewer_ids` replaces the whole reviewer
-   list, so merge with the reviewers already on the MR instead of overwriting them.
-   Read the MR back and confirm the reviewer is present before writing the receipt; if
-   it cannot be set, record that in the receipt blockers instead of reporting a clean
-   delivery, so the missing reviewer stays visible to a human.
-"""
 
 
 def subtask_scope_directive(key, subtasks, branch, subtask_cards=False):
@@ -681,17 +649,11 @@ D2. Everything happens in THIS worktree and on branch {branch}. Record the
 D3. Prefer asking the reporter to split it in Jira when the boundaries are a
    product decision, and use outcome "needs_input" with your proposed split.
 """
-    if reviewer_error:
-        scope_directive += f"""
-Reviewer lookup problem (report it, do not guess):
-{reviewer_error}
-"""
     snapshot = json.dumps({k: fields.get(k) for k in
                           ['summary', 'description', 'components', 'attachment', 'issuelinks']}
                          | {'subtasks': subtasks,
                             'assignee': (issue_assignee(fields)[1] or None)},
                          ensure_ascii=False, indent=2)
-    reviewer_text = reviewer_directive(reviewer, reviewer_display)
     delivery_text = delivery_directive(key, worktree, branch)
     return f'''Implement Jira {key}: {config['jiraUrl']}/browse/{key}.
 Repository: {config['projectPath']}; isolated worktree: {worktree}; branch: {branch}.
@@ -714,7 +676,7 @@ R3. Set GIT_SSH_COMMAND to
 
 {delivery_text}
 
-{scope_directive}{reviewer_text}
+{scope_directive}
 Initial Jira snapshot (refresh before implementing):
 {snapshot}
 '''
@@ -1300,7 +1262,7 @@ def tests_acceptable(tests):
 def validate_receipt(receipt, key, worktree, host):
     if receipt.get('issueKey') != key:
         return False
-    if receipt.get('outcome') != 'mr_created':
+    if receipt.get('outcome') not in ('development_complete', 'mr_created'):
         return False
     # A delivery receipt with unresolved blockers is not complete even when tests
     # passed and real MRs exist. Keep it blocked so partial work cannot be done.
@@ -1313,7 +1275,7 @@ def validate_receipt(receipt, key, worktree, host):
     if not log.is_relative_to(Path(worktree).resolve()) or not log.is_file() or not log.stat().st_size:
         return False
     urls = receipt.get('mergeRequests', [])
-    return bool(urls) and all(
+    return (receipt.get('outcome') == 'development_complete' or bool(urls)) and all(
         urllib.parse.urlsplit(u).scheme in ('http', 'https')
         and urllib.parse.urlsplit(u).hostname == host
         and re.search(r'/merge_requests/\d+$', urllib.parse.urlsplit(u).path)
@@ -1407,9 +1369,10 @@ def reconcile(config, state, api):
                         'updates': {'status': 'waiting_approval', 'error': reason},
                     })
                     job['featureStatus'] = 'waiting_approval'
-            elif outcome == 'mr_created' and validate_receipt(
+            elif outcome in ('development_complete', 'mr_created') and validate_receipt(
                     receipt, key, job['worktree'], config['gitlabHost']):
-                job['status'] = 'mr_reported'
+                job['status'] = ('development_reported' if outcome == 'development_complete'
+                                 else 'mr_reported')
                 job.pop('error', None)
             elif (outcome == 'mr_created' and receipt.get('blockers') and
                   has_valid_delivery_artifacts(receipt, key, job['worktree'],
@@ -1465,7 +1428,7 @@ def reconcile(config, state, api):
             continue
         elif feature_status in ('completed', 'verified', 'waiting_approval', 'failed', 'error', 'interrupted'):
             job['status'] = 'blocked'
-            job['error'] = feature.get('error') or 'Execution ended without test/MR receipt'
+            job['error'] = feature.get('error') or 'Execution ended without development/test receipt'
         else:
             age = (datetime.datetime.now(datetime.timezone.utc) -
                    datetime.datetime.fromisoformat(job['dispatchedAt'])).total_seconds()
@@ -1624,8 +1587,8 @@ def sync_jira_progress(config, state):
         mode = 'milestones' if config.get('jiraProgressEnabled', False) else 'off'
     if mode == 'off':
         return
-    allowed = {'mr_reported'} if mode == 'completion' else {
-        'running', 'blocked', 'mr_reported'}
+    allowed = {'development_reported', 'mr_reported'} if mode == 'completion' else {
+        'running', 'blocked', 'development_reported', 'mr_reported'}
     for key, job in state['jobs'].items():
         if job.get('status') not in allowed:
             continue
@@ -1658,7 +1621,7 @@ def sync_jira_progress(config, state):
             lines.extend('MR: ' + u for u in result.get('mergeRequests', []))
             lines.extend(f"Test: {t.get('command')} (exit {t.get('exitCode')})"
                          for t in result.get('tests', []))
-            if job['status'] == 'mr_reported':
+            if job['status'] in ('development_reported', 'mr_reported'):
                 lines.append('Delivery receipt received; review/merge and Jira completion are not implied.')
             elif job['status'] == 'blocked':
                 lines.append('This issue is not confirmed complete. Implementation/delivery must be verified before Done.')

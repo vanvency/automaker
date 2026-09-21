@@ -163,6 +163,12 @@ export class FeatureStateManager {
         feature.justFinishedAt = undefined;
       }
 
+      // Done bookkeeping mirrors FeatureLoader.update: `verifiedAt` is only set
+      // while the card sits in Done, and the worktree retention job counts from it.
+      // Delivered cards keep the stamp of the Done entry that led to them.
+      if (status === 'verified') feature.verifiedAt = new Date().toISOString();
+      else if (status !== 'completed') feature.verifiedAt = undefined;
+
       // Finalize in-progress tasks when reaching terminal states (waiting_approval or verified)
       if (status === 'waiting_approval' || status === 'verified') {
         this.finalizeInProgressTasks(feature, featureId, status);

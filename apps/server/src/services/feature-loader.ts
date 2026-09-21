@@ -475,6 +475,14 @@ export class FeatureLoader {
       descriptionHistory: updatedHistory,
     };
 
+    // Done bookkeeping. `verifiedAt` records when the card entered Done and is
+    // what the worktree retention job counts from; a card that is completed
+    // (delivered) keeps the stamp of the Done entry that led to it.
+    if (updates.status !== undefined && updates.status !== feature.status) {
+      if (updates.status === 'verified') updatedFeature.verifiedAt = new Date().toISOString();
+      else if (updates.status !== 'completed') updatedFeature.verifiedAt = undefined;
+    }
+
     // Remove transient runtime fields before persisting (same as create)
     const featureToWrite = { ...updatedFeature };
     delete featureToWrite.titleGenerating;

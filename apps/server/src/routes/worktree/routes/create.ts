@@ -28,6 +28,7 @@ import { execGitCommand } from '../../../lib/git.js';
 import { trackBranch } from './branch-tracking.js';
 import { createLogger } from '@automaker/utils';
 import { runInitScript } from '../../../services/init-script-service.js';
+import { worktreePathForBranch } from '../../../services/worktree-retention-service.js';
 import {
   syncBaseBranch,
   type BaseBranchSyncResult,
@@ -171,10 +172,8 @@ export function createCreateHandler(events: EventEmitter, settingsService?: Sett
         return;
       }
 
-      // Sanitize branch name for directory usage
-      const sanitizedName = branchName.replace(/[^a-zA-Z0-9_-]/g, '-');
       const worktreesDir = path.join(projectPath, '.worktrees');
-      const worktreePath = path.join(worktreesDir, sanitizedName);
+      const worktreePath = worktreePathForBranch(projectPath, branchName);
 
       // Create worktrees directory if it doesn't exist
       await secureFs.mkdir(worktreesDir, { recursive: true });

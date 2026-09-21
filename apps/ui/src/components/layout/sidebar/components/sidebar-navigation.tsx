@@ -94,8 +94,8 @@ export function SidebarNavigation({
 
   // Filter sections: always show non-project sections, only show project sections when project exists
   const visibleSections = navSections.filter((section) => {
-    // Always show Dashboard (first section with no label)
-    if (!section.label && section.items.some((item) => item.id === 'overview')) {
+    // Home and overview remain available without a selected project.
+    if (!section.label && section.items.some((item) => item.id === '' || item.id === 'overview')) {
       return true;
     }
     // Show other sections only when project is selected
@@ -284,7 +284,7 @@ export function SidebarNavigation({
                         sidebarOpen ? 'justify-start' : 'justify-center'
                       )}
                       title={!sidebarOpen ? item.label : undefined}
-                      data-testid={`nav-${item.id}`}
+                      data-testid={`nav-${item.id || 'home'}`}
                     >
                       <div className="relative">
                         {item.isLoading ? (

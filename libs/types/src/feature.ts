@@ -152,7 +152,7 @@ export interface Feature {
   requirePlanApproval?: boolean;
   planSpec?: PlanSpec;
   error?: string;
-  /** Source and time of the current task notice, distinct from the agent's answer. */
+  /** Review notices do not make a task fail or require an input decision. */
   executionNotice?: {
     kind: 'error' | 'review' | 'interrupted';
     source: 'execution' | 'delivery' | 'recovery';
@@ -260,8 +260,34 @@ export interface Feature {
   createdAt?: string; // ISO timestamp when feature was created
   updatedAt?: string; // ISO timestamp of the last state change
   startedAt?: string;
+  /** When the card entered Done (verified); cleared when work resumes on it. */
+  verifiedAt?: string;
+  /**
+   * Checkout Automaker released after the card stayed in Done past the retention
+   * window. The branch stays on the remote and metadata/conversations live
+   * outside the worktree, so the next Reply/Agent run rebuilds this path.
+   */
+  worktreeRelease?: {
+    releasedAt: string;
+    /** Checkout path that was removed and is reused when rebuilding */
+    path: string;
+    branch: string;
+  };
   descriptionHistory?: DescriptionHistoryEntry[]; // History of description changes
   [key: string]: unknown; // Keep catch-all for extensibility
+}
+
+/** Legacy errors still need attention; explicit review notices stay in review. */
+export function hasFeatureAttentionError(
+  feature: Pick<Feature, 'status' | 'error' | 'executionNotice'>
+): boolean {
+  return (
+    feature.status !== 'verified' &&
+    feature.status !== 'completed' &&
+    !(feature.status === 'waiting_approval' && feature.executionNotice?.kind === 'review') &&
+    typeof feature.error === 'string' &&
+    feature.error.trim() !== ''
+  );
 }
 
 export interface ChangedProject {

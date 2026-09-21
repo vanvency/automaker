@@ -21,6 +21,10 @@ import {
   createMergeConflictCheckHandler,
   createResolveConflictsHandler,
 } from './routes/merge-conflicts.js';
+import {
+  createReleaseStaleWorktreesHandler,
+  createRebuildWorktreeHandler,
+} from './routes/worktree-retention.js';
 import { createGetHandler } from './routes/get.js';
 import { createCreateHandler } from './routes/create.js';
 import { createUpdateHandler } from './routes/update.js';
@@ -119,6 +123,16 @@ export function createFeaturesRoutes(
     '/resolve-conflicts',
     validatePathParams('projectPath'),
     createResolveConflictsHandler(featureLoader, settingsService, autoModeService)
+  );
+  router.post(
+    '/release-stale-worktrees',
+    validatePathParams('projectPath'),
+    createReleaseStaleWorktreesHandler(featureLoader, autoModeService)
+  );
+  router.post(
+    '/rebuild-worktree',
+    validatePathParams('projectPath'),
+    createRebuildWorktreeHandler(featureLoader)
   );
   router.post(
     '/create',

@@ -261,7 +261,7 @@ def build_plan(config, api, state, run_id):
                 and not entry['card'].get('jiraDelivery', {}).get('conflictingCards')
                 and not entry['card'].get('jiraDelivery', {}).get('worktreeMismatch')
                 and not job.get('dispatchClaim')
-                and job.get('status') not in ('running', 'dispatching', 'preparing', 'blocked', 'mr_reported', 'needs_input')
+                and job.get('status') not in ('running', 'dispatching', 'preparing', 'blocked', 'development_reported', 'mr_reported', 'needs_input')
                 and (not existing or (existing.get('status') == 'backlog'
                                      and not existing.get('providerSessionId') and not existing.get('startedAt')))
                 and all(any(f.get('id') == dependency and not f.get('archive') and f.get('status') in ('verified', 'completed')
@@ -295,11 +295,6 @@ def apply_plan(config, api, state, state_path, entries, run_id):
         monitor.save(state_path, state)
         if not existing:
             monitor.ensure_worktree_for_branch(config, card['branchName'], card['worktree'])
-            reviewer, display, _, error = monitor.reviewer_for_assignee(
-                config, state, {'assignee': {'name': card.get('jiraAssignee') or ''}})
-            card['description'] += '\n\n' + monitor.reviewer_directive(reviewer, display)
-            if error:
-                card['description'] += '\nReviewer mapping: ' + error
             feature = {k: v for k, v in card.items()
                        if k not in ('contextMarkdown', 'mode', 'worktree', 'storyJiraKey')}
             feature['jiraSyncHistory'] = [{
@@ -427,7 +422,9 @@ def run(request):
                 job['status'] = 'needs_input'
             job['receiptRunId'] = current_run
             if monitor.validate_receipt(receipt, key, job['worktree'], config['gitlabHost']):
-                job['status'] = 'mr_reported'
+                job['status'] = ('development_reported'
+                                 if receipt.get('outcome') == 'development_complete'
+                                 else 'mr_reported')
             elif receipt.get('outcome') != 'needs_input':
                 job['status'] = 'blocked'
             current_jobs[key] = job

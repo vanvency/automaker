@@ -14,7 +14,11 @@
 import type { Request, Response } from 'express';
 import { createLogger } from '@automaker/utils';
 import { isGitRepo } from '@automaker/git-utils';
-import { getChildFeaturesForParent, hasChildFeatures } from '@automaker/types';
+import {
+  getChildFeaturesForParent,
+  hasChildFeatures,
+  hasFeatureAttentionError,
+} from '@automaker/types';
 import type {
   Feature,
   WorktreePRInfo,
@@ -269,9 +273,7 @@ export function deriveAttention(
   hasConflicts: boolean
 ): WorktreeProgressAttention | null {
   if (hasConflicts) return 'conflicts';
-  if (
-    features.some((feature) => typeof feature.error === 'string' && feature.error.trim() !== '')
-  ) {
+  if (features.some(hasFeatureAttentionError)) {
     return 'needs_input';
   }
   if (features.some((feature) => classifyStage(feature.status) === 'failed')) return 'failed';

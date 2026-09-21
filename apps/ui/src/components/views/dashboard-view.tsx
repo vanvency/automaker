@@ -558,6 +558,14 @@ export function DashboardView() {
           </div>
 
           {/* Projects Overview button */}
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => navigate({ to: '/' })}
+            className="titlebar-no-drag"
+          >
+            首页
+          </Button>
           {hasProjects && (
             <Button
               variant="outline"

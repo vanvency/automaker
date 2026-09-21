@@ -134,7 +134,9 @@ export function createOpenCodeWebHandler(featureLoader: FeatureLoader) {
         return;
       }
 
-      const resolved = await resolveFeatureWorkDir(featureLoader, projectPath, featureId);
+      const resolved = await resolveFeatureWorkDir(featureLoader, projectPath, featureId, {
+        rebuild: true,
+      });
       if (!resolved) {
         res.status(404).json({ success: false, error: `Feature ${featureId} not found` });
         return;

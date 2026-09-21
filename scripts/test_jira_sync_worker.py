@@ -215,6 +215,11 @@ class ManagedSyncTests(unittest.TestCase):
         self.assertNotIn('dispatch', entries[0])
         self.assertNotIn('dispatch', [c['action'] for c in changes])
 
+    def test_development_delivery_is_not_dispatched_again_without_an_mr(self):
+        entries, changes = self.plan({'jobs': {'AIP-1': {'status': 'development_reported'}}})
+        self.assertNotIn('dispatch', entries[0])
+        self.assertNotIn('dispatch', [c['action'] for c in changes])
+
     def test_completed_parent_dependency_required_before_dispatch(self):
         self.card['dependencies'] = ['parent']
         entries, _ = self.plan()

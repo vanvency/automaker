@@ -215,6 +215,9 @@ export function BoardView({
   const [showArchiveAllVerifiedDialog, setShowArchiveAllVerifiedDialog] = useState(false);
   const [showBoardBackgroundModal, setShowBoardBackgroundModal] = useState(false);
   const [showCompletedModal, setShowCompletedModal] = useState(false);
+  // The Done lane keeps the last retention window on the board; older cards are
+  // still in Automaker (branch + history) and appear behind this toggle.
+  const [showAllDoneCards, setShowAllDoneCards] = useState(false);
   // State for viewing plan in read-only mode
   const [viewPlanFeature, setViewPlanFeature] = useState<Feature | null>(null);
 
@@ -1779,7 +1782,7 @@ export function BoardView({
   }, [currentWorktreeBranch, hookFeatures]);
 
   // Use column features hook
-  const { getColumnFeatures, completedFeatures } = useBoardColumnFeatures({
+  const { getColumnFeatures, completedFeatures, hiddenDoneCount } = useBoardColumnFeatures({
     features: boardFeatures,
     runningAutoTasks,
     runningAutoTasksAllWorktrees,
@@ -1788,6 +1791,7 @@ export function BoardView({
     currentWorktreeBranch,
     projectPath: currentProject?.path || null,
     sortNewestCardOnTop: defaultSortNewestCardOnTop,
+    hideStaleDoneCards: !showAllDoneCards,
   });
 
   // Build columnFeaturesMap for ListView
@@ -2180,6 +2184,11 @@ export function BoardView({
                 addFeatureShortcut={keyboardShortcuts.addFeature}
                 onShowCompletedModal={() => setShowCompletedModal(true)}
                 completedCount={completedFeatures.length}
+                doneLane={{
+                  hiddenCount: hiddenDoneCount,
+                  showAll: showAllDoneCards,
+                  onToggleShowAll: () => setShowAllDoneCards((previous) => !previous),
+                }}
                 pipelineConfig={pipelineConfig ?? null}
                 onOpenPipelineSettings={() => setShowPipelineSettings(true)}
                 isSelectionMode={isSelectionMode}

@@ -28,12 +28,11 @@ import type { SettingsService } from './settings-service.js';
 import type { ConcurrencyManager } from './concurrency-manager.js';
 import { pipelineService } from './pipeline-service.js';
 import type { TestRunnerService, TestRunStatus } from './test-runner-service.js';
-import { performMerge } from './merge-service.js';
+import { DEVELOPMENT_COMPLETION_POLICY } from './continuation-prompt.js';
 import type {
   PipelineContext,
   PipelineStatusInfo,
   StepResult,
-  MergeResult,
   UpdateFeatureStatusFn,
   BuildFeaturePromptFn,
   ExecuteFeatureFn,
@@ -152,10 +151,6 @@ export class PipelineOrchestrator {
         projectPath,
       });
     }
-    if (ctx.branchName) {
-      const mergeResult = await this.attemptMerge(ctx);
-      if (!mergeResult.success && mergeResult.hasConflicts) return;
-    }
   }
 
   buildPipelineStepPrompt(
@@ -168,7 +163,7 @@ export class PipelineOrchestrator {
     if (previousContext) prompt += `### Previous Work\n${previousContext}\n\n`;
     return (
       prompt +
-      `### Pipeline Step Instructions\n${step.instructions}\n\n### Task\nComplete the pipeline step instructions above.\n\n` +
+      `### Pipeline Step Instructions\n${step.instructions}\n\n${DEVELOPMENT_COMPLETION_POLICY}\n\n### Task\nComplete the development and verification instructions above.\n\n` +
       `**CRITICAL: After completing the instructions, you MUST output a summary using this EXACT format:**\n\n` +
       `<summary>\n` +
       `## Summary: ${step.name}\n\n` +
@@ -573,61 +568,6 @@ export class PipelineOrchestrator {
         resolve({ status: 'failed', exitCode: null, duration: 600000 });
       }, 600000);
     });
-  }
-
-  /** Attempt to merge feature branch (REQ-F05) */
-  async attemptMerge(context: PipelineContext): Promise<MergeResult> {
-    const { projectPath, featureId, branchName, worktreePath, feature } = context;
-    if (!branchName) return { success: false, error: 'No branch name for merge' };
-
-    logger.info(`Attempting auto-merge for feature ${featureId} (branch: ${branchName})`);
-    try {
-      // Get the primary branch dynamically instead of hardcoding 'main'
-      const targetBranch = await this.worktreeResolver.getCurrentBranch(projectPath);
-
-      // Call merge service directly instead of HTTP fetch
-      const result = await performMerge(
-        projectPath,
-        branchName,
-        worktreePath || projectPath,
-        targetBranch || 'main',
-        {
-          deleteWorktreeAndBranch: false,
-        },
-        this.eventBus.getUnderlyingEmitter()
-      );
-
-      if (!result.success) {
-        if (result.hasConflicts) {
-          await this.updateFeatureStatusFn(projectPath, featureId, 'merge_conflict');
-          this.eventBus.emitAutoModeEvent('pipeline_merge_conflict', {
-            featureId,
-            branchName,
-            projectPath,
-          });
-          return { success: false, hasConflicts: true, needsAgentResolution: true };
-        }
-        return { success: false, error: result.error };
-      }
-
-      logger.info(`Auto-merge successful for feature ${featureId}`);
-      const runningEntryForMerge = this.concurrencyManager.getRunningFeature(featureId);
-      if (runningEntryForMerge?.isAutoMode) {
-        this.eventBus.emitAutoModeEvent('auto_mode_feature_complete', {
-          featureId,
-          featureName: feature.title,
-          branchName,
-          executionMode: 'auto',
-          passes: true,
-          message: 'Pipeline completed and merged',
-          projectPath,
-        });
-      }
-      return { success: true };
-    } catch (error) {
-      logger.error(`Merge failed for ${featureId}:`, error);
-      return { success: false, error: (error as Error).message };
-    }
   }
 
   /** Shared helper to parse test output lines and extract failure information */

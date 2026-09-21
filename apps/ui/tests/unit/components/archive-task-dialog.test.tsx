@@ -1,6 +1,6 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { render, screen, fireEvent, waitFor, cleanup } from '@testing-library/react';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { render, screen, fireEvent, waitFor, cleanup, within } from '@testing-library/react';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { ArchiveTaskDialog } from '../../../src/components/views/board-view/dialogs/archive-task-dialog';
 import type { Feature } from '@automaker/types';
 const mocks = vi.hoisted(() => ({ api: vi.fn(), update: vi.fn() }));
@@ -9,10 +9,28 @@ vi.mock('@/store/app-store', () => ({
   useAppStore: { getState: () => ({ updateFeature: mocks.update }) },
 }));
 vi.mock('sonner', () => ({ toast: { success: vi.fn(), error: vi.fn() } }));
-afterEach(cleanup);
+afterEach(() => {
+  cleanup();
+  vi.unstubAllGlobals();
+});
+beforeEach(() => {
+  vi.stubGlobal(
+    'ResizeObserver',
+    class {
+      observe() {}
+      unobserve() {}
+      disconnect() {}
+    }
+  );
+  HTMLElement.prototype.scrollIntoView = vi.fn();
+});
 const features = [
   { id: 'a', title: 'Export' },
-  { id: 'b', title: 'Export and audit' },
+  { id: 'b', title: 'Export and audit', jiraKey: 'AIP-114859' },
+  { id: 'other-task', title: 'Login' },
+  { id: 'archived', title: 'Archived export', archive: {} },
+  { id: 'superseded', title: 'Superseded export', supersededBy: 'b' },
+  { id: 'consolidating', title: 'Consolidating export', consolidationPlanId: 'plan' },
 ] as Feature[];
 function view() {
   render(
@@ -36,8 +54,24 @@ describe('archive task form', () => {
       target: { value: 'All export requirements are covered by the other task' },
     });
     expect(submit).toBeDisabled();
-    expect(screen.getByLabelText('Duplicate of').querySelector('option[value="a"]')).toBeNull();
-    fireEvent.change(screen.getByLabelText('Duplicate of'), { target: { value: 'b' } });
+    fireEvent.click(screen.getByRole('combobox', { name: /Duplicate of/ }));
+    const options = within(screen.getByRole('listbox'));
+    expect(options.getAllByRole('option').map((option) => option.textContent)).toEqual([
+      'AIP-114859 · Export and audit',
+      'Login',
+    ]);
+    const search = screen.getByPlaceholderText('Search by title, Jira key or task ID...');
+    for (const query of ['AUDIT', 'aip-114859', 'b']) {
+      fireEvent.change(search, { target: { value: query } });
+      expect(options.getAllByRole('option')).toHaveLength(1);
+      expect(options.getByRole('option')).toHaveTextContent('Export and audit');
+    }
+    fireEvent.change(search, { target: { value: 'no such task' } });
+    expect(screen.getByText('No matching tasks.')).toBeInTheDocument();
+    expect(options.queryByRole('option')).not.toBeInTheDocument();
+    fireEvent.change(search, { target: { value: '' } });
+    expect(options.getAllByRole('option')).toHaveLength(2);
+    fireEvent.click(options.getByRole('option', { name: 'AIP-114859 · Export and audit' }));
     mocks.api.mockResolvedValue({
       ok: true,
       json: async () => ({ success: true, archivedCount: 1, features: [] }),

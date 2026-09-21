@@ -340,6 +340,24 @@ describe('worktree task rollup', () => {
     expect(deriveAttention([idle], false)).toBeNull();
   });
 
+  it('keeps review notices distinct from input requests and ignores terminal notices', () => {
+    const delivered = feature({
+      status: 'waiting_approval',
+      error: 'MR awaits review',
+      executionNotice: {
+        kind: 'review',
+        source: 'delivery',
+        message: 'MR awaits review',
+        occurredAt: '2026-09-21T00:00:00Z',
+      },
+    });
+    expect(deriveAttention([delivered], false)).toBe('waiting_review');
+    expect(deriveAttention([{ ...delivered, status: 'verified' }], false)).toBeNull();
+    expect(deriveAttention([{ ...delivered, executionNotice: undefined }], false)).toBe(
+      'needs_input'
+    );
+  });
+
   it('attaches the rollup to the worktree row', () => {
     const parent = feature({
       id: 'jira-dodo-aip-114878',

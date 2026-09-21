@@ -39,6 +39,7 @@ import { createHealthRoutes, createDetailedHandler } from './routes/health/index
 import { createAgentRoutes } from './routes/agent/index.js';
 import { createSessionsRoutes } from './routes/sessions/index.js';
 import { createFeaturesRoutes } from './routes/features/index.js';
+import { WorktreeRetentionService } from './services/worktree-retention-service.js';
 import { createPiWebRoutes } from './routes/pi-web/index.js';
 import { createHerdrRoutes } from './routes/herdr/index.js';
 import { bootstrapHerdr } from './services/herdr-bootstrap.js';
@@ -501,6 +502,41 @@ setInterval(() => {
     logger.info(`Cleaned up ${cleaned} stale validation entries`);
   }
 }, VALIDATION_CLEANUP_INTERVAL_MS);
+
+/**
+ * Done cards keep their worktree for a week. After that the checkout is dead
+ * weight - the branch is on the remote, the task record lives in `.automaker`
+ * and pi keeps conversations outside the checkout - so the storage goes back and
+ * the card's next Reply/Agent run rebuilds the same path from the branch.
+ */
+const WORKTREE_RETENTION_INTERVAL_MS = 60 * 60 * 1000; // 1 hour
+const releaseDoneWorktrees = async () => {
+  try {
+    const retention = new WorktreeRetentionService(featureLoader, {
+      running: async (project) =>
+        (await autoModeService.getRunningAgents())
+          .filter((agent) => agent.projectPath === project)
+          .map((agent) => agent.featureId),
+    });
+    const settings = await settingsService.getGlobalSettings();
+    for (const project of settings?.projects ?? []) {
+      const result = await retention.run(project.path);
+      logger.info(
+        `Worktree retention in ${project.path}: released ${result.released.length}, kept ${
+          result.kept.length
+        }` +
+          (result.released.length > 0
+            ? ` (${result.released.map((item) => item.branch).join(', ')})`
+            : '')
+      );
+    }
+  } catch (error) {
+    logger.warn('Worktree retention run failed:', error);
+  }
+};
+// Give startup (and any board that is already open) a moment before touching git.
+setTimeout(() => void releaseDoneWorktrees(), 2 * 60 * 1000);
+setInterval(() => void releaseDoneWorktrees(), WORKTREE_RETENTION_INTERVAL_MS);
 
 // Require Content-Type: application/json for all API POST/PUT/PATCH requests
 // This helps prevent CSRF and content-type confusion attacks

@@ -11,6 +11,10 @@
 
 import type { Feature } from '@automaker/types';
 
+export const DEVELOPMENT_COMPLETION_POLICY = `Current task completion policy (supersedes historical delivery instructions):
+Complete implementation and relevant verification, then hand off for review. MR creation, reviewer assignment, MR conflict resolution and merge are separate from this task; do not perform them or add them to development goals unless a human explicitly requested MR work for this run.
+For Jira delivery receipts, use outcome "development_complete" when development and checks are complete; no MR is required. Preserve genuine development blockers and questions.`;
+
 /** True once a provider session id is recorded, i.e. this is not the first turn. */
 export function hasProviderSession(feature: Feature | null | undefined): boolean {
   if (!feature) return false;

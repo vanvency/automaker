@@ -216,7 +216,6 @@ function RootLayoutContent() {
   const setupComplete = useSetupStore((s) => s.setupComplete);
   const codexCliStatus = useSetupStore((s) => s.codexCliStatus);
   const navigate = useNavigate();
-  const [isMounted, setIsMounted] = useState(false);
   const [streamerPanelOpen, setStreamerPanelOpen] = useState(false);
   const authChecked = useAuthStore((s) => s.authChecked);
   const isAuthenticated = useAuthStore((s) => s.isAuthenticated);
@@ -304,10 +303,6 @@ function RootLayoutContent() {
   void fontFamilyMono; // Used for subscription
   const effectiveFontSans = getEffectiveFontSans();
   const effectiveFontMono = getEffectiveFontMono();
-
-  useEffect(() => {
-    setIsMounted(true);
-  }, []);
 
   // Sync critical UI state to the persistent UI cache store
   // This keeps the cache up-to-date so tab discard recovery is instant
@@ -837,9 +832,9 @@ function RootLayoutContent() {
       return;
     }
 
-    // Setup complete but user is still on /setup -> go to dashboard
+    // Setup complete but user is still on /setup -> go to the usage guide
     if (setupComplete && location.pathname === '/setup') {
-      navigate({ to: '/dashboard' });
+      navigate({ to: '/' });
     }
   }, [authChecked, isAuthenticated, settingsLoaded, setupComplete, location.pathname, navigate]);
 
@@ -927,22 +922,6 @@ function RootLayoutContent() {
     testConnection();
   }, [setIpcConnected]);
 
-  // Redirect from welcome page based on project state
-  useEffect(() => {
-    if (isMounted && isRootRoute) {
-      if (!settingsLoaded || shouldAutoOpen) {
-        return;
-      }
-      if (currentProject) {
-        // Project is selected, go to board
-        navigate({ to: '/board' });
-      } else {
-        // No project selected, go to dashboard
-        navigate({ to: '/dashboard' });
-      }
-    }
-  }, [isMounted, currentProject, isRootRoute, navigate, shouldAutoOpen, settingsLoaded]);
-
   // Auto-open the most recent project on startup
   useEffect(() => {
     if (!canAutoOpen) return;
@@ -957,9 +936,6 @@ function RootLayoutContent() {
         const initResult = await initializeProject(autoOpenCandidate.path);
         if (!initResult.success) {
           logger.warn('Auto-open project failed:', initResult.error);
-          if (isRootRoute) {
-            navigate({ to: '/dashboard' });
-          }
           return;
         }
 
@@ -970,30 +946,15 @@ function RootLayoutContent() {
             autoOpenCandidate.theme as ThemeMode | undefined
           );
         }
-
-        if (isRootRoute) {
-          navigate({ to: '/board' });
-        }
       } catch (error) {
         logger.error('Auto-open project crashed:', error);
-        if (isRootRoute) {
-          navigate({ to: '/dashboard' });
-        }
       } finally {
         setAutoOpenStatus(AUTO_OPEN_STATUS.done);
       }
     };
 
     void openProject();
-  }, [
-    canAutoOpen,
-    autoOpenStatus,
-    autoOpenCandidate,
-    currentProject,
-    navigate,
-    upsertAndSetCurrentProject,
-    isRootRoute,
-  ]);
+  }, [canAutoOpen, autoOpenStatus, autoOpenCandidate, currentProject, upsertAndSetCurrentProject]);
 
   // Bootstrap Codex models on app startup (after auth completes)
   useEffect(() => {

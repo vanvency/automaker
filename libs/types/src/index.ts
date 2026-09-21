@@ -3,6 +3,8 @@
  * Shared type definitions for AutoMaker
  */
 
+export { hasFeatureAttentionError } from './feature.js';
+
 // Provider types
 export type {
   ProviderConfig,
@@ -61,6 +63,7 @@ export type {
 export * from './jira-sync.js';
 export * from './task-consolidation.js';
 export * from './task-archive.js';
+export * from './worktree-retention.js';
 export type {
   Feature,
   AcceptanceEvidence,

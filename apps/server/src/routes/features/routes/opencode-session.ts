@@ -11,6 +11,7 @@ import os from 'os';
 import path from 'path';
 import { FeatureLoader } from '../../../services/feature-loader.js';
 import { WorktreeResolver } from '../../../services/worktree-resolver.js';
+import { WorktreeRetentionService } from '../../../services/worktree-retention-service.js';
 
 /**
  * Run a command and capture stdout through a file. opencode output can exceed
@@ -200,7 +201,8 @@ export function selectOpenCodeSession(
 export async function resolveFeatureWorkDir(
   featureLoader: FeatureLoader,
   projectPath: string,
-  featureId: string
+  featureId: string,
+  options: { rebuild?: boolean } = {}
 ) {
   const feature = await featureLoader.get(projectPath, featureId);
   if (!feature) return null;
@@ -211,6 +213,26 @@ export async function resolveFeatureWorkDir(
       feature.branchName
     );
     if (resolved) workDir = resolved;
+    else if (feature.worktreeRelease) {
+      // The checkout was released after the card stayed in Done. Reading history
+      // only needs the path (pi keys sessions by working directory), but callers
+      // that run an agent need a real tree and ask for the rebuild.
+      const released = feature.worktreeRelease.path;
+      if (!options.rebuild) workDir = released;
+      else {
+        try {
+          workDir =
+            (await new WorktreeRetentionService(featureLoader).ensureWorktree(
+              projectPath,
+              feature
+            )) ?? released;
+        } catch (error) {
+          throw new Error(
+            `worktree 已释放，无法从 ${feature.branchName} 重建：${(error as Error).message}`
+          );
+        }
+      }
+    }
   }
   return { feature, workDir };
 }

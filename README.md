@@ -13,6 +13,7 @@ Fork repository: [vanvency/automaker](https://github.com/vanvency/automaker). Th
 
 - [What changed in this fork](#what-changed-in-this-fork)
 - [Workflow](#workflow)
+- [中文使用流程](#中文使用流程)
 - [Quick start](#quick-start)
 - [Integrations](#integrations)
 - [Run and develop](#run-and-develop)
@@ -41,11 +42,90 @@ Inherited capabilities include plan approval, dependency graphs, context files, 
 2. **Confirm delivery scope.** Normal Jira sync treats a parent issue and its existing child issues as one card's delivery scope. Related work is grouped under the Epic root. An unsplit Epic / Story waits for Jira decomposition or an explicit human decision.
 3. **Run and communicate.** Choose an agent and model, start manually, or dispatch through sync settings. Follow logs or Conversation, then use Reply to answer questions, add requirements, or continue work.
 4. **Inspect delivery.** Review diffs, Draft PRs / MRs, preview deployments, and acceptance screenshots. Requirement changes and execution errors remain visible on the card.
-5. **Accept and finish.** Mark work complete after human review. The GitLab Complete flow checks merge conditions before merging. Archive work that will not continue, and use Similar Works to review overlap separately.
+5. **Accept and finish.** Verify work after human review, then preview and confirm Complete. For linked deliveries, completion tracks MR merging, Jira closure, and preview cleanup separately. Archive work that will not continue, and use Similar Works to review overlap separately.
 
 The board columns are **Backlog → In Progress → Needs Attention → Waiting Review → Done**. Needs Attention groups failed, conflicted, and interrupted states; it is not a required stage. Done means verified in Automaker, while Complete / archival and “code merged” still require their own checks.
 
 Jira status and Automaker execution status are independent. Normal sync does not transition Jira or merge MRs automatically; an agent delivery report is not human acceptance. External cleanup from Similar Works requires an explicit preview and confirmation.
+
+## 中文使用流程
+
+### 1. 启动工具并打开项目
+
+按下方 [Quick start](#quick-start) 安装 Node.js 22、npm、Git 和项目依赖，在仓库根目录执行 `npm run dev`，选择 Web 或 Electron。Web 默认入口为 `http://localhost:3007`，API 默认为 `http://localhost:3008`；只运行 `npm run dev:web` 时还需在另一终端运行 `npm run dev:server`。
+
+完成页面上的登录和初始化，创建项目或打开已有 Git 仓库。Web 模式选择的是 **API 服务所在机器上的目录**；使用 Docker 时先挂载项目目录。开始任务前确认当前项目、目标分支和工作区，避免把需求派发到错误仓库。
+
+### 2. 配置 Agent、模型和项目上下文
+
+- 在 **Settings** 中配置所用 Agent 的认证、模型和默认选项；CLI 必须能被服务端进程找到，不能只在浏览器所在机器安装。
+- 使用本 fork 的 Pi 任务、Reply 和 Conversation 时，先完成 [Pi / LiteLLM / Herdr 配置](#pi-litellm-and-herdr)，确认网关可达、模型可用。其他 Provider 按各自方式认证。
+- 在项目的上下文管理入口添加技术栈、运行命令、编码约定和验收要求。上下文保存在 `.automaker/context/`；不要放入密钥。
+- 自动开发本仓库时，让 Agent 先阅读根目录 [AGENTS.md](AGENTS.md)，再按任务定位代码和执行检查。
+
+### 3. 创建任务或导入 Jira 需求
+
+首次使用可先手工创建一个小任务，跑通开发与验收，再开启自动派发。
+
+**手工创建：** 在 **Task Kanban → Add Feature** 填写标题、需求描述、交付范围和验收标准，按需附上原型或截图，选择 Agent / 模型并保存到 Backlog。需要依赖其他任务时先明确依赖关系。
+
+可直接使用这样的任务描述：
+
+```text
+目标：给任务列表增加标题搜索。
+范围：只修改列表筛选，不改变任务状态和 Jira 同步规则。
+验收：输入标题片段后只显示匹配项；清空后恢复；无匹配时显示空状态。
+验证：补充筛选行为测试，并运行相关 UI 检查。
+```
+
+**Jira 导入：** 先在服务端安装并登录 Jira CLI，再进入 **Project Settings → Jira Sync** 配置站点、项目、JQL、标签、Agent / 模型、目标分支和派发容量。按「测试连接 → 预览匹配与变更 → 保存 → 立即同步」执行；确认导入结果后再启用定时同步与自动执行。关闭自动执行仍可导入任务。
+
+普通同步将匹配的父任务及其已有子任务作为一张卡的交付范围。未拆分的 Epic / Story 会等待 Jira 拆分或明确的人工决定，不会自动扩大需求范围。规则、迁移和运行记录见 [Jira 同步说明](docs/jira-sync-settings.md)。
+
+### 4. 启动开发并跟进执行
+
+在任务卡操作中启动开发；也可按项目设置自动派发。Agent 在任务对应的 Git Worktree 中工作，**Work Board** 用来查看代码空间、分支和交付，**Task Kanban** 用来查看各任务的状态。
+
+| 看板列          | 含义与下一步                                                         |
+| --------------- | -------------------------------------------------------------------- |
+| Backlog         | 尚未执行；检查需求、依赖和模型后启动。                               |
+| In Progress     | 正在执行；查看日志，若启用计划审批则先审阅计划。                     |
+| Needs Attention | 失败、冲突或中断；查看原因，处理后继续执行。                         |
+| Waiting Review  | 等待审阅；检查变更、测试和验收材料。                                 |
+| Done            | Automaker 内已验证；代码合并和 Jira 关闭仍需检查 Complete 交付结果。 |
+
+通过 **Conversation** 查看任务会话，用 **Reply** 回答问题、补充要求或继续开发。出现「需求已更新」时，先比较 Jira 的新要求，再通过 Reply 明确后续范围。暂停 Jira 同步只停止后续同步，不会停止已经运行的 Agent。
+
+### 5. 检查代码、预览和验收材料
+
+审阅任务差异、测试结果及关联仓库的 Draft PR / MR，确认改动符合验收标准；Agent 的完成回复不能替代实际验收。
+
+需要运行页面时，按 [Worktree 预览指南](docs/worktree-previews.md) 配置项目 `.automaker/preview.json`，在看板部署并打开预览。预览包含当前 Worktree 的未提交改动，修改代码后需重新部署；就绪地址通过 `AUTOMAKER_PREVIEW_URL` 注入 Worktree 测试。
+
+需要图文验收时，让 Agent 按 [验收材料规范](docs/task-acceptance-evidence.md) 产出 `.automaker/acceptance/<featureId>/manifest.json`、原型图、真实运行截图和检查结果，再在任务卡查看「验收结果」。无法验证的项目应明确标记，不能用原型图代替真实运行截图。
+
+### 6. 人工验收并完成交付
+
+验收不通过时，通过 Reply 或 **Request Changes** 提出修改；验收通过后使用 **Verify / Mark as Verified**，任务进入 Done。
+
+在 Done 卡片点击 **Complete**，先检查预览中的 MR、目标分支、被审阅版本、Jira 终态和阻塞项，再确认执行。有关联交付时，流程依次记录 **MR 合并 → Jira 关闭 → 预览资源释放**；这与普通 Jira 同步是不同操作。完成后保留交付回执，归档需单独操作。
+
+某一步失败时，卡片保留在 Done，并显示已完成步骤和失败原因。可以请求 Agent 修复前置问题，刷新后重试 Complete；如果修复改了代码，需要重新验收。详见 [交付进度说明](docs/task-delivery-progress.md)。
+
+不再推进的任务使用 **Archive Task**，填写原因和说明；重复任务还需选择被重复的任务。归档保留代码、会话和材料，可从 Archived Tasks 恢复，不会自动关闭 Jira 或 MR。运行中的任务先停止；外部重复需求清理由 **Similar Works** 单独预览和确认。
+
+### 7. 常见问题与恢复
+
+| 现象                      | 处理方式                                                                                                                                                                    |
+| ------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 页面打开但 API 不可用     | 确认服务端已启动，检查 3008 端口、代理配置和登录状态。                                                                                                                      |
+| Agent 或模型启动失败      | 查看服务端日志和 Provider 状态，检查服务端 PATH、认证与网关模型；Pi 任务还需检查 Herdr。                                                                                    |
+| Conversation 断开         | 等待重新附着或重新打开会话；认证失效时重新登录。PTY 断开不等于 Agent 已停止，先确认运行状态再重试任务。                                                                     |
+| Jira 任务未派发           | 查看同步预览、运行记录、自动执行开关、容量、依赖和拆分阻塞；不要同时运行旧 monitor 和新调度器。                                                                             |
+| Done 中找不到旧任务       | 使用搜索或 Done 标题的「+N 更早」显示超过 7 天的记录。符合保留策略的旧 Worktree 可能已释放，后续 Reply / Agent 执行或打开 Conversation 时会尝试重建；任务记录与会话仍保留。 |
+| Complete 被阻塞或中途失败 | 查看具体交付步骤，修复冲突、权限或必填项后重新预览与确认，不要直接修改任务 JSON 来跳过检查。                                                                                |
+
+备份项目 `.automaker/`、服务端 `DATA_DIR` 和 Provider 会话目录；数据位置见 [Architecture and data](#architecture-and-data)。
 
 ## Quick start
 
@@ -186,20 +266,21 @@ Back up the project `.automaker/` directory, server `DATA_DIR`, and provider ses
 
 ## Documentation
 
-| Guide                                                            | Covers                                                     |
-| ---------------------------------------------------------------- | ---------------------------------------------------------- |
-| [Jira sync settings](docs/jira-sync-settings.md)                 | UI configuration, migration, idempotency, and run history. |
-| [Jira monitor](docs/jira-monitor.md)                             | CLI workflow and advanced hierarchy import.                |
-| [Herdr session architecture](docs/herdr-session-architecture.md) | Project / Worktree / task mapping and session lifecycle.   |
-| [Provider architecture](docs/server/providers.md)                | Agent routing, models, authentication, and sessions.       |
-| [Worktree previews](docs/worktree-previews.md)                   | k3s, image builds, preview URLs, and tests.                |
-| [Acceptance evidence](docs/task-acceptance-evidence.md)          | Manifest format, screenshots, and automatic backfill.      |
-| [Task archival](docs/task-archive.md)                            | Archive reasons, duplicate references, and restore.        |
-| [Similar Works](docs/similar-tasks.md)                           | Requirement comparison and external cleanup.               |
-| [Git delivery workflow](docs/checkout-branch-pr.md)              | Branches, commits, Draft PRs, and review.                  |
-| [Terminal](docs/terminal.md)                                     | PTY, WebSocket, and terminal configuration.                |
-| [Shared packages](docs/llm-shared-packages.md)                   | Monorepo shared modules.                                   |
-| [Contributing](CONTRIBUTING.md)                                  | Development conventions and contribution workflow.         |
+| Guide                                                            | Covers                                                                           |
+| ---------------------------------------------------------------- | -------------------------------------------------------------------------------- |
+| [Jira sync settings](docs/jira-sync-settings.md)                 | UI configuration, migration, idempotency, and run history.                       |
+| [Jira monitor](docs/jira-monitor.md)                             | CLI workflow and advanced hierarchy import.                                      |
+| [Herdr session architecture](docs/herdr-session-architecture.md) | Project / Worktree / task mapping and session lifecycle.                         |
+| [Provider architecture](docs/server/providers.md)                | Agent routing, models, authentication, and sessions.                             |
+| [Worktree previews](docs/worktree-previews.md)                   | k3s, image builds, preview URLs, and tests.                                      |
+| [Acceptance evidence](docs/task-acceptance-evidence.md)          | Manifest format, screenshots, and automatic backfill.                            |
+| [Task archival](docs/task-archive.md)                            | Archive reasons, duplicate references, and restore.                              |
+| [Similar Works](docs/similar-tasks.md)                           | Requirement comparison and external cleanup.                                     |
+| [Git delivery workflow](docs/checkout-branch-pr.md)              | Branches, commits, Draft PRs, and review.                                        |
+| [Terminal](docs/terminal.md)                                     | PTY, WebSocket, and terminal configuration.                                      |
+| [Shared packages](docs/llm-shared-packages.md)                   | Monorepo shared modules.                                                         |
+| [Agent development guide](AGENTS.md)                             | Repository workflow, code boundaries, and validation commands for coding agents. |
+| [Contributing](CONTRIBUTING.md)                                  | Development conventions and contribution workflow.                               |
 
 ## Origin and license
 

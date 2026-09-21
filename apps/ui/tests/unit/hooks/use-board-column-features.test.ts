@@ -82,6 +82,23 @@ describe('useBoardColumnFeatures', () => {
       ]);
     });
 
+    it('keeps delivered work with review notices in Waiting Review', () => {
+      const delivered = createMockFeature('delivered', 'waiting_approval', {
+        error: 'MR awaits review and merge',
+        executionNotice: {
+          kind: 'review',
+          source: 'delivery',
+          message: 'MR awaits review and merge',
+          occurredAt: '2026-09-21T00:00:00Z',
+        },
+      });
+      const { result } = renderHook(() =>
+        useBoardColumnFeatures({ ...defaultProps, features: [delivered] })
+      );
+      expect(result.current.columnFeaturesMap.waiting_approval).toEqual([delivered]);
+      expect(result.current.columnFeaturesMap.failed).toEqual([]);
+    });
+
     it('should map merge_conflict features to the Needs Attention lane', () => {
       const features = [createMockFeature('feat-1', 'merge_conflict')];
 
@@ -436,6 +453,51 @@ describe('useBoardColumnFeatures', () => {
       const allColumns = Object.values(result.current.columnFeaturesMap).flat();
       const completedFeature = allColumns.find((f) => f.id === 'feat-completed');
       expect(completedFeature).toBeUndefined();
+    });
+  });
+
+  describe('Done lane retention window', () => {
+    const daysAgo = (days: number) =>
+      new Date(Date.now() - days * 24 * 60 * 60 * 1000).toISOString();
+
+    it('keeps the last week on the board and hides older Done cards', () => {
+      const features = [
+        createMockFeature('fresh', 'verified', { verifiedAt: daysAgo(2) }),
+        createMockFeature('stale', 'verified', { verifiedAt: daysAgo(9) }),
+      ];
+
+      const { result } = renderHook(() => useBoardColumnFeatures({ ...defaultProps, features }));
+
+      expect(result.current.columnFeaturesMap.verified.map((f) => f.id)).toEqual(['fresh']);
+      expect(result.current.hiddenDoneCount).toBe(1);
+    });
+
+    it('shows the full Done history when the lane asks for it', () => {
+      const features = [
+        createMockFeature('fresh', 'verified', { verifiedAt: daysAgo(2) }),
+        createMockFeature('stale', 'verified', { verifiedAt: daysAgo(9) }),
+      ];
+
+      const { result } = renderHook(() =>
+        useBoardColumnFeatures({ ...defaultProps, features, hideStaleDoneCards: false })
+      );
+
+      expect(result.current.columnFeaturesMap.verified.map((f) => f.id).sort()).toEqual([
+        'fresh',
+        'stale',
+      ]);
+      expect(result.current.hiddenDoneCount).toBe(0);
+    });
+
+    it('surfaces an old card again when the search matches it', () => {
+      const features = [createMockFeature('stale', 'verified', { verifiedAt: daysAgo(9) })];
+
+      const { result } = renderHook(() =>
+        useBoardColumnFeatures({ ...defaultProps, features, searchQuery: 'stale' })
+      );
+
+      expect(result.current.columnFeaturesMap.verified.map((f) => f.id)).toEqual(['stale']);
+      expect(result.current.hiddenDoneCount).toBe(0);
     });
   });
 

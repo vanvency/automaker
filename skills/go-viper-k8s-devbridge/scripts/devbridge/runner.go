@@ -21,14 +21,17 @@ import (
 const sessionLabelKey = "devbridge.transwarp.io/session"
 
 type sessionState struct {
-	Version    int    `json:"version"`
-	ConfigPath string `json:"config_path"`
-	SSH        string `json:"ssh"`
-	Namespace  string `json:"namespace"`
-	RemoteDir  string `json:"remote_dir"`
-	LabelValue string `json:"label_value"`
-	RouteID    string `json:"route_id"`
-	ProxyURL   string `json:"proxy_url"`
+	Version        int    `json:"version"`
+	ConfigPath     string `json:"config_path"`
+	SSH            string `json:"ssh"`
+	Namespace      string `json:"namespace"`
+	RemoteDir      string `json:"remote_dir"`
+	LabelValue     string `json:"label_value"`
+	RouteID        string `json:"route_id"`
+	ProxyURL       string `json:"proxy_url"`
+	PreviewAddress string `json:"preview_address,omitempty"`
+	HealthPath     string `json:"health_path"`
+	Ready          bool   `json:"ready"`
 }
 
 func doctor(ctx context.Context, cfg *config, projectRoot string) error {
@@ -100,8 +103,8 @@ func doctor(ctx context.Context, cfg *config, projectRoot string) error {
 	return nil
 }
 
-func up(ctx context.Context, cfg *config, cfgPath, projectRoot string) error {
-	statePath := filepath.Join(projectRoot, ".devbridge", "session.json")
+func up(ctx context.Context, cfg *config, cfgPath, projectRoot, stateDir, frontendURL, previewListen string) error {
+	statePath := filepath.Join(stateDir, "session.json")
 	if _, err := os.Stat(statePath); err == nil {
 		return fmt.Errorf("an existing session file was found; run devbridge down first")
 	} else if !errors.Is(err, os.ErrNotExist) {
@@ -109,7 +112,7 @@ func up(ctx context.Context, cfg *config, cfgPath, projectRoot string) error {
 	}
 	// A SIGKILL or host reboot can bypass deferred cleanup. With no active
 	// session state, every directory below this tool-owned path is stale.
-	if err := os.RemoveAll(filepath.Join(projectRoot, ".devbridge", "sessions")); err != nil {
+	if err := os.RemoveAll(filepath.Join(stateDir, "sessions")); err != nil {
 		return fmt.Errorf("remove stale local sessions: %w", err)
 	}
 
@@ -119,7 +122,7 @@ func up(ctx context.Context, cfg *config, cfgPath, projectRoot string) error {
 	}
 	labelValue := "s-" + suffix
 	routeID := "devbridge-" + localUserName() + "-" + suffix
-	localDir := filepath.Join(projectRoot, ".devbridge", "sessions", suffix)
+	localDir := filepath.Join(stateDir, "sessions", suffix)
 	if err := os.MkdirAll(localDir, 0o700); err != nil {
 		return err
 	}
@@ -137,17 +140,26 @@ func up(ctx context.Context, cfg *config, cfgPath, projectRoot string) error {
 	configPath := filepath.Join(localDir, "mirrord.json")
 
 	remoteDir := fmt.Sprintf("%s/devbridge-%s-%s", cfg.Remote.BaseDir, cfg.Project.Name, suffix)
+	state := &sessionState{
+		Version: 1, ConfigPath: cfgPath, SSH: cfg.Remote.SSH, Namespace: cfg.Remote.Namespace,
+		RemoteDir: remoteDir, LabelValue: labelValue, RouteID: routeID,
+		HealthPath: cfg.Gateway.HealthPath,
+	}
+	// Persist cleanup coordinates before the first remote mutation.
+	if err := writeState(statePath, state); err != nil {
+		return err
+	}
+	defer func() {
+		cleanupCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+		// Keep the state file when cleanup fails so "down" can retry.
+		if err := cleanupRemote(cleanupCtx, cfg.Remote.SSH, cfg.Remote.Namespace, remoteDir, labelValue); err == nil {
+			_ = os.Remove(statePath)
+		}
+	}()
 	if err := remotePrepare(ctx, cfg, remoteDir); err != nil {
 		return err
 	}
-	remoteCreated := true
-	defer func() {
-		if remoteCreated {
-			cleanupCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-			defer cancel()
-			_ = cleanupRemote(cleanupCtx, cfg.Remote.SSH, cfg.Remote.Namespace, remoteDir, labelValue)
-		}
-	}()
 
 	imageExists, err := remoteAgentImageExists(ctx, cfg)
 	if err != nil {
@@ -171,21 +183,26 @@ func up(ctx context.Context, cfg *config, cfgPath, projectRoot string) error {
 	if err != nil {
 		return err
 	}
+	cfg.Gateway.Listen = proxy.listener.Addr().String()
 	defer func() {
 		closeCtx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 		defer cancel()
 		_ = proxy.Close(closeCtx)
 	}()
 
-	state := &sessionState{
-		Version: 1, ConfigPath: cfgPath, SSH: cfg.Remote.SSH, Namespace: cfg.Remote.Namespace,
-		RemoteDir: remoteDir, LabelValue: labelValue, RouteID: routeID,
-		ProxyURL: "http://" + cfg.Gateway.Listen,
+	state.ProxyURL = "http://" + cfg.Gateway.Listen
+	var preview *localProxy
+	if frontendURL != "" {
+		preview, err = startPreviewProxy(cfg, routeID, frontendURL, previewListen)
+		if err != nil {
+			return err
+		}
+		state.PreviewAddress = preview.listener.Addr().String()
+		defer func() { _ = preview.server.Close() }()
 	}
 	if err := writeState(statePath, state); err != nil {
 		return err
 	}
-	defer os.Remove(statePath)
 
 	fmt.Printf("route selector: %s: %s\n", cfg.Gateway.RouteHeader, routeID)
 	fmt.Printf("frontend/API gateway: http://%s\n", cfg.Gateway.Listen)
@@ -217,6 +234,10 @@ func up(ctx context.Context, cfg *config, cfgPath, projectRoot string) error {
 		fmt.Printf("waiting for the API-only process (startup can take several minutes)...\n")
 		processExited, readyErr := waitReady(ctx, cfg, routeID, waitCh)
 		if readyErr == nil {
+			state.Ready = true
+			if err := writeState(statePath, state); err != nil {
+				return err
+			}
 			if recoveries == 0 {
 				fmt.Printf("devbridge ready: http://%s%s\n", cfg.Gateway.Listen, cfg.Gateway.HealthPath)
 				fmt.Println("press Ctrl-C to stop and clean up the route")
@@ -236,17 +257,20 @@ func up(ctx context.Context, cfg *config, cfgPath, projectRoot string) error {
 		} else {
 			processErr = <-waitCh
 		}
-		if ctx.Err() != nil {
+		if _, stateErr := os.Stat(statePath); errors.Is(stateErr, os.ErrNotExist) {
 			return nil
 		}
-		if _, stateErr := os.Stat(statePath); errors.Is(stateErr, os.ErrNotExist) {
+		state.Ready = false
+		if err := writeState(statePath, state); err != nil {
+			return err
+		}
+		if ctx.Err() != nil {
 			return nil
 		}
 		if processErr == nil {
 			if err := cleanupRemote(context.Background(), cfg.Remote.SSH, cfg.Remote.Namespace, remoteDir, labelValue); err != nil {
 				return err
 			}
-			remoteCreated = false
 			return nil
 		}
 		if !cfg.Recovery.AutoReattach || recoveries >= cfg.Recovery.MaxAttempts {
@@ -268,8 +292,8 @@ func up(ctx context.Context, cfg *config, cfgPath, projectRoot string) error {
 	}
 }
 
-func down(ctx context.Context, projectRoot string) error {
-	statePath := filepath.Join(projectRoot, ".devbridge", "session.json")
+func down(ctx context.Context, stateDir string) error {
+	statePath := filepath.Join(stateDir, "session.json")
 	data, err := os.ReadFile(statePath)
 	if errors.Is(err, os.ErrNotExist) {
 		fmt.Println("no devbridge session is recorded")
@@ -382,6 +406,7 @@ func isolateGoBuildModule(args []string, root, sessionDir string) ([]string, err
 func remotePrepare(ctx context.Context, cfg *config, remoteDir string) error {
 	cacheRoot := remoteCacheRoot(cfg)
 	command := strings.Join([]string{
+		"set -e",
 		"install -d -m 700 " + shellQuote(remoteDir),
 		"if test -e " + shellQuote(cacheRoot) + "; then test -d " + shellQuote(cacheRoot) + " && test ! -L " + shellQuote(cacheRoot) + " && test \"$(stat -c %u " + shellQuote(cacheRoot) + ")\" = \"$(id -u)\"; else install -d -m 700 " + shellQuote(cacheRoot) + "; fi",
 		"chmod 700 " + shellQuote(cacheRoot),
@@ -558,7 +583,7 @@ func remoteAppCommand(ctx context.Context, cfg *config, remoteDir string) *exec.
 		parts[len(parts)-1] += " " + shellQuote(arg)
 	}
 	cmd := exec.CommandContext(ctx, "ssh", "-o", "ServerAliveInterval=15", "-o", "ServerAliveCountMax=3", cfg.Remote.SSH, strings.Join(parts, "; "))
-	cmd.Stdin, cmd.Stdout, cmd.Stderr = os.Stdin, os.Stdout, os.Stderr
+	cmd.Stdout, cmd.Stderr = os.Stdout, os.Stderr
 	return cmd
 }
 
@@ -600,6 +625,7 @@ func cleanupRemote(ctx context.Context, sshHost, namespace, remoteDir, labelValu
 		return fmt.Errorf("refusing cleanup outside /tmp/devbridge-*")
 	}
 	command := strings.Join([]string{
+		"set -e",
 		"if test -f " + shellQuote(remoteDir+"/.devbridge.pid") + "; then pid=$(cat " + shellQuote(remoteDir+"/.devbridge.pid") + "); case $pid in ''|*[!0-9]*) pid='' ;; esac; if test -n \"$pid\" && test -d \"/proc/$pid\" && test \"$(readlink /proc/$pid/cwd)\" = " + shellQuote(remoteDir) + "; then kill \"$pid\" 2>/dev/null || true; fi; fi",
 		"kubectl -n " + shellQuote(namespace) + " delete pod -l " + shellQuote(sessionLabelKey+"="+labelValue) + " --ignore-not-found --wait=false >/dev/null",
 		"rm -rf -- " + shellQuote(remoteDir),

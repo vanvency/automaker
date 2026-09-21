@@ -466,133 +466,6 @@ describe('PipelineOrchestrator', () => {
     }, 15000);
   });
 
-  describe('attemptMerge', () => {
-    const createMergeContext = (): PipelineContext => ({
-      projectPath: '/test/project',
-      featureId: 'feature-1',
-      feature: testFeature,
-      steps: testSteps,
-      workDir: '/test/project',
-      worktreePath: '/test/worktree',
-      branchName: 'feature/test-1',
-      abortController: new AbortController(),
-      autoLoadClaudeMd: true,
-      testAttempts: 0,
-      maxTestAttempts: 5,
-    });
-
-    beforeEach(() => {
-      vi.mocked(performMerge).mockReset();
-    });
-
-    it('should call performMerge with correct parameters', async () => {
-      vi.mocked(performMerge).mockResolvedValue({ success: true });
-
-      const context = createMergeContext();
-      await orchestrator.attemptMerge(context);
-
-      expect(performMerge).toHaveBeenCalledWith(
-        '/test/project',
-        'feature/test-1',
-        '/test/worktree',
-        'main',
-        { deleteWorktreeAndBranch: false },
-        expect.anything()
-      );
-    });
-
-    it('should return success on clean merge', async () => {
-      vi.mocked(performMerge).mockResolvedValue({ success: true });
-
-      const context = createMergeContext();
-      const result = await orchestrator.attemptMerge(context);
-
-      expect(result.success).toBe(true);
-      expect(result.hasConflicts).toBeUndefined();
-    });
-
-    it('should set merge_conflict status when hasConflicts is true', async () => {
-      vi.mocked(performMerge).mockResolvedValue({
-        success: false,
-        hasConflicts: true,
-        error: 'Merge conflict',
-      });
-
-      const context = createMergeContext();
-      await orchestrator.attemptMerge(context);
-
-      expect(mockUpdateFeatureStatusFn).toHaveBeenCalledWith(
-        '/test/project',
-        'feature-1',
-        'merge_conflict'
-      );
-    });
-
-    it('should emit pipeline_merge_conflict event on conflict', async () => {
-      vi.mocked(performMerge).mockResolvedValue({
-        success: false,
-        hasConflicts: true,
-        error: 'Merge conflict',
-      });
-
-      const context = createMergeContext();
-      await orchestrator.attemptMerge(context);
-
-      expect(mockEventBus.emitAutoModeEvent).toHaveBeenCalledWith(
-        'pipeline_merge_conflict',
-        expect.objectContaining({ featureId: 'feature-1', branchName: 'feature/test-1' })
-      );
-    });
-
-    it('should emit auto_mode_feature_complete on success when isAutoMode is true', async () => {
-      vi.mocked(performMerge).mockResolvedValue({ success: true });
-      vi.mocked(mockConcurrencyManager.getRunningFeature).mockReturnValue({
-        featureId: 'feature-1',
-        projectPath: '/test/project',
-        abortController: new AbortController(),
-        branchName: null,
-        worktreePath: null,
-        isAutoMode: true,
-        startTime: Date.now(),
-        leaseCount: 1,
-      });
-
-      const context = createMergeContext();
-      await orchestrator.attemptMerge(context);
-
-      expect(mockEventBus.emitAutoModeEvent).toHaveBeenCalledWith(
-        'auto_mode_feature_complete',
-        expect.objectContaining({ featureId: 'feature-1', passes: true })
-      );
-    });
-
-    it('should not emit auto_mode_feature_complete on success when isAutoMode is false', async () => {
-      vi.mocked(performMerge).mockResolvedValue({ success: true });
-      vi.mocked(mockConcurrencyManager.getRunningFeature).mockReturnValue(undefined);
-
-      const context = createMergeContext();
-      await orchestrator.attemptMerge(context);
-
-      const completeCalls = vi
-        .mocked(mockEventBus.emitAutoModeEvent)
-        .mock.calls.filter((call) => call[0] === 'auto_mode_feature_complete');
-      expect(completeCalls.length).toBe(0);
-    });
-
-    it('should return needsAgentResolution true on conflict', async () => {
-      vi.mocked(performMerge).mockResolvedValue({
-        success: false,
-        hasConflicts: true,
-        error: 'Merge conflict',
-      });
-
-      const context = createMergeContext();
-      const result = await orchestrator.attemptMerge(context);
-
-      expect(result.needsAgentResolution).toBe(true);
-    });
-  });
-
   describe('buildTestFailureSummary', () => {
     it('should extract pass/fail counts from test output', () => {
       const scrollback = `
@@ -854,17 +727,13 @@ describe('PipelineOrchestrator', () => {
       );
     });
 
-    it('should call attemptMerge after successful completion', async () => {
-      const context = createPipelineContext();
-      await orchestrator.executePipeline(context);
-
-      expect(performMerge).toHaveBeenCalledWith(
+    it('hands off completed development without merging the branch', async () => {
+      await orchestrator.executePipeline(createPipelineContext());
+      expect(performMerge).not.toHaveBeenCalled();
+      expect(mockUpdateFeatureStatusFn).not.toHaveBeenCalledWith(
         '/test/project',
-        'feature/test-1',
-        '/test/project', // Falls back to projectPath when worktreePath is null
-        'main',
-        { deleteWorktreeAndBranch: false },
-        expect.anything()
+        'feature-1',
+        'merge_conflict'
       );
     });
   });
@@ -903,40 +772,6 @@ describe('PipelineOrchestrator', () => {
         expect(context.autoLoadClaudeMd).toBe(true);
         expect(context.testAttempts).toBe(0);
         expect(context.maxTestAttempts).toBe(5);
-      });
-
-      it('passes worktreePath when worktree exists', async () => {
-        const context = createPipelineContext();
-        context.worktreePath = '/test/custom-worktree';
-
-        await orchestrator.executePipeline(context);
-
-        // Merge should receive the worktree path
-        expect(performMerge).toHaveBeenCalledWith(
-          '/test/project',
-          'feature/test-1',
-          '/test/custom-worktree',
-          'main',
-          { deleteWorktreeAndBranch: false },
-          expect.anything()
-        );
-      });
-
-      it('passes branchName from feature', async () => {
-        const context = createPipelineContext();
-        context.branchName = 'feature/custom-branch';
-        context.feature = { ...testFeature, branchName: 'feature/custom-branch' };
-
-        await orchestrator.executePipeline(context);
-
-        expect(performMerge).toHaveBeenCalledWith(
-          '/test/project',
-          'feature/custom-branch',
-          '/test/worktree',
-          'main',
-          { deleteWorktreeAndBranch: false },
-          expect.anything()
-        );
       });
 
       it('passes testAttempts and maxTestAttempts', async () => {

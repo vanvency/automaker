@@ -15,6 +15,7 @@ import {
   Network,
   Bell,
   Settings,
+  Home,
 } from 'lucide-react';
 import type { NavSection, NavItem } from '../types';
 import type { KeyboardShortcut } from '@/hooks/use-keyboard-shortcuts';
@@ -188,6 +189,10 @@ export function useNavigation({
     }
 
     const sections: NavSection[] = [
+      {
+        // Navigation prefixes ids with '/', so the empty id opens the home route.
+        items: [{ id: '', label: '首页', icon: Home }],
+      },
       // Project section - expanded by default
       {
         label: 'Project',

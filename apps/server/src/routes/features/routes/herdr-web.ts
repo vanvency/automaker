@@ -171,7 +171,11 @@ export function createHerdrWebHandler(featureLoader: FeatureLoader, events?: Eve
         return;
       }
 
-      const resolved = await resolveFeatureWorkDir(featureLoader, projectPath, featureId);
+      // Opening the conversation starts a pi agent in the checkout, so a
+      // released worktree is rebuilt here instead of failing later.
+      const resolved = await resolveFeatureWorkDir(featureLoader, projectPath, featureId, {
+        rebuild: true,
+      });
       if (!resolved) {
         res.status(404).json({ success: false, error: `Feature ${featureId} not found` });
         return;

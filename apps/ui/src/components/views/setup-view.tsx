@@ -86,8 +86,8 @@ export function SetupView() {
   const handleFinish = () => {
     logger.debug('[Setup Flow] handleFinish called - completing setup');
     completeSetup();
-    logger.debug('[Setup Flow] Setup completed, redirecting to dashboard');
-    navigate({ to: '/dashboard' });
+    logger.debug('[Setup Flow] Setup completed, redirecting to home');
+    navigate({ to: '/' });
   };
 
   return (

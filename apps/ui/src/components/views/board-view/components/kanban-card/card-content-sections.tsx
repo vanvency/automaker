@@ -1,7 +1,7 @@
 // @ts-nocheck - content section prop typing with feature data extraction
 import { memo } from 'react';
 import { Feature } from '@/store/app-store';
-import { GitPullRequest, ExternalLink } from 'lucide-react';
+import { ArchiveRestore, GitPullRequest, ExternalLink } from 'lucide-react';
 import { TaskNotice } from '../task-notice';
 import { GoalSummaryBar, type GoalProgress } from './goal-list';
 import { ChangedProjectList, getChangedProjects } from './changed-projects';
@@ -25,6 +25,23 @@ export const CardContentSections = memo(function CardContentSections({
           on (needs_input), so it must be readable on the card itself rather than
           hidden behind the badge tooltip. */}
       <TaskNotice feature={feature} />
+      {/* A released checkout is not a problem: the branch and the conversation
+          history stay in place, and the next agent run rebuilds the checkout. */}
+      {feature.worktreeRelease && (
+        <div
+          className="mb-2 rounded border border-border/60 px-2 py-1.5 text-[10px] text-muted-foreground"
+          data-testid={`worktree-released-${feature.id}`}
+        >
+          <span className="flex items-start gap-1.5">
+            <ArchiveRestore className="mt-[1px] h-3 w-3 shrink-0" />
+            <span>
+              worktree 已释放（
+              {new Date(feature.worktreeRelease.releasedAt).toLocaleDateString()}）：分支{' '}
+              {feature.worktreeRelease.branch} 与对话历史保留，Reply 或 Agent 时会自动重建。
+            </span>
+          </span>
+        </div>
+      )}
       {feature.supersededBy && (
         <div className="mb-2 rounded border px-2 py-1.5 text-xs" data-testid="task-superseded">
           已由 {feature.supersededBy.jiraKey || feature.supersededBy.featureId} 覆盖
