@@ -14,6 +14,7 @@ Fork repository: [vanvency/automaker](https://github.com/vanvency/automaker). Th
 - [What changed in this fork](#what-changed-in-this-fork)
 - [Workflow](#workflow)
 - [中文使用流程](#中文使用流程)
+- [任务生命周期与职责边界](#任务生命周期与职责边界)
 - [Quick start](#quick-start)
 - [Integrations](#integrations)
 - [Run and develop](#run-and-develop)
@@ -126,6 +127,108 @@ Jira status and Automaker execution status are independent. Normal sync does not
 | Complete 被阻塞或中途失败 | 查看具体交付步骤，修复冲突、权限或必填项后重新预览与确认，不要直接修改任务 JSON 来跳过检查。                                                                                |
 
 备份项目 `.automaker/`、服务端 `DATA_DIR` 和 Provider 会话目录；数据位置见 [Architecture and data](#architecture-and-data)。
+
+## 任务生命周期与职责边界
+
+Automaker 程序、平台辅助 AI 和任务 Agent 协作执行任务，用户负责范围决策和验收。平台没有一个负责所有环节的“总指挥 Agent”：
+
+| 标记                   | 执行者                                                                  | 负责内容                                                         |
+| ---------------------- | ----------------------------------------------------------------------- | ---------------------------------------------------------------- |
+| **P · Automaker 程序** | UI、API、调度器、状态管理和外部接口代码                                 | 导入、存储、去重、派发、Worktree、会话、测试结果、状态和交付步骤 |
+| **A · 平台辅助 AI**    | 标题、需求增强、规格、Ideation、需求变更摘要等按需调用的模型            | 生成或总结内容，不直接拥有任务代码修改流程                       |
+| **T · 任务 Agent**     | 任务选择的 Claude、Codex、Cursor、Gemini、Copilot、OpenCode 或 Pi Agent | 阅读仓库、规划实现、修改代码、执行测试、修复失败并报告结果       |
+| **H · 用户**           | 任务创建者和验收者                                                      | 确定范围、批准计划、回答问题、检查交付并确认完成                 |
+
+手工创建的改进任务不需要 Jira。Jira 同步是可选的需求入口；在当前实现中，Jira 同步、评论回写和 Complete 阶段的 Jira 流转仍由内置服务及脚本执行，尚未拆成可插拔的 Jira Plugin。
+
+```mermaid
+flowchart TD
+    H1["H · 手工创建改进任务"] --> P1
+    J1["P · Jira 查询与同步"] --> P1
+    A1["A · 可选：生成标题、增强需求或规格"] --> P1
+    P1["P · 校验、去重、创建/更新任务卡"] --> P2["P · Backlog"]
+
+    P2 --> H2["H · 手动启动<br/>或允许自动派发"]
+    H2 --> P3["P · 检查容量、依赖、锁和任务范围"]
+    P3 -->|需要决策| H3["H · 明确范围或批准计划/拆分"]
+    H3 --> P3
+    P3 -->|可以启动| P4["P · 准备/定位 Worktree<br/>创建运行身份和 Agent 会话"]
+    P4 --> P5["P · In Progress<br/>组装提示、上下文和模型配置"]
+    P5 --> T1["T · 读取需求和代码"]
+
+    T1 --> P6{"P · 是否启用计划模式"}
+    P6 -->|是| T2["T · 生成实现计划"]
+    T2 --> P7["P · 保存计划并等待审批"]
+    P7 -->|需要修改| H4["H · 修改或退回计划"]
+    H4 --> T2
+    P7 -->|需要审批| H8["H · 审阅并批准计划"]
+    H8 --> T3["T · 修改代码、测试、构建和修复"]
+    P7 -->|无需审批| T3
+    P6 -->|否| T3
+
+    T3 -->|需要产品决定| P8["P · 保存问题/阻塞信息"]
+    P8 --> H5["H · Reply 或已启用的 Jira 问答"]
+    H5 --> P9["P · 恢复同一会话并传入反馈"]
+    P9 --> T3
+    T3 --> T4["T · 输出摘要、测试结果、回执和验收材料"]
+
+    T4 --> P10["P · 检查计划任务<br/>最多补跑 3 次"]
+    P10 -->|未完成且有重试次数| T3
+    P10 -->|进入收尾| P11{"P · 是否配置后续流水线"}
+    P11 -->|是| T5["T · 按程序编排执行流水线步骤"]
+    T5 --> P12
+    P11 -->|否| P12["P · 读取日志、回执和验收证据"]
+    P12 -->|失败/中断/缺少有效结果| P13["P · Needs Attention 或可重试状态"]
+    P13 --> H6["H · 处理原因后重试"]
+    H6 --> P4
+    P12 -->|计算目标状态| P16{"P · 当前 Jira 任务额外门禁<br/>Draft MR 检查"}
+    P16 -->|未通过| P13
+    P16 -->|通过或非 Jira 任务| P14["P · Waiting Review<br/>或按规则自动进入 Verified"]
+
+    P14 --> H7["H · 检查差异、测试、预览和真实结果"]
+    H7 -->|需要修改| P9
+    H7 -->|通过 Verify| P15["P · Done<br/>记录人工验收"]
+
+    classDef program fill:#e8f1ff,stroke:#3974c6,color:#14263d;
+    classDef assistant fill:#f1e8ff,stroke:#8955c7,color:#312040;
+    classDef task fill:#e6f5eb,stroke:#38965b,color:#173523;
+    classDef human fill:#f1f3f5,stroke:#7b8490,color:#20262d;
+    class P1,P2,P3,P4,P5,P6,P7,P8,P9,P10,P11,P12,P13,P14,P15,P16,J1 program;
+    class A1 assistant;
+    class T1,T2,T3,T4,T5 task;
+    class H1,H2,H3,H4,H5,H6,H7,H8 human;
+```
+
+计划模式中的“规划”和后续“开发”通常由同一个任务 Agent 完成。Automaker 程序负责决定是否需要审批、解析计划、保存任务进度和恢复会话；它本身不会替任务 Agent 修改业务代码。流水线同样由程序编排，流水线步骤中的智能操作仍由任务 Agent 执行，测试命令由测试程序返回结果。
+
+`AgentExecutor`、`ExecutionService` 和 Herdr 会话管理属于程序代码。流水线步骤即使叫 Review，也不代表它使用了独立、隔离的审核 Agent。自动进入 `verified` 也不等于人工验收：Agent 的输出和回执不能替代对实际功能的检查。
+
+平台辅助 AI 按功能需要调用，并非每张任务都会经过：
+
+| 场景                   | 平台辅助 AI           | Automaker 程序                  |
+| ---------------------- | --------------------- | ------------------------------- |
+| 创建任务               | 生成标题、增强描述    | 展示或保存生成内容              |
+| Spec / Ideation        | 生成规格、任务建议    | 创建卡片、维护任务关系          |
+| 执行期间 Jira 需求变化 | 总结变化点            | 将摘要传给运行中的任务会话      |
+| 提交或 PR 辅助功能     | 生成提交信息、PR 描述 | 根据用户操作调用 Git 或远端接口 |
+
+Jira 需求变更通知可能影响正在运行的任务，应在后续插件配置中作为独立选项。当前 [Draft MR 门禁](apps/server/src/services/draft-mr-review-gate.ts) 也仍会检查 Jira 任务能否进入 Review/Done；它与“任务只负责开发”的目标存在冲突，应移到独立交付阶段。
+
+开发结束后的代码交付和 Jira 流转是独立阶段：
+
+```mermaid
+flowchart LR
+    D["P · Done + H 已验收"] --> C["H · 预览并确认 Complete"]
+    C --> M["P · 核对并按顺序处理 MR<br/>子项目 → 根仓库"]
+    M --> J["P · 内置 Jira 服务<br/>有 Jira 关联时核对并执行完成流转"]
+    J --> R["P · 释放预览、保存每一步结果"]
+    M -->|失败| X["P · 保留已完成步骤<br/>等待修复或重试"]
+    J -->|失败| X
+```
+
+任务 Agent 的开发完成不等于 MR 已合并，也不等于 Jira 已关闭。当前 Complete 流程核对关联 MR、按需合并、关闭关联 Jira 并释放预览；没有 Jira 关联时跳过 Jira 步骤。未来 Jira Plugin 化后，Jira 相关步骤还应由项目配置控制，手工创建的非 Jira 任务仍可完整开发、验收和完成。
+
+实现入口：[任务编排](apps/server/src/services/execution-service.ts)、[Agent 执行与计划审批](apps/server/src/services/agent-executor.ts)、[流水线编排](apps/server/src/services/pipeline-orchestrator.ts)、[Complete 交付流程](apps/server/src/routes/features/routes/complete.ts)。
 
 ## Quick start
 
