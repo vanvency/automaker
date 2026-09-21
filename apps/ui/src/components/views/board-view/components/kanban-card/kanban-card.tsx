@@ -1,3 +1,4 @@
+import { DeliveryProgress } from './delivery-progress';
 // @ts-nocheck - dnd-kit draggable/droppable ref combination type incompatibilities
 import React, { memo, useLayoutEffect, useState, useCallback } from 'react';
 import { useDraggable, useDroppable } from '@dnd-kit/core';
@@ -414,6 +415,14 @@ export const KanbanCard = memo(function KanbanCard({
       />
 
       <CardContent className="px-3 pt-0 pb-0">
+        {currentProject?.path && (feature.status === 'verified' || feature.deliveryCompletion) && (
+          <DeliveryProgress
+            projectPath={currentProject.path}
+            featureId={feature.id}
+            initial={feature.deliveryCompletion}
+            onRetry={feature.status === 'verified' ? onComplete : undefined}
+          />
+        )}
         {/* Done lane: a verified card whose delivery merge requests conflict cannot
             be completed until an agent resolves them, so the fix is offered here. */}
         {feature.status === 'verified' && currentProject?.path && (

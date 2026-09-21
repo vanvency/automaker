@@ -303,6 +303,11 @@ export function useBoardColumnFeatures({
 
       // Use the feature's status (fallback to backlog for unknown statuses)
       const status = f.status || 'backlog';
+      // Keep the three-stage completion receipt on Done until explicitly archived.
+      if (status === 'completed' && f.deliveryCompletion && !f.archive && matchesWorktree) {
+        map.verified.push(f);
+        return;
+      }
 
       // IMPORTANT:
       // Historically, we forced "running" features into in_progress so they never disappeared

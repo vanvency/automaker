@@ -1,3 +1,4 @@
+import { activeDeliveryProjects } from '../delivery-completion.js';
 /**
  * AutoModeServiceFacade - Clean interface for auto-mode functionality
  *
@@ -731,6 +732,8 @@ export class AutoModeServiceFacade {
     imagePaths?: string[],
     useWorktrees = true
   ): Promise<void> {
+    if (activeDeliveryProjects.has(this.projectPath))
+      throw new Error('Complete is running for this project; wait before replying');
     validateWorkingDirectory(this.projectPath);
 
     try {

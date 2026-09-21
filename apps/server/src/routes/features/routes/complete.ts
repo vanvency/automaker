@@ -11,7 +11,15 @@ import {
   resolveGitLabToken,
 } from '../../../services/gitlab-merge-service.js';
 import { consolidationExternal } from '../../../services/task-consolidation-service.js';
-import type { Feature } from '@automaker/types';
+import type { Feature, FeatureDelivery, DeliveryStepId } from '@automaker/types';
+import {
+  activeCompletions,
+  activeDeliveryProjects,
+  activeCompletionRepairs,
+  completionKey,
+  newDelivery,
+  releaseDeliveryPreview,
+} from '../../../services/delivery-completion.js';
 
 export function createCompleteHandler(
   loader: FeatureLoader,
@@ -24,9 +32,14 @@ export function createCompleteHandler(
       if (!token) throw new Error('GitLab credentials unavailable');
       return new GitLabMergeService(token);
     },
-  }
+  },
+  cleanup: (
+    project: string,
+    feature: Feature
+  ) => Promise<{ status: 'succeeded' | 'skipped'; message: string }> = (project, feature) =>
+    releaseDeliveryPreview(loader, project, feature)
 ) {
-  const busy = new Set<string>();
+  const busy = activeCompletions;
   return async (req: Request, res: Response) => {
     const {
       projectPath,
@@ -36,21 +49,52 @@ export function createCompleteHandler(
       transitionId,
       jiraFields = {},
     } = req.body ?? {};
-    const lock = `${projectPath}:${featureId}`;
-    if (busy.has(lock)) {
+    const lock = completionKey(projectPath, featureId);
+    if (
+      busy.has(lock) ||
+      activeCompletionRepairs.has(lock) ||
+      activeDeliveryProjects.has(projectPath)
+    ) {
       res.status(409).json({ success: false, error: 'Completion is already running' });
       return;
     }
     busy.add(lock);
+    if (!preview) activeDeliveryProjects.add(projectPath);
+    let progress: FeatureDelivery | undefined;
+    let currentStep: DeliveryStepId = 'merge';
+    const saveStep = async (
+      id: DeliveryStepId,
+      status: FeatureDelivery['steps'][number]['status'],
+      message?: string
+    ) => {
+      if (!progress) return;
+      currentStep = id;
+      const now = new Date().toISOString();
+      progress = {
+        ...progress,
+        updatedAt: now,
+        steps: progress.steps.map((step) =>
+          step.id === id ? { id, status, message, updatedAt: now } : step
+        ),
+      };
+      await loader.update(projectPath, featureId, { deliveryCompletion: progress });
+    };
     try {
       if (typeof projectPath !== 'string' || typeof featureId !== 'string')
         throw new Error('Project and feature are required');
       const feature = await loader.get(projectPath, featureId);
-      if (!feature || feature.archive) throw new Error('Task not found or archived');
+      if (!feature || feature.archive || feature.supersededBy || feature.consolidationPlanId)
+        throw new Error('Task not found, archived or being consolidated');
       if (feature.status !== 'verified' || feature.completionSource !== 'human')
         throw new Error('Confirm Verify before Complete');
       if ((await running(projectPath)).includes(featureId))
         throw new Error('Wait for the task agent to stop');
+      if (!preview) {
+        progress = newDelivery(feature.deliveryCompletion);
+        await loader.update(projectPath, featureId, { deliveryCompletion: progress });
+        if (progress.steps[0].status !== 'succeeded')
+          await saveStep('merge', 'running', '正在核对交付 MR 与源分支…');
+      }
       const config = (await settings?.getProjectSettings(projectPath))?.jiraSync;
       const plan = buildFeatureMergePlan({
         ...feature,
@@ -105,6 +149,7 @@ export function createCompleteHandler(
       const blockers: string[] = [];
       let jira;
       if (feature.jiraKey) {
+        currentStep = 'jira';
         if (
           !config?.jiraUrl ||
           (feature.jiraUrl && new URL(feature.jiraUrl).origin !== new URL(config.jiraUrl).origin)
@@ -120,7 +165,12 @@ export function createCompleteHandler(
           blockers.push('当前 Jira 状态没有可用的完成流转，请检查工作流或账号权限。');
       }
       const stamp = (value: Feature) =>
-        JSON.stringify({ ...value, updatedAt: undefined, justFinishedAt: undefined });
+        JSON.stringify({
+          ...value,
+          deliveryCompletion: undefined,
+          updatedAt: undefined,
+          justFinishedAt: undefined,
+        });
       const featureStamp = stamp(feature);
       const digest = createHash('sha256')
         .update(JSON.stringify({ featureStamp, entries, jira, config }))
@@ -144,10 +194,12 @@ export function createCompleteHandler(
       }
       if (fingerprint !== digest)
         throw new Error('Task, MR or Jira changed. Refresh the completion preview.');
-      if (conflicts.length)
+      if (conflicts.length) {
+        currentStep = 'merge';
         throw new Error(
           `MR 仍有冲突，请先让 Agent 修复：${conflicts.map((c) => c.mrUrl).join('、')}`
         );
+      }
       if (blockers.length) throw new Error(blockers.join('\n'));
       if (jira && !jira.done && !jira.transitions.some((t) => t.id === transitionId))
         throw new Error('Select a Jira completion transition');
@@ -177,8 +229,19 @@ export function createCompleteHandler(
             throw new Error(`请选择 Jira 必填字段：${field.name}`);
         }
       }
+      const assertUnchanged = async () => {
+        const latest = await loader.get(projectPath, featureId);
+        if (
+          !latest ||
+          stamp(latest) !== featureStamp ||
+          (await running(projectPath)).includes(featureId)
+        )
+          throw new Error('Task changed or started running during completion');
+      };
+      await saveStep('merge', 'running', '按子项目 → 根仓库顺序 squash 合并 MR…');
       // Apply the reviewed source revisions in subproject-before-root order.
       for (const entry of entries) {
+        await saveStep('merge', 'running', `${entry.name}: ${entry.mrUrl}`);
         if (entry.state.state === 'merged') continue;
         const latest = await loader.get(projectPath, featureId);
         if (
@@ -199,10 +262,19 @@ export function createCompleteHandler(
           const ready = await gitlab!.markReady(entry.mrUrl, state.title);
           if (!ready.ok) throw new Error(ready.error || 'Could not mark MR ready');
         }
-        const merged = await gitlab!.merge(entry.mrUrl, { sha: state.sha });
+        const merged = await gitlab!.merge(entry.mrUrl, { sha: state.sha, squash: true });
         if (!merged.ok || !merged.merged)
           throw new Error(merged.error || `MR merge not confirmed: ${entry.mrUrl}`);
       }
+      await saveStep(
+        'merge',
+        'succeeded',
+        entries.length
+          ? `${entries.length} 个 MR 已确认合并（新合并采用 squash）`
+          : '无交付 MR，已完成本地任务核对'
+      );
+      await saveStep('jira', 'running', '正在确认 Jira 完成状态…');
+      await assertUnchanged();
       if (jira && !jira.done) {
         try {
           jira = await external.jira({
@@ -221,17 +293,53 @@ export function createCompleteHandler(
         }
         if (!jira.done) throw new Error('Jira completion was not confirmed');
       }
+      await saveStep(
+        'jira',
+        jira ? 'succeeded' : 'skipped',
+        jira ? `Jira ${feature.jiraKey} · ${jira.status}` : '此任务未关联 Jira'
+      );
+      await saveStep('preview', 'running', '正在释放此任务 worktree 的托管预览资源…');
+      await assertUnchanged();
+      const released = await cleanup(projectPath, feature);
+      await assertUnchanged();
+      await saveStep('preview', released.status, released.message);
+      progress = { ...progress!, status: 'succeeded', updatedAt: new Date().toISOString() };
       const updated = await loader.update(projectPath, featureId, {
+        deliveryCompletion: progress,
         status: 'completed',
         completionSource: 'human',
         ...(jira ? { jiraStatus: jira.status } : {}),
       });
       res.json({ success: true, feature: updated });
     } catch (error) {
+      if (progress) {
+        // A preflight may fail in Jira while MR writes have not even started.
+        progress = {
+          ...progress,
+          status: 'failed',
+          steps: progress.steps.map((step) =>
+            step.status === 'running' && step.id !== currentStep
+              ? { ...step, status: 'pending' }
+              : step
+          ),
+        };
+        try {
+          if (progress.steps.find((step) => step.id === currentStep)?.status === 'succeeded') {
+            progress.reconciliationError = {
+              stepId: currentStep,
+              message: (error as Error).message,
+            };
+            await loader.update(projectPath, featureId, { deliveryCompletion: progress });
+          } else await saveStep(currentStep, 'failed', (error as Error).message);
+        } catch {
+          /* Preserve original failure. */
+        }
+      }
       // Partial merges are re-read on retry. The card remains in Done until all steps succeed.
       res.status(409).json({ success: false, error: (error as Error).message });
     } finally {
       busy.delete(lock);
+      if (!preview) activeDeliveryProjects.delete(projectPath);
     }
   };
 }

@@ -1,3 +1,4 @@
+import { activeDeliveryProjects } from '../../../services/delivery-completion.js';
 /**
  * GET /api/features/herdr-task?projectPath=...&featureId=... - status of the
  * feature's herdr task.
@@ -111,6 +112,8 @@ export function createHerdrDispatchHandler(featureLoader: FeatureLoader, events?
         return;
       }
 
+      if (activeDeliveryProjects.has(projectPath))
+        throw new Error('Complete is running; wait before dispatch');
       const feature = await featureLoader.get(projectPath, featureId);
       if (!feature) {
         res.status(404).json({ success: false, error: `Feature ${featureId} not found` });

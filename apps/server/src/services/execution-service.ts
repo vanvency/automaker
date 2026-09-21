@@ -1,3 +1,4 @@
+import { activeDeliveryProjects } from './delivery-completion.js';
 /**
  * ExecutionService - Feature execution lifecycle coordination
  */
@@ -337,6 +338,8 @@ requires:
     providedWorktreePath?: string,
     options?: { continuationPrompt?: string; _calledInternally?: boolean }
   ): Promise<void> {
+    if (activeDeliveryProjects.has(projectPath))
+      throw new Error('Complete is running for this project; wait before starting an Agent');
     const executionStartedAt = Date.now();
     const tempRunningFeature = this.acquireRunningFeature({
       featureId,

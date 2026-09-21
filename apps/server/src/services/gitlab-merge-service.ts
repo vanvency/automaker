@@ -150,7 +150,7 @@ export class GitLabMergeService {
   /** Merge the MR. `sha` guards against merging a branch that moved meanwhile. */
   async merge(
     url: string,
-    options: { sha?: string } = {}
+    options: { sha?: string; squash?: boolean } = {}
   ): Promise<{ ok: boolean; merged: boolean; error?: string }> {
     const mr = parseMergeRequestUrl(url);
     if (!mr) return { ok: false, merged: false, error: `Unparseable MR URL: ${url}` };
@@ -159,6 +159,7 @@ export class GitLabMergeService {
       body: JSON.stringify({
         ...(options.sha ? { sha: options.sha } : {}),
         should_remove_source_branch: false,
+        ...(options.squash !== undefined ? { squash: options.squash } : {}),
       }),
     });
     if (!result.ok) {

@@ -1,3 +1,4 @@
+import { toast } from 'sonner';
 import { useCallback, useEffect, useState } from 'react';
 import { Loader2 } from 'lucide-react';
 import { apiFetch } from '@/lib/api-fetch';
@@ -101,7 +102,7 @@ export function CompleteTaskDialog({
     setApplying(true);
     setError('');
     try {
-      const response = await apiFetch('/api/features/complete', 'POST', {
+      const pending = apiFetch('/api/features/complete', 'POST', {
         body: {
           projectPath,
           featureId: feature.id,
@@ -111,11 +112,16 @@ export function CompleteTaskDialog({
           jiraFields,
         },
       });
+      onClose();
+      toast.info('Complete 已提交，可在任务卡查看三步进度');
+      const response = await pending;
       const data = await response.json();
       if (!response.ok || !data.success) throw new Error(data.error || 'Completion failed');
       onCompleted();
       onClose();
     } catch (error) {
+      toast.error((error as Error).message);
+      onCompleted();
       setError((error as Error).message);
       setPlan(null);
     } finally {
@@ -137,8 +143,8 @@ export function CompleteTaskDialog({
         <DialogHeader>
           <DialogTitle>Complete · {feature.jiraKey || feature.title}</DialogTitle>
           <DialogDescription>
-            按顺序合并 MR，全部成功后关闭 Jira 并完成任务。遇到冲突或失败会保留在
-            Done，可处理后重试。
+            依次 squash 合并 MR → 关闭 Jira →
+            释放托管预览资源。每步进度和失败原因展示在卡片上。失败会保留在 Done，可处理后重试。
           </DialogDescription>
         </DialogHeader>
         {loading && (

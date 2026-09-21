@@ -1,3 +1,7 @@
+import {
+  createCompletionProgressHandler,
+  createCompletionRepairHandler,
+} from './routes/completion-progress.js';
 /**
  * Features routes - HTTP API for feature management
  */
@@ -94,6 +98,16 @@ export function createFeaturesRoutes(
         .filter((agent) => agent.projectPath === project)
         .map((agent) => agent.featureId)
     )
+  );
+  router.post(
+    '/completion-progress',
+    validatePathParams('projectPath'),
+    createCompletionProgressHandler(featureLoader)
+  );
+  router.post(
+    '/completion-repair',
+    validatePathParams('projectPath'),
+    createCompletionRepairHandler(featureLoader, autoModeService)
   );
   router.post('/get', validatePathParams('projectPath'), createGetHandler(featureLoader));
   router.post(

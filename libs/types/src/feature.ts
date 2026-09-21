@@ -32,6 +32,19 @@ export interface FeatureTextFilePath {
   [key: string]: unknown;
 }
 
+export type DeliveryStepId = 'merge' | 'jira' | 'preview';
+export interface FeatureDelivery {
+  reconciliationError?: { stepId: DeliveryStepId; message: string };
+  status: 'running' | 'failed' | 'succeeded';
+  updatedAt: string;
+  steps: Array<{
+    id: DeliveryStepId;
+    status: 'pending' | 'running' | 'succeeded' | 'failed' | 'skipped';
+    message?: string;
+    updatedAt?: string;
+  }>;
+}
+
 /** Agent-produced evidence for human acceptance; passing checks is not human approval. */
 export interface AcceptanceEvidence {
   status: 'passed' | 'failed' | 'blocked';
@@ -127,6 +140,7 @@ export interface Feature {
   imagePaths?: Array<string | FeatureImagePath | { path: string; [key: string]: unknown }>;
   textFilePaths?: FeatureTextFilePath[];
   acceptanceEvidence?: AcceptanceEvidence;
+  deliveryCompletion?: FeatureDelivery;
   // Branch info - worktree path is derived at runtime from branchName
   branchName?: string | null; // Name of the feature branch (undefined/null = use current worktree)
   skipTests?: boolean;

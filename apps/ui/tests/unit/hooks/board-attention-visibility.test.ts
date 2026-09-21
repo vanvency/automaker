@@ -45,4 +45,21 @@ describe('completed runs awaiting attention remain visible', () => {
       feature.id,
     ]);
   });
+  it('keeps the successful three-step receipt on Done until explicitly archived', () => {
+    const completed = {
+      ...feature,
+      status: 'completed',
+      error: undefined,
+      deliveryCompletion: { status: 'succeeded', updatedAt: 'now', steps: [] },
+    } as Feature;
+    const { result, rerender } = renderHook(
+      (features: Feature[]) => useBoardColumnFeatures({ ...options, features }),
+      { initialProps: [completed] }
+    );
+    expect(result.current.getColumnFeatures('verified').map((f: Feature) => f.id)).toEqual([
+      feature.id,
+    ]);
+    rerender([{ ...completed, archive: { reason: 'obsolete' } } as unknown as Feature]);
+    expect(result.current.getColumnFeatures('verified')).toEqual([]);
+  });
 });

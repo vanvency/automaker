@@ -47,6 +47,7 @@ export interface Feature extends Omit<
   reasoningEffort?: ReasoningEffort; // Explicit type to override BaseFeature's index signature
   providerId?: string; // Explicit type to override BaseFeature's index signature
   acceptanceEvidence?: BaseFeature['acceptanceEvidence'];
+  deliveryCompletion?: BaseFeature['deliveryCompletion'];
   summary?: string; // Explicit type to override BaseFeature's index signature
 }
 

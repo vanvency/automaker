@@ -422,3 +422,5 @@ export type {
   MultiProjectOverview,
   ProjectOverviewError,
 } from './project-overview.js';
+
+export type { FeatureDelivery, DeliveryStepId } from './feature.js';
