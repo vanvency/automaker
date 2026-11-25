@@ -1,5 +1,5 @@
 // @ts-nocheck - form state management with partial feature updates and validation
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import {
   Dialog,
   DialogContent,
@@ -151,48 +151,43 @@ export function EditFeatureDialog({
   const [excludedPipelineSteps, setExcludedPipelineSteps] = useState<string[]>(
     feature?.excludedPipelineSteps ?? []
   );
+  const draftFeatureRef = useRef<string | null>(null);
 
   useEffect(() => {
+    if (!feature) return;
+    const draftKey = `${projectPath}:${feature.id}`;
+    if (draftFeatureRef.current === draftKey) return;
+    draftFeatureRef.current = draftKey;
     setEditingFeature(feature);
-    if (feature) {
-      setPlanningMode(feature.planningMode ?? 'skip');
-      setRequirePlanApproval(feature.requirePlanApproval ?? false);
-      // Derive workMode from feature's branchName
-      setWorkMode(feature.branchName ? 'custom' : 'current');
-      // Reset history tracking state
-      setOriginalDescription(feature.description ?? '');
-      setDescriptionChangeSource(null);
-      setPreEnhancementDescription(null);
-      setLocalHistory(feature.descriptionHistory ?? []);
-      // Reset model entry - migrate legacy model IDs
-      setModelEntry(
-        normalizeModelEntry({
-          model: migrateModelId(feature.model) || 'claude-opus',
-          thinkingLevel: feature.thinkingLevel || 'none',
-          reasoningEffort: feature.reasoningEffort || 'none',
-          providerId: feature.providerId,
-        })
-      );
-      // Reset dependency state
-      setParentDependencies(feature.dependencies ?? []);
-      const childDeps = allFeatures
-        .filter((f) => f.dependencies?.includes(feature.id))
-        .map((f) => f.id);
-      setChildDependencies(childDeps);
-      setOriginalChildDependencies(childDeps);
-      // Reset pipeline exclusion state
-      setExcludedPipelineSteps(feature.excludedPipelineSteps ?? []);
-    } else {
-      setEditFeaturePreviewMap(new Map());
-      setDescriptionChangeSource(null);
-      setPreEnhancementDescription(null);
-      setLocalHistory([]);
-      setParentDependencies([]);
-      setChildDependencies([]);
-      setOriginalChildDependencies([]);
-      setExcludedPipelineSteps([]);
-    }
-  }, [feature, allFeatures]);
+    setEditFeaturePreviewMap(new Map());
+    setPlanningMode(feature.planningMode ?? 'skip');
+    setRequirePlanApproval(feature.requirePlanApproval ?? false);
+    // Derive workMode from feature's branchName
+    setWorkMode(feature.branchName ? 'custom' : 'current');
+    // Reset history tracking state
+    setOriginalDescription(feature.description ?? '');
+    setDescriptionChangeSource(null);
+    setPreEnhancementDescription(null);
+    setLocalHistory(feature.descriptionHistory ?? []);
+    // Reset model entry - migrate legacy model IDs
+    setModelEntry(
+      normalizeModelEntry({
+        model: migrateModelId(feature.model) || 'claude-opus',
+        thinkingLevel: feature.thinkingLevel || 'none',
+        reasoningEffort: feature.reasoningEffort || 'none',
+        providerId: feature.providerId,
+      })
+    );
+    // Reset dependency state
+    setParentDependencies(feature.dependencies ?? []);
+    const childDeps = allFeatures
+      .filter((f) => f.dependencies?.includes(feature.id))
+      .map((f) => f.id);
+    setChildDependencies(childDeps);
+    setOriginalChildDependencies(childDeps);
+    // Reset pipeline exclusion state
+    setExcludedPipelineSteps(feature.excludedPipelineSteps ?? []);
+  }, [feature, allFeatures, projectPath]);
 
   // Clear requirePlanApproval when planning mode is skip (lite supports approval)
   useEffect(() => {
@@ -271,6 +266,7 @@ export function EditFeatureDialog({
       historyEnhancementMode,
       preEnhancementDescription ?? undefined
     );
+    draftFeatureRef.current = null;
     setEditFeaturePreviewMap(new Map());
     onClose();
   };
@@ -290,7 +286,7 @@ export function EditFeatureDialog({
   const sectionHeaderClass = 'flex items-center gap-2 text-sm font-medium text-foreground';
 
   return (
-    <Dialog open={!!editingFeature} onOpenChange={handleDialogClose}>
+    <Dialog open={!!feature} onOpenChange={handleDialogClose}>
       <DialogContent
         compact={!isMaximized}
         data-testid="edit-feature-dialog"

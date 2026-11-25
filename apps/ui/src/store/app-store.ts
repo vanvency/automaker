@@ -434,7 +434,11 @@ export const useAppStore = create<AppState & AppActions>()((set, get) => ({
     }
   },
 
-  removeProject: (projectId: string) => {
+  removeProject: async (projectId: string) => {
+    const result = await getHttpApiClient().settings.updateGlobal({
+      removedProjectIds: [projectId],
+    });
+    if (!result.success) throw new Error(result.error || 'Failed to remove project');
     set((state) => ({
       projects: state.projects.filter((p) => p.id !== projectId),
       currentProject: state.currentProject?.id === projectId ? null : state.currentProject,

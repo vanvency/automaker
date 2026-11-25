@@ -65,7 +65,7 @@ describe('delivery preview cleanup', () => {
     } as any;
     const next = newDelivery(previous);
     expect(next.status).toBe('running');
-    expect(next.steps).toEqual(previous.steps);
+    expect(next.steps).toEqual([previous.steps[2], previous.steps[0], previous.steps[1]]);
   });
 
   it('does not fall back to the project root if the task worktree is missing', async () => {

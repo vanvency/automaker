@@ -30,6 +30,7 @@ import type { AutoModeEventType } from './typed-event-bus.js';
 import { getNotificationService } from './notification-service.js';
 import { FeatureLoader } from './feature-loader.js';
 import { pipelineService } from './pipeline-service.js';
+import { gateDraftMrReview } from './draft-mr-review-gate.js';
 
 const logger = createLogger('FeatureStateManager');
 
@@ -151,7 +152,22 @@ export class FeatureStateManager {
         return;
       }
 
+      const previousStatus = feature.status;
+      const review = await gateDraftMrReview(projectPath, { ...feature, status });
+      Object.assign(feature, review);
+      status = review.status ?? status;
+      if (
+        ['waiting_approval', 'verified'].includes(status) &&
+        (previousStatus === 'in_progress' || isPipelineStatus(previousStatus))
+      ) {
+        feature.lastExecutionCompletedAt = new Date().toISOString();
+      }
       feature.status = status;
+      if (
+        feature.herdrExecution?.outputApplied &&
+        ['verified', 'waiting_approval', 'completed'].includes(status)
+      )
+        feature.herdrExecution = undefined;
       feature.updatedAt = new Date().toISOString();
 
       // Handle justFinishedAt timestamp based on status
@@ -318,6 +334,8 @@ export class FeatureStateManager {
 
         const feature = result.data;
         if (!feature) continue;
+        // Herdr owns the live process. Keep its stage/plan intact for reattachment.
+        if (feature.herdrExecution) continue;
 
         let needsUpdate = false;
         const originalStatus = feature.status;

@@ -51,6 +51,24 @@ describe('CardActions conversation entry', () => {
     expect(screen.queryByTestId('verify-acceptance-backlog')).not.toBeInTheDocument();
   });
 
+  it('changes Complete to Confirm after MR approval', () => {
+    const feature = { id: 'approved', status: 'verified', completionSource: 'human' } as Feature;
+    const onComplete = vi.fn();
+    const { rerender } = render(
+      <CardActions feature={feature} isCurrentAutoTask={false} onComplete={onComplete} />
+    );
+    expect(screen.getByRole('button', { name: 'Complete' })).toBeInTheDocument();
+    rerender(
+      <CardActions
+        feature={{ ...feature, deliveryApproval: { approvedAt: 'now', reviews: [] } }}
+        isCurrentAutoTask={false}
+        onComplete={onComplete}
+      />
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'Confirm' }));
+    expect(onComplete).toHaveBeenCalledOnce();
+  });
+
   it('offers Reply but no Verify for a Needs Attention card', () => {
     const reply = vi.fn();
     render(
@@ -74,6 +92,42 @@ describe('CardActions conversation entry', () => {
     fireEvent.click(screen.getByTestId('reply-needs-attention'));
     expect(reply).toHaveBeenCalledOnce();
   });
+
+  it.each(['failed', 'error', 'cancelled', 'canceled', 'interrupted', 'merge_conflict'])(
+    'offers Reply for an idle %s task and hides it while running',
+    (status) => {
+      const reply = vi.fn();
+      const props = {
+        feature: { id: 'attention', status } as Feature,
+        isCurrentAutoTask: false,
+        onFollowUp: reply,
+        onViewAcceptance: vi.fn(),
+      };
+      const { rerender } = render(<CardActions {...props} />);
+      fireEvent.click(screen.getByRole('button', { name: 'Reply' }));
+      expect(reply).toHaveBeenCalledOnce();
+      expect(screen.queryByRole('button', { name: 'Verify' })).not.toBeInTheDocument();
+      rerender(<CardActions {...props} isRunningTask />);
+      expect(screen.queryByRole('button', { name: 'Reply' })).not.toBeInTheDocument();
+    }
+  );
+
+  it.each(['failed', 'interrupted', 'merge_conflict'])(
+    'opens Logs for an idle Needs Attention task with %s status',
+    (status) => {
+      const onViewOutput = vi.fn();
+      render(
+        <CardActions
+          feature={{ id: 'attention-logs', status } as Feature}
+          isCurrentAutoTask={false}
+          onViewOutput={onViewOutput}
+          onFollowUp={vi.fn()}
+        />
+      );
+      fireEvent.click(screen.getByRole('button', { name: 'Logs' }));
+      expect(onViewOutput).toHaveBeenCalledOnce();
+    }
+  );
 
   it('allows replying to a failed backlog task without forcing Retry', () => {
     const reply = vi.fn();

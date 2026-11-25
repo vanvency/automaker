@@ -12,6 +12,7 @@ import path from 'path';
 import { FeatureLoader } from '../../../services/feature-loader.js';
 import { WorktreeResolver } from '../../../services/worktree-resolver.js';
 import { WorktreeRetentionService } from '../../../services/worktree-retention-service.js';
+import { assertWorkNotSnoozed } from '../../../services/work-snooze.js';
 
 /**
  * Run a command and capture stdout through a file. opencode output can exceed
@@ -206,6 +207,7 @@ export async function resolveFeatureWorkDir(
 ) {
   const feature = await featureLoader.get(projectPath, featureId);
   if (!feature) return null;
+  if (options.rebuild) await assertWorkNotSnoozed(projectPath, feature.branchName);
   let workDir = projectPath;
   if (feature.branchName) {
     const resolved = await new WorktreeResolver().findWorktreeForBranch(

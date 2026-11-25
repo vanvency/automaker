@@ -213,8 +213,10 @@ export class HerdrScheduler {
     // Jira already split this issue: those sub-tasks are the units of work, so the
     // leader must not invent a second split. They run in order, in this worktree,
     // because they all land on the same branch.
-    if (scope.kind === 'jira-subtasks') {
-      const tasks = buildTasksFromJiraSubtasks(scope.subtasks);
+    if (scope.kind === 'jira-subtasks' || scope.kind === 'approved-story') {
+      const tasks = buildTasksFromJiraSubtasks(
+        scope.kind === 'approved-story' ? [scope.story] : scope.subtasks
+      );
       const plan = tasks.map((task) => `- [ ] ${task.id}: ${task.description}`).join('\n');
       await this.options.persistTasks?.(projectPath, featureId, plan, tasks);
       this.emit('herdr_plan_ready', {
@@ -246,7 +248,8 @@ export class HerdrScheduler {
         tabId,
         rootPaneId: taskTab.rootPaneId,
         workDir,
-        subtasks: scope.subtasks,
+        subtasks: scope.kind === 'approved-story' ? [scope.story] : scope.subtasks,
+        approvedStory: scope.kind === 'approved-story',
         abortSignal,
         env,
       });
@@ -361,6 +364,7 @@ export class HerdrScheduler {
     rootPaneId: string;
     workDir: string;
     subtasks: JiraSubtask[];
+    approvedStory?: boolean;
     abortSignal?: AbortSignal;
     env?: Record<string, string>;
   }): Promise<{ aborted: boolean; worker: HerdrTaskAgent | null }> {
@@ -406,7 +410,9 @@ export class HerdrScheduler {
 
       const outcome = await this.taskService.promptAndWait(
         worker.paneId,
-        buildJiraSubtaskPrompt(subtask, index, subtasks.length, issueKey, featureId),
+        params.approvedStory
+          ? `The user approved implementing Jira Story ${issueKey} as this existing card in the Epic worktree. Do not split the Story or create cards. Implement only this Story's requirements and preserve other Story work on this branch. Run relevant checks, record real evidence (or blocked/skipped), and write this run's delivery receipt to .automaker/jira/${featureId}/jira-result.json with the executionRunId. Create or update Draft MRs for changed repositories; do not merge or change Jira status.`
+          : buildJiraSubtaskPrompt(subtask, index, subtasks.length, issueKey, featureId),
         { timeoutMs: DEFAULT_TURN_TIMEOUT_MS }
       );
 

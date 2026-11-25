@@ -414,7 +414,7 @@ export interface AppActions {
   // Project actions
   setProjects: (projects: Project[]) => void;
   addProject: (project: Project) => void;
-  removeProject: (projectId: string) => void;
+  removeProject: (projectId: string) => Promise<void>;
   moveProjectToTrash: (projectId: string) => void;
   restoreTrashedProject: (projectId: string) => void;
   deleteTrashedProject: (projectId: string) => void;

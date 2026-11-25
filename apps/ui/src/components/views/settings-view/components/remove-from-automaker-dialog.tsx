@@ -1,12 +1,13 @@
 import { Folder, LogOut } from 'lucide-react';
 import { ConfirmDialog } from '@/components/ui/confirm-dialog';
 import type { Project } from '@/lib/electron';
+import { toast } from 'sonner';
 
 interface RemoveFromAutomakerDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   project: Project | null;
-  onConfirm: (projectId: string) => void;
+  onConfirm: (projectId: string) => void | Promise<void>;
 }
 
 export function RemoveFromAutomakerDialog({
@@ -15,9 +16,13 @@ export function RemoveFromAutomakerDialog({
   project,
   onConfirm,
 }: RemoveFromAutomakerDialogProps) {
-  const handleConfirm = () => {
+  const handleConfirm = async () => {
     if (project) {
-      onConfirm(project.id);
+      try {
+        await onConfirm(project.id);
+      } catch (error) {
+        toast.error(error instanceof Error ? error.message : 'Failed to remove project');
+      }
     }
   };
 

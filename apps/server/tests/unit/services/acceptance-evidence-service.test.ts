@@ -54,6 +54,48 @@ describe('acceptance evidence import', () => {
     }
   });
 
+  it('imports legacy evidence without inventing missing capture or verification times', async () => {
+    const value = {
+      ...manifest(),
+      verifiedAt: undefined,
+      screenshots: manifest().screenshots.map((shot) => ({ ...shot, capturedAt: undefined })),
+    };
+    await writeFile(path.join(directory, 'manifest.json'), JSON.stringify(value));
+    const result = await collectAcceptanceEvidence(project, 'task-1', worktree);
+    expect(result?.screenshots).toHaveLength(2);
+    expect(result?.verifiedAt).toBeUndefined();
+    expect(result?.screenshots.every((shot) => shot.capturedAt === undefined)).toBe(true);
+    expect(Number.isFinite(Date.parse(result!.importedAt))).toBe(true);
+  });
+
+  it.each([undefined, null, '', '   '])(
+    'keeps unknown optional timestamps unknown: %j',
+    (value) => {
+      const result = parseAcceptanceManifest({
+        ...manifest(),
+        verifiedAt: value,
+        screenshots: manifest().screenshots.map((shot) => ({ ...shot, capturedAt: value })),
+      });
+      expect(result.verifiedAt).toBeUndefined();
+      expect(result.screenshots.every((shot) => shot.capturedAt === undefined)).toBe(true);
+    }
+  );
+
+  it.each(['not-a-date', 123, {}, []])(
+    'still rejects malformed supplied timestamps: %j',
+    (value) => {
+      expect(() => parseAcceptanceManifest({ ...manifest(), verifiedAt: value })).toThrow(
+        'verifiedAt'
+      );
+      expect(() =>
+        parseAcceptanceManifest({
+          ...manifest(),
+          screenshots: manifest().screenshots.map((shot) => ({ ...shot, capturedAt: value })),
+        })
+      ).toThrow('screenshots[0].capturedAt');
+    }
+  );
+
   it('ignores missing manifests and artifacts from previous executions', async () => {
     expect(await collectAcceptanceEvidence(project, 'other-task', worktree)).toBeNull();
     await utimes(path.join(directory, 'manifest.json'), 1, 1);

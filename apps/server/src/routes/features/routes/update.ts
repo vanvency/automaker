@@ -19,7 +19,8 @@ const SYNC_TRIGGER_STATUSES: FeatureStatus[] = ['verified', 'completed'];
 export function createUpdateHandler(
   featureLoader: FeatureLoader,
   events?: EventEmitter,
-  settingsService?: SettingsService
+  settingsService?: SettingsService,
+  isFeatureRunning: (projectPath: string, featureId: string) => Promise<boolean> = async () => false
 ) {
   return async (req: Request, res: Response): Promise<void> => {
     try {
@@ -60,6 +61,13 @@ export function createUpdateHandler(
           .json({ success: false, error: 'Restore the archived task before editing it' });
         return;
       }
+      if (updates.attentionOverride && (await isFeatureRunning(projectPath, featureId))) {
+        res.status(409).json({
+          success: false,
+          error: 'Stop the agent before moving this task.',
+        });
+        return;
+      }
       const newStatus = updates.status as FeatureStatus | undefined;
 
       const updated = await featureLoader.update(
@@ -79,7 +87,7 @@ export function createUpdateHandler(
       const freshJiraChanges = (updates.jiraChanges ?? []).filter(
         (change) => !previousChangeKeys.has(changeKey(change))
       );
-      if (freshJiraChanges.length > 0) {
+      if (freshJiraChanges.length > 0 && !updated.worktreeSnooze) {
         void notifyRunningAgentOfJiraChanges({
           projectPath,
           feature: updated,

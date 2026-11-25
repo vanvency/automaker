@@ -44,6 +44,17 @@ export function createUpdateGlobalHandler(settingsService: SettingsService) {
         });
         return;
       }
+      const removedProjectIds = req.body.removedProjectIds;
+      if (
+        removedProjectIds !== undefined &&
+        (!Array.isArray(removedProjectIds) ||
+          !removedProjectIds.every((id: unknown) => typeof id === 'string' && id.length > 0))
+      ) {
+        res
+          .status(400)
+          .json({ success: false, error: 'removedProjectIds must be an array of IDs' });
+        return;
+      }
 
       // Minimal debug logging to help diagnose accidental wipes.
       const projectsLen = Array.isArray(updates.projects) ? updates.projects.length : undefined;

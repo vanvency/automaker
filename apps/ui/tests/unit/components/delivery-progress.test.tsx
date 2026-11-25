@@ -56,14 +56,14 @@ describe('delivery progress', () => {
     );
     expect(await screen.findByRole('button', { name: '已发送修复请求' })).toBeInTheDocument();
   });
-  it('lets the operator retry Complete after a failed delivery', () => {
+  it('lets the operator retry Confirm after a failed delivery', () => {
     const retry = vi.fn();
     apiFetch.mockResolvedValue({
       ok: true,
       json: async () => ({ success: true, progress: initial }),
     });
     renderProgress(retry);
-    fireEvent.click(screen.getByRole('button', { name: '核对并重试 Complete' }));
+    fireEvent.click(screen.getByRole('button', { name: '核对并重试 Confirm' }));
     expect(retry).toHaveBeenCalledOnce();
   });
 });

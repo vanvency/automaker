@@ -24,7 +24,6 @@ import {
   Trash2,
   Search,
   X,
-  LayoutDashboard,
   type LucideIcon,
 } from 'lucide-react';
 import * as LucideIcons from 'lucide-react';
@@ -148,7 +147,7 @@ export function DashboardView() {
           description: `Opened ${name}`,
         });
 
-        navigate({ to: '/board' });
+        navigate({ to: '/worktrees' });
       } catch (error) {
         logger.error('[Dashboard] Failed to open project:', error);
         toast.error('Failed to open project', {
@@ -317,7 +316,7 @@ export function DashboardView() {
         description: `Created ${projectName}`,
       });
 
-      navigate({ to: '/board' });
+      navigate({ to: '/worktrees' });
     } catch (error) {
       logger.error('Failed to create project:', error);
       toast.error('Failed to create project', {
@@ -398,7 +397,7 @@ export function DashboardView() {
         description: `Created ${projectName} from ${template.name}`,
       });
 
-      navigate({ to: '/board' });
+      navigate({ to: '/worktrees' });
     } catch (error) {
       logger.error('Failed to create project from template:', error);
       toast.error('Failed to create project', {
@@ -475,7 +474,7 @@ export function DashboardView() {
         description: `Created ${projectName}`,
       });
 
-      navigate({ to: '/board' });
+      navigate({ to: '/worktrees' });
     } catch (error) {
       logger.error('Failed to create project from custom URL:', error);
       toast.error('Failed to create project', {
@@ -499,7 +498,7 @@ export function DashboardView() {
             aria-hidden="true"
           />
         )}
-        <div className="px-4 sm:px-8 py-4 flex items-center justify-between">
+        <div className="px-4 sm:px-8 py-4 flex items-center justify-between gap-2">
           <div
             className="flex items-center gap-2 sm:gap-3 cursor-pointer group titlebar-no-drag"
             onClick={() => navigate({ to: '/dashboard' })}
@@ -557,40 +556,17 @@ export function DashboardView() {
             </div>
           </div>
 
-          {/* Projects Overview button */}
           <Button
             variant="outline"
             size="sm"
             onClick={() => navigate({ to: '/' })}
-            className="titlebar-no-drag"
+            className="ml-auto titlebar-no-drag"
           >
-            首页
+            Home
           </Button>
-          {hasProjects && (
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => navigate({ to: '/overview' })}
-              className="hidden sm:flex gap-2 titlebar-no-drag"
-              data-testid="projects-overview-button"
-            >
-              <LayoutDashboard className="w-4 h-4" />
-              Overview
-            </Button>
-          )}
-
           {/* Mobile action buttons in header */}
           {hasProjects && (
             <div className="flex sm:hidden gap-2 titlebar-no-drag">
-              <Button
-                variant="outline"
-                size="icon"
-                onClick={() => navigate({ to: '/overview' })}
-                title="Projects Overview"
-                data-testid="projects-overview-button-mobile"
-              >
-                <LayoutDashboard className="w-4 h-4" />
-              </Button>
               <Button variant="outline" size="icon" onClick={handleOpenProject}>
                 <FolderOpen className="w-4 h-4" />
               </Button>

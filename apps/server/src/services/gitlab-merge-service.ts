@@ -27,9 +27,22 @@ export interface MergeRequestState {
   sourceBranch: string;
   targetBranch: string;
   sha?: string;
+  mergeCommitSha?: string;
+  squashCommitSha?: string;
   hasConflicts: boolean;
   mergeStatus?: string;
+  detailedMergeStatus?: string;
+  pipelineStatus?: string;
+  blockingDiscussionsResolved?: boolean;
   webUrl?: string;
+}
+
+export interface MergeRequestFeedback {
+  id: number;
+  body: string;
+  author: string;
+  updatedAt: string;
+  url: string;
 }
 
 export type FetchLike = (url: string, init?: RequestInit) => Promise<Response>;
@@ -124,17 +137,112 @@ export class GitLabMergeService {
       sourceBranch: String(data.source_branch ?? ''),
       targetBranch: String(data.target_branch ?? ''),
       sha: typeof data.sha === 'string' ? data.sha : undefined,
+      mergeCommitSha: typeof data.merge_commit_sha === 'string' ? data.merge_commit_sha : undefined,
+      squashCommitSha:
+        typeof data.squash_commit_sha === 'string' ? data.squash_commit_sha : undefined,
       hasConflicts: Boolean(data.has_conflicts),
       mergeStatus: typeof data.merge_status === 'string' ? data.merge_status : undefined,
+      detailedMergeStatus:
+        typeof data.detailed_merge_status === 'string' ? data.detailed_merge_status : undefined,
+      pipelineStatus: (data.head_pipeline as { status?: string } | undefined)?.status,
+      blockingDiscussionsResolved: data.blocking_discussions_resolved as boolean | undefined,
       webUrl: typeof data.web_url === 'string' ? data.web_url : undefined,
     };
+  }
+
+  /** Always fetch live discussions, including every page; omit resolved and outdated diff notes. */
+  async getReviewFeedback(url: string, sha?: string): Promise<MergeRequestFeedback[]> {
+    const mr = parseMergeRequestUrl(url);
+    if (!mr) throw new Error(`Unparseable MR URL: ${url}`);
+    const feedback: MergeRequestFeedback[] = [];
+    for (let page = 1; ; page++) {
+      const result = await this.request<
+        Array<{
+          notes: Array<{
+            id: number;
+            body: string;
+            system?: boolean;
+            resolved?: boolean;
+            author?: { username?: string };
+            updated_at?: string;
+            position?: { head_sha?: string };
+          }>;
+        }>
+      >(mr, `/discussions?per_page=100&page=${page}`);
+      if (!result.ok || !Array.isArray(result.data))
+        throw new Error(`Could not read MR review feedback: ${url}`);
+      for (const discussion of result.data) {
+        if (!Array.isArray(discussion.notes)) throw new Error('Invalid MR discussion response');
+        const root = discussion.notes[0];
+        if (root?.resolved || (sha && root?.position?.head_sha && root.position.head_sha !== sha))
+          continue;
+        for (const note of discussion.notes) {
+          if (
+            note.system ||
+            note.resolved ||
+            (sha && note.position?.head_sha && note.position.head_sha !== sha)
+          )
+            continue;
+          feedback.push({
+            id: note.id,
+            body: note.body,
+            author: note.author?.username ?? '',
+            updatedAt: note.updated_at ?? '',
+            url: `${url}#note_${note.id}`,
+          });
+        }
+      }
+      if (result.data.length < 100) break;
+    }
+    return feedback.sort((a, b) => a.id - b.id);
+  }
+
+  /** Read project policy as older GitLab versions omit detailed_merge_status. */
+  async getMergeBlockers(url: string, state: MergeRequestState): Promise<string[]> {
+    if (state.state === 'merged') return [];
+    const mr = parseMergeRequestUrl(url);
+    if (!mr) throw new Error(`Unparseable MR URL: ${url}`);
+    const response = await this.fetchImpl(
+      `${mr.host}/api/v4/projects/${encodeURIComponent(mr.project)}`,
+      {
+        headers: { 'PRIVATE-TOKEN': this.token },
+        redirect: 'error',
+        signal: AbortSignal.timeout(30000),
+      }
+    );
+    if (!response.ok) throw new Error(`Could not read MR merge policy: ${url}`);
+    const policy = (await response.json()) as {
+      only_allow_merge_if_pipeline_succeeds?: boolean;
+      only_allow_merge_if_all_discussions_are_resolved?: boolean;
+      allow_merge_on_skipped_pipeline?: boolean;
+    };
+    const blockers: string[] = [];
+    if (state.hasConflicts) blockers.push('MR 存在冲突');
+    if (state.draft) blockers.push('MR 仍为 Draft，请先 Approve MR');
+    if (
+      policy.only_allow_merge_if_pipeline_succeeds &&
+      state.pipelineStatus !== 'success' &&
+      !(state.pipelineStatus === 'skipped' && policy.allow_merge_on_skipped_pipeline)
+    )
+      blockers.push(`CI 尚未成功（${state.pipelineStatus ?? '无流水线'}）`);
+    if (
+      policy.only_allow_merge_if_all_discussions_are_resolved &&
+      state.blockingDiscussionsResolved === false
+    )
+      blockers.push('GitLab 要求先解决所有 review 讨论');
+    if (state.detailedMergeStatus && !['mergeable', 'not_open'].includes(state.detailedMergeStatus))
+      blockers.push(`GitLab 合并状态：${state.detailedMergeStatus}`);
+    return blockers.map((message) => `${url}: ${message}`);
   }
 
   /** Drop the `Draft:`/`WIP:` prefix so GitLab will accept a merge. */
   async markReady(url: string, currentTitle: string): Promise<{ ok: boolean; error?: string }> {
     const mr = parseMergeRequestUrl(url);
     if (!mr) return { ok: false, error: `Unparseable MR URL: ${url}` };
-    const title = currentTitle.replace(/^\s*(?:draft|wip)\s*:\s*/i, '').trim() || currentTitle;
+    const title =
+      currentTitle
+        .replace(/^\s*(?:(?:draft|wip)\s*:|\[(?:draft|wip)\]|\((?:draft|wip)\))\s*/i, '')
+        .trim() || currentTitle;
     if (title === currentTitle) return { ok: true };
     const result = await this.request(mr, '', {
       method: 'PUT',

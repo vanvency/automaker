@@ -365,11 +365,15 @@ export function ProjectContextMenu({
     setShowRemoveFromAutomakerDialog(true);
   };
 
-  const handleConfirmRemoveFromAutomaker = useCallback(() => {
-    removeProject(project.id);
-    toast.success('Project removed from Automaker', {
-      description: `${project.name} has been removed. The folder remains on disk.`,
-    });
+  const handleConfirmRemoveFromAutomaker = useCallback(async () => {
+    try {
+      await removeProject(project.id);
+      toast.success('Project removed from Automaker', {
+        description: `${project.name} has been removed. The folder remains on disk.`,
+      });
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'Failed to remove project');
+    }
   }, [removeProject, project.id, project.name]);
 
   const handleRemoveFromAutomakerDialogClose = useCallback(

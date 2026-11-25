@@ -88,4 +88,57 @@ describe('ui-cache-store worktree state hardening', () => {
     expect(didRestore).toBe(false);
     expect(appStoreSetState).not.toHaveBeenCalled();
   });
+
+  it('keeps navigation and subscribers working when storage is full, then retries persistence', () => {
+    const original = window.Storage.prototype.setItem;
+    const writes = vi
+      .spyOn(window.Storage.prototype, 'setItem')
+      .mockImplementation(function (key, value) {
+        if (key === 'automaker-ui-cache') {
+          throw new window.DOMException('Storage full', 'QuotaExceededError');
+        }
+        original.call(this, key, value);
+      });
+    const unsubscribeCache = useAppStore.subscribe(syncUICache);
+    const listener = vi.fn();
+    const unsubscribeListener = useAppStore.subscribe(listener);
+    const select = useAppStore.getState().setCurrentWorktree;
+
+    try {
+      expect(() => select('/quota', '/quota/a', 'branch-a')).not.toThrow();
+      expect(() => select('/quota', '/quota/b', 'branch-b')).not.toThrow();
+      expect(listener).toHaveBeenCalledTimes(2);
+      expect(useAppStore.getState().getCurrentWorktree('/quota')).toEqual({
+        path: '/quota/b',
+        branch: 'branch-b',
+      });
+      expect(useUICacheStore.getState().cachedCurrentWorktreeByProject['/quota']).toEqual({
+        path: '/quota/b',
+        branch: 'branch-b',
+      });
+
+      writes.mockRestore();
+      select('/quota', '/quota/c', 'branch-c');
+      expect(
+        JSON.parse(localStorage.getItem('automaker-ui-cache')!).state
+          .cachedCurrentWorktreeByProject['/quota']
+      ).toEqual({ path: '/quota/c', branch: 'branch-c' });
+    } finally {
+      unsubscribeCache();
+      unsubscribeListener();
+      writes.mockRestore();
+    }
+  });
+
+  it('tolerates access to localStorage being denied', async () => {
+    vi.spyOn(window, 'localStorage', 'get').mockImplementation(() => {
+      throw new window.DOMException('Denied', 'SecurityError');
+    });
+
+    await useUICacheStore.persist.rehydrate();
+    expect(useUICacheStore.persist.hasHydrated()).toBe(true);
+    expect(() => syncUICache({ sidebarOpen: false })).not.toThrow();
+    expect(useUICacheStore.getState().cachedSidebarOpen).toBe(false);
+    expect(() => useUICacheStore.persist.clearStorage()).not.toThrow();
+  });
 });

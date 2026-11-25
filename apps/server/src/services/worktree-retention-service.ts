@@ -221,6 +221,8 @@ export class WorktreeRetentionService {
     workDir: string,
     context: { days: number; now: Date; running: Set<string> }
   ): Promise<{ doneAt: string } | { reason: string }> {
+    if (cards.some((card) => card.worktreeSnooze))
+      return { reason: 'Work is snoozed; its checkout is retained' };
     const active = cards.filter(
       (card) => card.status !== 'verified' && card.status !== 'completed'
     );
@@ -246,6 +248,8 @@ export class WorktreeRetentionService {
       (card) => card.branchName === candidate.branch
     );
     if (cards.length === 0) throw new Error('分支上已没有卡片');
+    if (cards.some((card) => card.worktreeSnooze))
+      throw new Error('Work was snoozed; its checkout must be retained');
 
     // The preview is bookkept by checkout path, so it has to go first; the
     // delivery flow already knows how to leave another task's preview alone.

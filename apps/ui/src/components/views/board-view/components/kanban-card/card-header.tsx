@@ -4,7 +4,7 @@ import { Feature } from '@/store/app-store';
 import { cn } from '@/lib/utils';
 import { CardDescription, CardHeader } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
-import { cardPreviewText } from './card-preview-text';
+import { cardPreviewText, jiraRequirementText } from './card-preview-text';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -29,6 +29,7 @@ import { CountUpTimer } from '@/components/ui/count-up-timer';
 import { formatModelName, DEFAULT_MODEL } from '@/lib/agent-context-parser';
 import { getProviderIconForModel } from '@/components/ui/provider-icon';
 import { useAppStore } from '@/store/app-store';
+import { isNeedsAttentionStatus } from '../../constants';
 
 function DuplicateMenuItems({
   onDuplicate,
@@ -137,7 +138,11 @@ export const CardHeaderSection = memo(function CardHeaderSection({
   dragHandleListeners,
   dragHandleAttributes,
 }: CardHeaderProps) {
-  const showBacklogLogsButton = hasContext && !!onViewOutput;
+  const showBacklogLogsButton =
+    hasContext &&
+    !!onViewOutput &&
+    !isNeedsAttentionStatus(feature.status) &&
+    !feature.error?.trim();
 
   // Get providers from store for provider-aware model name display
   // This allows formatModelName to show provider-specific model names (e.g., "GLM 4.7" instead of "Sonnet 4.5")
@@ -519,10 +524,12 @@ export const CardHeaderSection = memo(function CardHeaderSection({
         <div className="flex-1 min-w-0 overflow-hidden">
           <CardDescription
             className={cn(
-              'text-xs leading-snug break-words hyphens-auto overflow-hidden text-muted-foreground line-clamp-3'
+              'text-xs leading-snug break-words hyphens-auto overflow-hidden line-clamp-3 text-muted-foreground'
             )}
           >
-            {cardPreviewText(feature)}
+            {feature.jiraKey || feature.jiraImported
+              ? jiraRequirementText(feature)
+              : cardPreviewText(feature)}
           </CardDescription>
           {onOpenDetails && (
             <button

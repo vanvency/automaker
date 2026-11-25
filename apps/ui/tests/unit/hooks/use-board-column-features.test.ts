@@ -501,6 +501,51 @@ describe('useBoardColumnFeatures', () => {
     });
   });
 
+  it('scopes archives to the selected worktree, including legacy completed deliveries', () => {
+    const deliveryCompletion: Feature['deliveryCompletion'] = {
+      status: 'succeeded',
+      updatedAt: new Date().toISOString(),
+      steps: [],
+    };
+    const features = [
+      createMockFeature('delivered', 'completed', { branchName: 'task/a', deliveryCompletion }),
+      createMockFeature('archived-a', 'completed', {
+        branchName: 'task/a',
+        deliveryCompletion,
+        archive: {
+          reason: 'obsolete',
+          description: 'Requirement no longer needed',
+          previousStatus: 'completed',
+          archivedAt: new Date().toISOString(),
+        },
+      }),
+      createMockFeature('legacy-b', 'completed', { branchName: 'task/b' }),
+      createMockFeature('unassigned', 'completed'),
+    ];
+    const { result, rerender } = renderHook(
+      (worktree: { currentWorktreePath: string | null; currentWorktreeBranch: string | null }) =>
+        useBoardColumnFeatures({ ...defaultProps, features, ...worktree }),
+      {
+        initialProps: {
+          currentWorktreePath: '/test/project/.worktrees/a',
+          currentWorktreeBranch: 'task/a',
+        },
+      }
+    );
+    expect(result.current.completedFeatures.map((f) => f.id)).toEqual(['delivered', 'archived-a']);
+    expect(result.current.columnFeaturesMap.verified).toEqual([]);
+
+    rerender({
+      currentWorktreePath: '/test/project/.worktrees/b',
+      currentWorktreeBranch: 'task/b',
+    });
+    expect(result.current.completedFeatures.map((f) => f.id)).toEqual(['legacy-b']);
+    expect(result.current.columnFeaturesMap.verified).toEqual([]);
+
+    rerender({ currentWorktreePath: null, currentWorktreeBranch: 'main' });
+    expect(result.current.completedFeatures.map((f) => f.id)).toEqual(['unassigned']);
+  });
+
   describe('debug logging', () => {
     it('should log debug message when recently completed feature is skipped from backlog', () => {
       const debugSpy = vi.spyOn(console, 'debug').mockImplementation(() => {});

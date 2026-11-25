@@ -457,6 +457,7 @@ export const KanbanBoard = memo(function KanbanBoard({
                               size="sm"
                               className="h-6 w-6 p-0 relative"
                               onClick={onShowCompletedModal}
+                              aria-label="Archived Tasks"
                               data-testid="completed-features-button"
                             >
                               <Archive className="w-3.5 h-3.5 text-muted-foreground" />
@@ -468,7 +469,7 @@ export const KanbanBoard = memo(function KanbanBoard({
                             </Button>
                           </TooltipTrigger>
                           <TooltipContent>
-                            <p>Completed Features ({completedCount})</p>
+                            <p>Archived Tasks ({completedCount})</p>
                           </TooltipContent>
                         </Tooltip>
                       </div>

@@ -21,17 +21,26 @@ def identity(config, issue_id):
         separators=(',', ':')).encode()).hexdigest()
 
 
-METADATA_FIELDS = ('title', 'jiraKey', 'jiraUrl', 'jiraIssueId', 'jiraInstanceUrl',
-                   'jiraType', 'jiraLabels', 'jiraAssignee', 'jiraSubtasks',
+METADATA_FIELDS = ('title', 'jiraSummary', 'jiraKey', 'jiraUrl', 'jiraIssueId', 'jiraInstanceUrl',
+                   'jiraType', 'jiraLabels', 'jiraAssignee', 'jiraAssigneeDisplayName',
+                   'jiraReporter', 'jiraReporterDisplayName', 'jiraSubtasks',
                    'parentJiraKey', 'epicJiraKey', 'issueType', 'jiraStatus', 'jiraDelivery')
 
 
-def changes_for(existing, card, run_id):
+def changes_for(existing, card, run_id, previous_dependency_ids=()):
     """Only Jira-owned fields. Execution/session/acceptance fields never enter updates."""
     if existing.get('archive') or existing.get('supersededBy') or existing.get('consolidationPlanId'):
         return {}
     updates = {k: card[k] for k in METADATA_FIELDS
                if k in card and existing.get(k) != card[k]}
+    if 'blockedBy' in (card.get('jiraDelivery') or {}):
+        old_keys = (existing.get('jiraDelivery') or {}).get('blockedBy') or []
+        managed = set(old_keys) | set(previous_dependency_ids)
+        remaining = [item for item in existing.get('dependencies') or []
+                     if item not in managed]
+        desired = list(dict.fromkeys(remaining + card.get('dependencies', [])))
+        if existing.get('dependencies') != desired:
+            updates['dependencies'] = desired
     old_context = existing.get('jiraContext') or {}
     new_context = card.get('jiraContext') or {}
     if old_context.get('version') != new_context.get('version'):
@@ -42,6 +51,8 @@ def changes_for(existing, card, run_id):
                          and not existing.get('summary'))
         if never_started:
             updates['description'] = card['description']
+            if 'jiraExecutionInstructions' in card:
+                updates['jiraExecutionInstructions'] = card['jiraExecutionInstructions']
         else:
             updates['jiraPendingDescription'] = card['description']
     if updates:
@@ -89,15 +100,19 @@ def delivery_plan(config, root_key, features, label):
     fields = detail.get('fields') or {}
     # Children carry no dispatch label of their own, so the split is scanned from
     # the Jira hierarchy instead of from the labelled sweep.
-    subtasks = monitor.descendant_subtasks(config, detail)
+    # Linked Stories are separate delivery cards; the Epic only owns direct Jira subtasks.
+    subtasks = (monitor.issue_subtasks(fields) if monitor.issue_type(fields) == 'Epic'
+                else monitor.descendant_subtasks(config, detail))
     chain = monitor.jira_lineage(config, root_key) or {}
     # Delivery scope stays on this issue, but its workspace belongs to the Epic.
     # Existing divergent branches need an explicit, content-preserving migration;
     # never silently move a live/dirty checkout during a Jira metadata sync.
     anchor = chain.get('epic') or detail
-    root_card = next((f for f in features if f.get('jiraKey') == root_key), None)
+    root_card = next((f for f in features if f.get('jiraKey') == root_key
+                      and not f.get('archive')), None)
     anchor_card = next((f for f in features
-                        if f.get('jiraKey') == anchor['key'] and f.get('branchName')), None)
+                        if f.get('jiraKey') == anchor['key'] and f.get('branchName')
+                        and not f.get('archive')), None)
     shared_card = anchor_card or next((f for f in features
         if f.get('epicJiraKey') == anchor['key'] and f.get('branchName')
         and anchor['key'].lower() in f['branchName'].lower()
@@ -113,14 +128,27 @@ def delivery_plan(config, root_key, features, label):
     feature_id = f'jira-{label}-{root_key.lower()}'
     context_path = f'.automaker/jira-context/{feature_id}/context.md'
     requires_decision = monitor.is_parent_issue(detail) and not subtasks
-    description = monitor.task_description(
+    execution_prompt = monitor.task_description(
         detail, dict(config, subtaskCards=False), worktree, branch,
         detail=detail, allow_decomposition=False, subtasks=subtasks)
+    instructions, snapshot_text = execution_prompt.split('Initial Jira snapshot (refresh before implementing):', 1)
+    snapshot = json.loads(snapshot_text)
+    # Requirements remain readable/editable; retain attachments and other source
+    # fields in the execution contract without repeating the requirement body.
+    snapshot.pop('description', None)
+    snapshot.pop('summary', None)
+    description = fields.get('description') or ''
+    if not isinstance(description, str):
+        description = json.dumps(description, ensure_ascii=False, indent=2)
+    description = description.strip() or fields.get('summary') or root_key
+    instructions = instructions.strip() + '\n\nAdditional Jira context:\n' + json.dumps(snapshot, ensure_ascii=False)
     delivery = {
         'issueKey': root_key, 'subtaskKeys': [s['key'] for s in subtasks],
         'branch': branch, 'worktree': worktree, 'requiresDecision': requires_decision,
         'rule': 'parent-with-jira-subtasks',
     }
+    if monitor.issue_type(fields) == 'Story':
+        delivery['blockedBy'] = monitor.blocked_by_keys(detail)
     if branch != expected_branch:
         delivery['worktreeMismatch'] = {
             'epicKey': anchor['key'], 'currentBranch': branch,
@@ -137,37 +165,249 @@ def delivery_plan(config, root_key, features, label):
     return {'cards': [{
         'id': feature_id, 'jiraKey': root_key, 'jiraUrl': config['jiraUrl'] + '/browse/' + root_key,
         'title': f'{root_key}: {fields.get("summary") or ""}', 'category': f'Jira {config["jiraProject"]} / {label}',
+        'jiraSummary': fields.get('summary') or root_key,
+        'jiraExecutionInstructions': instructions,
         'status': 'backlog', 'branchName': branch, 'worktree': worktree,
         'description': description, 'model': config['model'],
         'reasoningEffort': config['reasoningEffort'], 'planningMode': 'skip',
         'skipTests': False, 'requirePlanApproval': False,
         'jiraType': monitor.jira_work_type(monitor.issue_type(fields), config),
         'issueType': monitor.issue_type(fields), 'jiraLabels': monitor.issue_labels(fields),
-        'jiraSubtasks': subtasks, 'jiraAssignee': monitor.issue_assignee(fields)[0] or None,
+        'jiraSubtasks': subtasks, **monitor.issue_people(fields),
         'epicJiraKey': (chain.get('epic') or {}).get('key'),
         'parentJiraKey': (chain.get('epic') or {}).get('key'),
-        'jiraImported': True, 'jiraDelivery': delivery, 'dependencies': [],
+        'jiraImported': True, 'jiraDelivery': delivery,
+        'dependencies': delivery.get('blockedBy', []),
         # Policy version forces old unsafe prompts into pending review, never replacing an active prompt.
-        'jiraContext': {'version': 'parent-delivery-v1:' + version,
+        'jiraContext': {'version': 'readable-description-v2:' + version,
                         'path': context_path, 'syncedAt': monitor.now()},
         'contextMarkdown': monitor.lineage_context_markdown(chain or {'task': detail}, config),
     }]}
+
+
+def snoozed_branches(config):
+    path = Path(config['projectPath']) / '.automaker/work-snoozes.json'
+    try:
+        value = json.loads(path.read_text())
+    except FileNotFoundError:
+        return set()
+    if not isinstance(value, dict):
+        raise ValueError('Invalid work snooze state')
+    return set(value)
+
+
+class ResetBlocked(Exception):
+    pass
+
+
+def reset_plan(config, api, feature_id, attempt=0):
+    """Read the live Jira issue and verify the old checkout is exclusively owned."""
+    features = api.call('features/list', {'projectPath': config['projectPath']}).get('features', [])
+    old = next((f for f in features if f.get('id') == feature_id), None)
+    if not old or not old.get('jiraKey') or old.get('archive'):
+        raise ResetBlocked('Select an active Jira work')
+    issue = monitor.issue_detail(config, old['jiraKey'])
+    if not issue or not issue.get('id') or (
+            old.get('jiraIssueId') and str(issue['id']) != str(old['jiraIssueId'])):
+        raise ResetBlocked('Jira issue identity changed; reset is unavailable')
+    old_site = old.get('jiraInstanceUrl') or old.get('jiraUrl', '').split('/browse/')[0]
+    if old_site.rstrip('/') != config['jiraUrl'].rstrip('/'):
+        raise ResetBlocked('Jira site does not match this work')
+    if any(f.get('id') != feature_id and f.get('branchName') == old.get('branchName')
+           for f in features):
+        raise ResetBlocked('The old worktree belongs to another work')
+    if any(f.get('id') != feature_id and f.get('jiraIssueId') == old.get('jiraIssueId')
+           and not f.get('archive') for f in features):
+        raise ResetBlocked('Another active work owns this Jira issue')
+    if old.get('status') == 'in_progress' or str(old.get('status', '')).startswith('pipeline_'):
+        raise ResetBlocked('Stop the agent before resetting this work')
+    if feature_id in api.call('auto-mode/status', {}).get('runningFeatures', []):
+        raise ResetBlocked('Stop the running agent before resetting this work')
+    label = (monitor.issue_mode(issue, config) or ('manual', 'manual'))[1]
+    # Exclude the old card: delivery_plan must build from Jira rather than reuse its branch.
+    card = delivery_plan(config, old['jiraKey'], [f for f in features if f['id'] != feature_id], label)['cards'][0]
+    original_id = card['id']
+    old_branch = old.get('branchName')
+    if not old_branch:
+        raise ResetBlocked('Old worktree identity is missing')
+    old_tree = Path(monitor.worktree_path_for_branch(
+        config, old_branch, old.get('jiraDelivery', {}).get('worktree', ''))).resolve()
+    project = Path(config['projectPath']).resolve()
+    if project not in old_tree.parents or old_tree == project or not old_tree.is_dir():
+        raise ResetBlocked('Old worktree is outside this project')
+    snapshot = hashlib.sha256(json.dumps({
+        'issue': issue, 'context': card['jiraContext']['version'],
+        'oldId': feature_id, 'oldBranch': old_branch, 'oldStatus': old.get('status'),
+        'oldTree': str(old_tree), 'attempt': attempt,
+    }, sort_keys=True, ensure_ascii=False).encode()).hexdigest()
+    previous_worktree = card['worktree']
+    branch = card['branchName'] + '-reset-' + snapshot[:8]
+    card['branchName'] = branch
+    card['worktree'] = monitor.worktree_path_for_branch(
+        config, branch, str(project / '.worktrees' / branch.replace('/', '-')))
+    card['id'] = 'jira-reset-' + snapshot[:24]
+    context_path = f".automaker/jira-context/{card['id']}/context.md"
+    old_context = card['jiraContext']['path']
+    card['jiraContext']['path'] = context_path
+    for key in ('description', 'jiraExecutionInstructions'):
+        if key in card:
+            card[key] = card[key].replace(old_context, context_path).replace(original_id, card['id'])
+            previous_branch = card.get('jiraDelivery', {}).get('branch')
+            if previous_branch:
+                card[key] = card[key].replace(previous_branch, branch)
+            card[key] = card[key].replace(previous_worktree, card['worktree'])
+    card['jiraDelivery'].update(branch=branch, worktree=card['worktree'])
+    card.update(jiraIssueId=str(issue['id']), jiraInstanceUrl=config['jiraUrl'].rstrip('/'),
+                jiraStatus=(issue.get('fields', {}).get('status') or {}).get('name', ''))
+    # Include the current Jira content in the preview token to catch edits before confirmation.
+    return old, old_tree, card, snapshot
+
+
+def reset_work(config, api, state, state_path, request):
+    feature_id = request['featureId']
+    attempt = state.get('resetAttempts', {}).get(feature_id, 0)
+    old, old_tree, card, snapshot = reset_plan(config, api, feature_id, attempt)
+    if request['mode'] == 'reset-preview':
+        dirty = monitor.checked(['git', 'status', '--porcelain'], str(old_tree), 30)
+        return {'message': 'Fresh Jira snapshot ready', 'changes': [],
+                'reset': {'featureId': feature_id, 'issueKey': old['jiraKey'],
+                          'title': card['title'], 'newBranch': card['branchName'],
+                          'oldBranch': old['branchName'], 'oldWorktree': str(old_tree),
+                          'hasLocalChanges': bool(dirty.strip()), 'snapshot': snapshot}}
+    if request.get('snapshot') != snapshot:
+        raise ResetBlocked('Jira or work changed since preview; preview reset again')
+    # Worktree removal is the only destructive step. Make the new card and checkout first.
+    if not old_tree.is_dir():
+        raise ResetBlocked('Old worktree is missing; inspect it before resetting')
+    active_tree = monitor.checked(['git', 'worktree', 'list', '--porcelain'], config['projectPath'], 30)
+    if f'worktree {old_tree}\n' not in active_tree:
+        raise ResetBlocked('Old directory is not a registered Git worktree')
+    old_head = monitor.checked(['git', 'branch', '--show-current'], str(old_tree), 30).strip()
+    if old_head != old['branchName']:
+        raise ResetBlocked('Old worktree branch changed; preview reset again')
+    if Path(card['worktree']).exists() or monitor.command(
+            ['git', 'show-ref', '--verify', '--quiet', 'refs/heads/' + card['branchName']],
+            config['projectPath'], 30).returncode == 0:
+        raise ResetBlocked('A reset branch already exists; inspect the previous reset before retrying')
+    new_tree_created = new_card_created = archive_started = False
+    try:
+        monitor.ensure_worktree_for_branch(config, card['branchName'], card['worktree'])
+        new_tree_created = True
+        feature = {k: v for k, v in card.items()
+                   if k not in ('contextMarkdown', 'worktree', 'mode', 'storyJiraKey')}
+        feature['jiraSyncHistory'] = [{
+            'runId': request['runId'], 'at': monitor.now(), 'actor': 'jira-reset',
+            'action': 'create', 'fields': list(METADATA_FIELDS),
+            'reason': f"Reset from {feature_id}; fresh Jira snapshot",
+        }]
+        api.call('features/create', {'projectPath': config['projectPath'], 'feature': feature})
+        new_card_created = True
+        context = Path(card['worktree']) / card['jiraContext']['path']
+        context.parent.mkdir(parents=True, exist_ok=True)
+        context.write_text(card['contextMarkdown'])
+        api.call('worktree/preview-stop', {'projectPath': config['projectPath'], 'worktreePath': str(old_tree)})
+        archive_started = True
+        api.call('features/archive', {'projectPath': config['projectPath'], 'featureId': feature_id,
+                                      'archive': {'reason': 'deferred',
+                                                  'description': f"Reset from latest Jira into {card['id']}; old checkout and agent conversation abandoned."}})
+    except Exception:
+        if archive_started:
+            try:
+                current = api.call('features/get', {'projectPath': config['projectPath'],
+                                                    'featureId': feature_id}).get('feature') or {}
+            except Exception as error:
+                raise ResetBlocked('Archive result is uncertain; inspect both works before retrying') from error
+            if not current:
+                raise ResetBlocked('Archive result is uncertain; inspect both works before retrying')
+            if not current.get('archive'):
+                archive_started = False
+        if not archive_started:
+            # Preserve history while keeping the old task usable if its archive failed.
+            # A new attempt gets a fresh branch and identity; no abandoned session is reused.
+            if new_card_created:
+                try:
+                    api.call('features/archive', {'projectPath': config['projectPath'],
+                                                  'featureId': card['id'],
+                                                  'archive': {'reason': 'deferred',
+                                                              'description': 'Reset failed before replacing the old work; abandoned attempt.'}})
+                except Exception:
+                    pass
+            if new_tree_created:
+                try:
+                    monitor.checked(['git', 'worktree', 'remove', '--force', card['worktree']],
+                                    config['projectPath'], 120)
+                    monitor.checked(['git', 'branch', '-D', card['branchName']],
+                                    config['projectPath'], 30)
+                except Exception:
+                    pass
+            state.setdefault('resetAttempts', {})[feature_id] = attempt + 1
+            monitor.save(state_path, state)
+            raise
+    job = state.setdefault('jobs', {}).setdefault(old['jiraKey'], {})
+    job.clear()
+    job.update(featureId=card['id'], worktree=card['worktree'], branch=card['branchName'],
+               identity=identity(config, card['jiraIssueId']), issueId=card['jiraIssueId'],
+               status='ready')
+    state.setdefault('identities', {})[job['identity']] = card['id']
+    monitor.save(state_path, state)
+    try:
+        monitor.checked(['git', 'worktree', 'remove', '--force', str(old_tree)],
+                        config['projectPath'], 120)
+    except Exception as error:
+        raise ResetBlocked('New work was created and old work archived, but old worktree cleanup failed; inspect before retrying') from error
+    return {'message': f"Reset {old['jiraKey']} from the latest Jira snapshot",
+            'changes': [{'issueKey': old['jiraKey'], 'featureId': card['id'],
+                         'action': 'create', 'reason': 'Work reset from Jira'}],
+            'reset': {'featureId': card['id'], 'worktree': card['worktree']}}
 
 
 def build_plan(config, api, state, run_id):
     # Managed sync always follows the Jira-subtask delivery policy. The
     # hierarchy-import switches are only for explicit CLI tree imports.
     config = dict(config, executionUnit='story', worktreeScope='epic', subtaskCards=False)
-    issues = monitor.search(config)
+    issues = list(monitor.search(config))
+    inherited = {}
+    seen_keys = {issue.get('key') for issue in issues}
+    for epic in list(issues):
+        if monitor.issue_type(epic.get('fields') or {}) != 'Epic':
+            continue
+        mode = monitor.issue_mode(epic, config)
+        if not mode:
+            continue
+        for jql in (f'"Epic Link" = {epic["key"]}', f'parent = {epic["key"]}'):
+            children = monitor.search_jql(config, jql, limit=201)
+            if len(children) >= 201:
+                raise RuntimeError(f'More than 200 Stories linked to {epic["key"]}; narrow the Jira scope')
+            for child in children:
+                key = child.get('key')
+                if not key or key in seen_keys:
+                    continue
+                detail = monitor.issue_detail(config, key)
+                if not detail:
+                    raise RuntimeError(f'Cannot verify Epic-linked issue {key}; retry Jira sync')
+                fields = detail.get('fields') or {}
+                if monitor.issue_type(fields) != 'Story':
+                    continue
+                if (monitor.epic_link_key(fields, config) != epic['key']
+                        and ((fields.get('parent') or {}).get('key') != epic['key'])):
+                    continue
+                if not monitor.issue_mode({**detail, 'fields': {
+                        **fields, 'labels': list(fields.get('labels') or []) + [mode[1]]}}, config):
+                    continue
+                seen_keys.add(key)
+                issues.append(detail)
+                inherited[key] = mode[1]
     features = api.call('features/list', {'projectPath': config['projectPath']}).get('features', [])
     plans, changes, seen = [], [], set()
     for issue in issues:
         fields = issue.get('fields') or {}
-        if fields.get('parent') or monitor.is_subtask_issue(issue):
+        if monitor.is_subtask_issue(issue) or (
+                fields.get('parent') and monitor.issue_type(fields) not in ('Epic', 'Story')):
             changes.append({'issueKey': issue['key'], 'action': 'skip',
                             'reason': 'Subtask is imported through its parent; no independent root card'})
             continue
-        mode, label = monitor.issue_mode(issue, config)
+        mode, label = (('manual', inherited[issue['key']]) if issue['key'] in inherited
+                       else monitor.issue_mode(issue, config))
         plan = delivery_plan(config, issue['key'], features, label)
         if plan.get('error'):
             raise RuntimeError(plan['error'])
@@ -187,15 +427,21 @@ def build_plan(config, api, state, run_id):
                  and f.get('jiraInstanceUrl') == card['jiraInstanceUrl'])
                 or (not f.get('jiraIssueId') and f.get('jiraKey') == card['jiraKey']
                     and str(f.get('jiraUrl', '')).startswith(config['jiraUrl'].rstrip('/') + '/')))]
-            if len(matches) > 1:
+            active_matches = [f for f in matches if not f.get('archive')]
+            if len(active_matches) > 1:
                 changes.append({'issueKey': card['jiraKey'], 'action': 'blocked',
                                 'reason': 'Multiple existing cards match this issue; manual reconciliation required'})
                 continue
-            existing = matches[0] if matches else None
+            existing = active_matches[0] if active_matches else (matches[0] if matches else None)
             if existing and (existing.get('archive') or existing.get('supersededBy') or existing.get('consolidationPlanId')):
                 changes.append({'issueKey': card['jiraKey'], 'featureId': existing['id'],
                                 'action': 'skip', 'reason': 'Human-confirmed coverage or consolidation lock; never redispatch'})
                 continue
+            approved = (existing or {}).get('jiraDelivery', {}).get('storyExecutionApproved') is True
+            if (card.get('issueType') == 'Story' and approved
+                    and card.get('epicJiraKey') and card['jiraDelivery']['requiresDecision']):
+                card['jiraDelivery']['storyExecutionApproved'] = True
+                card['jiraDelivery']['requiresDecision'] = False
             legacy_job = state.get('jobs', {}).get(card['jiraKey'], {})
             if not existing and legacy_job.get('status') in ('collapsed_into_parent', 'missing_feature'):
                 changes.append({'issueKey': card['jiraKey'], 'action': 'skip',
@@ -211,14 +457,15 @@ def build_plan(config, api, state, run_id):
                 card['id'] = 'jira-' + ident[:24]
             original_context = card['jiraContext']['path']
             card['jiraContext']['path'] = f".automaker/jira-context/{card['id']}/context.md"
-            card['description'] = card['description'].replace(original_context, card['jiraContext']['path'])
-            card['description'] = card['description'].replace(original_id, card['id'])
+            prompt_field = 'jiraExecutionInstructions' if 'jiraExecutionInstructions' in card else 'description'
+            card[prompt_field] = card[prompt_field].replace(original_context, card['jiraContext']['path'])
+            card[prompt_field] = card[prompt_field].replace(original_id, card['id'])
             # Configurable target branch must also reach generated delivery instructions.
-            card['description'] = card['description'].replace('targeting dev', 'targeting ' + config['targetBranch'])
-            card['description'] = card['description'].replace('origin dev', 'origin ' + config['targetBranch'])
-            card['description'] = card['description'].replace('origin/dev', 'origin/' + config['targetBranch'])
-            card['description'] = card['description'].replace('MR to dev', 'MR to ' + config['targetBranch'])
-            card['description'] = card['description'].replace('modify dev directly', 'modify ' + config['targetBranch'] + ' directly')
+            card[prompt_field] = card[prompt_field].replace('targeting dev', 'targeting ' + config['targetBranch'])
+            card[prompt_field] = card[prompt_field].replace('origin dev', 'origin ' + config['targetBranch'])
+            card[prompt_field] = card[prompt_field].replace('origin/dev', 'origin/' + config['targetBranch'])
+            card[prompt_field] = card[prompt_field].replace('MR to dev', 'MR to ' + config['targetBranch'])
+            card[prompt_field] = card[prompt_field].replace('modify dev directly', 'modify ' + config['targetBranch'] + ' directly')
             if card.get('jiraDelivery'):
                 card['jiraDelivery'].update(branch=card['branchName'], worktree=card['worktree'])
                 # Existing independent subtask cards must not be silently absorbed and executed twice.
@@ -242,19 +489,37 @@ def build_plan(config, api, state, run_id):
             change_index = len(changes)
             changes.append(entry)
             card_mode = monitor.issue_mode(detail, config)
-            dispatch_mode = card_mode[0] if card_mode else mode
+            dispatch_mode = ('auto' if approved and card['jiraKey'] in inherited
+                             else 'manual' if card['jiraKey'] in inherited
+                             else card_mode[0] if card_mode else mode)
             plans.append({'card': card, 'existing': existing, 'updates': updates,
                           'identity': ident, 'startMode': dispatch_mode, 'changeIndex': change_index,
                           'originalId': original_id})
     ids = {entry['originalId']: entry['card']['id'] for entry in plans}
+    issue_ids = {entry['card']['jiraKey']: entry['card']['id'] for entry in plans}
+    issue_ids.update({f['jiraKey']: f['id'] for f in features if f.get('jiraKey') and not f.get('archive')})
     for entry in plans:
-        entry['card']['dependencies'] = [ids.get(key, key) for key in entry['card'].get('dependencies', [])]
+        card = entry['card']
+        card['dependencies'] = [issue_ids.get(key, ids.get(key, key))
+                                for key in card.get('dependencies', [])]
+        if entry['existing']:
+            old_keys = (entry['existing'].get('jiraDelivery') or {}).get('blockedBy') or []
+            old_ids = [issue_ids.get(key, key) for key in old_keys]
+            entry['updates'] = changes_for(entry['existing'], card, run_id, old_ids)
+            change = changes[entry['changeIndex']]
+            change['action'] = 'update' if entry['updates'] else 'skip'
+            change['fields'] = sorted(k for k in entry['updates'] if k != 'jiraSyncHistory')
+            if entry['updates'] and change['reason'] in ('Already synchronized', 'Jira fields changed'):
+                change['reason'] = 'Jira fields changed'
     # Report possible dispatches in preview using exactly the same admission rules.
     running = api.call('auto-mode/status', {}).get('runningFeatures', [])
     active_branches = {f.get('branchName') for f in features if f.get('id') in running}
     count = 0
+    snoozed = snoozed_branches(config)
     for entry in plans:
         existing = entry['existing']
+        if entry['card']['branchName'] in snoozed or (existing and existing.get('worktreeSnooze')):
+            continue
         job = state.get('jobs', {}).get(entry['card']['jiraKey'], {})
         if (config.get('autoStart') and entry['startMode'] == 'auto'
                 and not entry['card'].get('jiraDelivery', {}).get('requiresDecision')
@@ -313,6 +578,8 @@ def apply_plan(config, api, state, state_path, entries, run_id):
                 context.parent.mkdir(parents=True, exist_ok=True)
                 context.write_text(card['contextMarkdown'])
         if entry.get('dispatch'):
+            if card['branchName'] in snoozed_branches(config):
+                continue
             if card.get('jiraDelivery', {}).get('worktreeMismatch'):
                 continue
             running = api.call('auto-mode/status', {}).get('runningFeatures', [])
@@ -374,6 +641,8 @@ def run(request):
     state_path = Path(request['statePath'])
     state = json.loads(state_path.read_text()) if state_path.exists() else {'jobs': {}}
     api = ManagedAPI(config, state, state_path)
+    if mode in ('reset-preview', 'reset'):
+        return reset_work(config, api, state, state_path, request)
     entries, changes = build_plan(config, api, state, request['runId'])
     if mode == 'sync':
         apply_plan(config, api, state, state_path, entries, request['runId'])
@@ -395,7 +664,8 @@ def run(request):
                     continue
                 raise
             current_run = feature.get('executionRunId')
-            if feature.get('archive') or feature.get('supersededBy') or feature.get('consolidationPlanId'):
+            if (feature.get('archive') or feature.get('supersededBy') or
+                    feature.get('consolidationPlanId') or feature.get('worktreeSnooze')):
                 continue
             if not current_run:
                 continue
@@ -471,7 +741,8 @@ if __name__ == '__main__':
         main()
     except Exception as error:
         # Do not include command output, auth headers or expanded config in the response.
-        message = ('Jira CLI site differs from configured URL' if isinstance(error, ValueError) and 'CLI login' in str(error)
+        message = (str(error) if isinstance(error, ResetBlocked)
+                   else 'Jira CLI site differs from configured URL' if isinstance(error, ValueError) and 'CLI login' in str(error)
                    else 'Another Jira operation holds the lock; retry after it finishes' if 'owns this configuration' in str(error)
                    else f'{type(error).__name__}: Jira operation failed; check CLI authentication, JQL and project access')
         print(json.dumps({'success': False, 'error': message}))

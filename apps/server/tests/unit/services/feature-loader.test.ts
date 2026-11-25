@@ -1,3 +1,10 @@
+vi.mock('../../../src/services/work-snooze.js', () => ({
+  readWorkSnoozes: vi.fn().mockResolvedValue({}),
+  workSnoozeFor: vi.fn(),
+  assertWorkNotSnoozed: vi.fn().mockResolvedValue(undefined),
+  changingWorkSnoozes: new Set(),
+  WorkSnoozedError: class extends Error {},
+}));
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { FeatureLoader } from '@/services/feature-loader.js';
 import * as fs from 'fs/promises';
@@ -317,6 +324,112 @@ describe('feature-loader.ts', () => {
   });
 
   describe('update', () => {
+    it.each(['waiting_approval', 'verified'] as const)(
+      'allows an explicit risk acceptance from Needs Attention to %s and records the blocker',
+      async (targetStatus) => {
+        vi.mocked(fs.readFile).mockResolvedValue(
+          JSON.stringify({
+            id: 'feature-123',
+            jiraKey: 'AIP-117268',
+            status: 'failed',
+            executionRunId: 'run-1',
+            error: 'Draft MR delivery required before review',
+          })
+        );
+        const result = await loader.update(testProjectPath, 'feature-123', {
+          status: targetStatus,
+          attentionOverride: {
+            fromStatus: 'failed',
+            targetStatus,
+            executionRunId: 'run-1',
+            acceptedAt: '2026-11-23T00:00:00.000Z',
+            previousError: 'Draft MR delivery required before review',
+          },
+        });
+        expect(result.status).toBe(targetStatus);
+        expect(result.error).toBeUndefined();
+        expect(result.attentionOverride).toMatchObject({
+          fromStatus: 'failed',
+          targetStatus,
+          executionRunId: 'run-1',
+          previousError: 'Draft MR delivery required before review',
+          acceptedAt: expect.any(String),
+        });
+        if (targetStatus === 'verified') {
+          expect(result.completionSource).toBe('human');
+          expect(result.verifiedAt).toEqual(expect.any(String));
+        }
+        expect(fs.writeFile).toHaveBeenCalled();
+      }
+    );
+
+    it.each([
+      { status: 'in_progress', executionRunId: 'run-1' },
+      { status: 'failed', executionRunId: 'run-2' },
+      { status: 'failed', executionRunId: 'run-1', archive: { reason: 'obsolete' } },
+      { status: 'backlog', executionRunId: 'run-1' },
+    ])('rejects stale or ineligible risk acceptance: %j', async (current) => {
+      vi.mocked(fs.readFile).mockResolvedValue(
+        JSON.stringify({ id: 'feature-123', jiraKey: 'AIP-117268', ...current })
+      );
+      await expect(
+        loader.update(testProjectPath, 'feature-123', {
+          status: 'verified',
+          attentionOverride: {
+            fromStatus: 'failed',
+            targetStatus: 'verified',
+            executionRunId: 'run-1',
+            acceptedAt: '2026-11-23T00:00:00.000Z',
+          },
+        })
+      ).rejects.toThrow('not eligible');
+      expect(fs.writeFile).not.toHaveBeenCalled();
+    });
+
+    it('does not reuse an earlier risk acceptance for a later review transition', async () => {
+      vi.mocked(fs.readFile).mockResolvedValue(
+        JSON.stringify({
+          id: 'feature-123',
+          jiraKey: 'AIP-117268',
+          status: 'backlog',
+          attentionOverride: {
+            fromStatus: 'failed',
+            targetStatus: 'verified',
+            acceptedAt: '2026-11-23T00:00:00.000Z',
+          },
+        })
+      );
+      const result = await loader.update(testProjectPath, 'feature-123', { status: 'verified' });
+      expect(result.status).toBe('failed');
+      expect(result.error).toContain('Task branch is missing');
+    });
+
+    it('invalidates delivery approval when an accepted task starts another execution', async () => {
+      vi.mocked(fs.readFile).mockResolvedValue(
+        JSON.stringify({
+          id: 'feature-123',
+          status: 'verified',
+          deliveryApproval: { approvedAt: 'now', reviews: [] },
+        })
+      );
+      const result = await loader.update(testProjectPath, 'feature-123', { status: 'in_progress' });
+      expect(result.deliveryApproval).toBeUndefined();
+    });
+    it('prevents manual Jira review updates from bypassing the Draft MR gate', async () => {
+      vi.mocked(fs.readFile).mockResolvedValue(
+        JSON.stringify({
+          id: 'feature-123',
+          title: 'Jira task',
+          jiraKey: 'AIP-1',
+          status: 'in_progress',
+        })
+      );
+      const result = await loader.update(testProjectPath, 'feature-123', { status: 'verified' });
+      expect(result.status).toBe('failed');
+      expect(result.verifiedAt).toBeUndefined();
+      expect(result.error).toContain('Task branch is missing');
+    });
+
     it('should update existing feature', async () => {
       vi.mocked(fs.readFile).mockResolvedValue(
         JSON.stringify({

@@ -26,6 +26,23 @@ Session 名由 `buildProjectSessionName(projectPath)` 从项目目录名生成 s
 
 ## 运行条件
 
+### Browser appearance
+
+The Agent page and hosted terminal use a light palette. Herdr renders its own
+workspace colors, so configure its native theme in `~/.config/herdr/config.toml`
+(or `HERDR_CONFIG_PATH`) as well:
+
+```toml
+[theme]
+name = "catppuccin-latte"
+auto_switch = false
+```
+
+Reload the configuration in the running project session to apply the theme
+without restarting its agents. Keep `ui.mouse_capture = true` (the default) for
+clickable spaces and tabs. The browser restores SGR mouse reporting when attaching
+to an existing PTY because bounded scrollback can omit Herdr's startup modes.
+
 - 服务端能执行 `herdr` 与 `pi`；Herdr 支持 `HERDR_BIN` / `HERDR_BIN_PATH` 覆盖。
 - Pi 配置 LiteLLM 模型与认证，见 [Provider 文档](server/providers.md)。
 - Herdr 的 Pi 集成可用；任务启动的 bootstrap 路径会安装缺失集成并准备项目 session。
@@ -76,6 +93,38 @@ Leader / worker 调度入口 `/api/features/herdr-dispatch` 已实现，但仍�
 不意味着每个普通任务都会自动拆分或派发多个 Agent。
 
 ## 断线、重启与身份
+
+### API restart without stopping Pi
+
+Automaker-managed Pi turns run in Herdr, outside the API observer. Before sending
+a prompt, Automaker persists `feature.herdrExecution`: the pane, workspace, tab,
+working directory, session identity, original prompt, transcript start position,
+execution run ID, and planning/pipeline context.
+
+- Graceful API shutdown detaches the observer without sending Escape to Pi.
+  The task stage and current plan task remain intact.
+- Startup reconnects to the recorded pane and replays only that turn's transcript.
+  It does not restore/recreate the pane or submit a continuation prompt.
+- A turn completed while the API was offline is collected normally. The original
+  execution run ID and acceptance-evidence time window are retained.
+- Pipeline recovery collects the detached step before running subsequent steps.
+  An output-applied marker allows finalization without executing the turn again.
+- Explicit **Stop** still sends Escape. A lost/replaced pane, changed session, or
+  uncertain submission requires inspection; recovery never blindly resubmits it.
+- New/revised plans can still require human approval after reconnection. This
+  mechanism preserves running turns, not an in-memory approval waiter.
+
+For systemd, `automaker-server.service` uses `KillMode=process`. Otherwise the
+default cgroup cleanup can kill detached Herdr servers when the API restarts.
+API shutdown still aborts its locally managed providers and closes terminal
+attachments. Operators must stop Herdr separately when intentionally shutting
+down all agents.
+
+This applies to turns started with the durable checkpoint support installed.
+Other CLI/SDK providers retain interrupt-and-resume behavior. API availability,
+browser authentication and log streaming may pause during restart. A machine
+reboot, a Herdr restart, or lost session storage cannot preserve a running Pi
+process. One API instance must own execution tracking for a project.
 
 网页地址中的 `session=term-...` 是 Automaker PTY 连接 ID，不是 Pi session ID。
 服务端重启时这个 ID 可能失效，Herdr 和 Pi 原生会话可以继续保留。

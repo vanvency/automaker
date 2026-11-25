@@ -21,12 +21,44 @@
 Jira 评论回写和人工问答分别配置。MR 固定要求 Draft，不自动合并；
 本实现不自动修改 Jira workflow 状态。完成评论表示收到交付回执，不表示人工验收。
 
+### Draft MR handoff
+
+Managed Jira imports keep the issue summary in `jiraSummary` and the requirement
+body in `description`. The import/execution contract is stored separately in
+`jiraExecutionInstructions` and included when starting a fresh agent conversation.
+Follow-ups reuse conversation context. The card highlights Jira summary; details
+show requirements first, with execution instructions collapsed. Legacy imported
+prompts are left intact and their embedded Jira snapshot is used for display.
+Sync preserves already-started descriptions/instructions and stages requirement
+changes for human review.
+
+Before a Jira task enters Waiting Review, its current execution receipt must identify
+every changed repository and its Draft MR. The server reads those MRs from the
+configured GitLab host and checks that they are open drafts targeting the configured
+branch, use the task's source branch, and contain the current checkout revision.
+When Stories share an Epic worktree, a submodule added by a downstream Story can
+be accounted for by that Story's current execution receipt. It must belong to the
+same Epic, Jira site, branch and worktree, depend directly or transitively on the
+Story being checked, and supply an MR that passes the same remote/branch/revision
+checks. The earlier Story's receipt and MR list remain unchanged; downstream test
+blockers remain on the downstream Story. Unaccounted repositories and a missing
+root MR still block review.
+This applies to normal execution, resumed pipelines, and manual status updates.
+Missing MRs, stale receipts, branch mismatches, or an unavailable GitLab check keep
+the task in Needs Attention with a delivery error. Retry the delivery through Reply
+after fixing the reported issue. Human-confirmed Complete remains the only merge step.
+
 ## 正常同步与高级层级导入
 
 正常同步：匹配的 Jira 父任务对应一张卡，Jira 已有子任务列为这张卡的交付范围。
-子任务不需要自己带 kaka/dodo 标签：标签只决定哪张父任务被选中，交付范围从 Jira
-层级读取（父任务自身的子任务，以及 Epic 经 Epic Link / parent 关联的 Story 下的
-子任务，去重后全部列出）。
+匹配标签的 Epic 通过 Epic Link / parent 额外扫描其关联 Story；Story 即使没有
+kaka/dodo 标签也独立入板，保留自己的 Jira 标签和已有子任务，不自动派发。
+Epic 自身只负责直接子任务，不重复包含 Story 的子任务。Story 没有子任务时仍等待
+Jira 拆分或明确的人工决定。
+已导入 Story 的 Jira `Blocks` 关系会转为卡片依赖；跨 Epic 的阻塞项若不在看板上，
+依赖保持未满足，不会被当成已完成。用户明确批准现有 Story 作为独立交付卡后，
+同分支一次仅派发一张；前一张经人工 Verify 进入 Done 后，下一张才有资格自动派发。
+执行失败或仍在 Waiting Review 时不会越过依赖。
 不为这些子任务重复建卡、不授权 Agent 再次拆分。分支沿用现有约定，新的关联任务按
 Epic 根任务归并代码空间；一个父任务的子任务始终在同一个 worktree 完成交付。
 已有任务的分支和 worktree 保持原位，不因策略升级重命名或迁移。
@@ -34,7 +66,7 @@ Epic 根任务归并代码空间；一个父任务的子任务始终在同一个
 未拆分的 Epic/Story 会在预览与卡片上显示“等待 Jira 拆分或人工批准 Automaker 拆分”，
 不自动派发。人工启动时提示 Agent 先请求决策，不能把没有子任务当成已授权自动拆分。
 若存在旧的独立子卡，预览提示冲突并禁止自动派发父卡；不会删除、合并或重跑它们。
-普通同步不展开 Epic 的全部 Story。祖先仅作为上下文，不能扩大本次标签匹配的任务范围。
+不会扫描未命中同步条件的 Epic 的 Story；祖先仅作为 Story 上下文，不授权跨 Story 扩大交付范围。
 
 高级层级导入是显式 CLI 操作。设置页将其折叠展示，保存于 `jiraSync.hierarchyImport`；
 不会影响普通预览、立即同步或定时同步。CLI 使用方式：
@@ -64,6 +96,16 @@ python3 scripts/jira-monitor.py --config data/jira-monitor/config.json \
 迁移幂等，重复调用不会丢弃新状态。若迁移中断，保持旧 timer 暂停，从页面重试。
 回退需先暂停 Automaker 同步并确认无 worker 持锁，再核对最新状态与备份；
 不要直接重新启用旧 timer，旧调度器的状态治理逻辑与新版本不同。
+
+## 重置一个 Work
+
+在 **Work Board** 的 Jira Work 卡片右上角（表格视图的操作栏也可使用），或
+「Jira 同步 → 任务映射与派发状态」选择 **重置 Work**，先预览最新 Jira 标题、新分支、旧
+Worktree 和未提交修改，再明确确认。操作停止旧预览、归档旧任务、强制移除旧
+Worktree，并从最新 Jira 父任务及已有子任务创建独立的新任务、新分支和 Worktree；
+新任务在 Backlog，不沿用旧 Agent 会话、验收或派发 claim。旧任务历史保留在归档，
+不会改动 Jira、远端分支或 MR。运行中的 Agent、被其他卡使用的分支、Jira 身份变化
+和过期的预览快照都会阻止重置；中途失败时检查新任务和目录后再处理，不能盲目重试。
 
 ## 状态与幂等边界
 

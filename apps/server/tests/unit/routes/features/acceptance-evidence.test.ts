@@ -8,6 +8,7 @@ const mocks = vi.hoisted(() => ({
   collect: vi.fn(),
   get: vi.fn(),
   update: vi.fn(),
+  emit: vi.fn(),
 }));
 vi.mock('../../../../src/services/worktree-resolver.js', () => ({
   WorktreeResolver: class {
@@ -31,7 +32,7 @@ describe('import acceptance evidence API', () => {
     ]);
   });
   const invoke = (extra: object = {}) =>
-    createAcceptanceEvidenceHandler(loader)(
+    createAcceptanceEvidenceHandler(loader, { emit: mocks.emit, subscribe: vi.fn() })(
       {
         body: { projectPath: '/project', featureId: 'task-1', ...extra },
       } as Request,
@@ -48,6 +49,14 @@ describe('import acceptance evidence API', () => {
       acceptanceEvidence: evidence,
     });
     expect(response.json).toHaveBeenCalledWith(expect.objectContaining({ success: true }));
+    expect(mocks.emit).toHaveBeenCalledWith(
+      'auto-mode:event',
+      expect.objectContaining({
+        type: 'features_reconciled',
+        projectPath: '/project',
+        reconciledFeatureIds: ['task-1'],
+      })
+    );
   });
 
   it('does not overwrite prior evidence when no manifest exists', async () => {
@@ -55,6 +64,26 @@ describe('import acceptance evidence API', () => {
     await invoke();
     expect(response.status).toHaveBeenCalledWith(404);
     expect(mocks.update).not.toHaveBeenCalled();
+    expect(mocks.emit).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ['Acceptance evidence could not be imported: Invalid acceptance screenshot timestamp', true],
+    ['Provider execution failed', false],
+  ])('clears only a resolved import error: %s', async (error, clears) => {
+    mocks.get.mockResolvedValue({
+      id: 'task-1',
+      branchName: 'feature/one',
+      status: 'waiting_approval',
+      error,
+    });
+    const evidence = { status: 'passed', screenshots: [] };
+    mocks.collect.mockResolvedValue(evidence);
+    await invoke();
+    const updates = mocks.update.mock.calls[0][2];
+    expect(updates.acceptanceEvidence).toEqual(evidence);
+    expect(Object.hasOwn(updates, 'error')).toBe(clears);
+    expect(updates).not.toHaveProperty('status');
   });
 
   it('rejects malformed artifacts before updating the card', async () => {
@@ -62,6 +91,26 @@ describe('import acceptance evidence API', () => {
     await invoke();
     expect(response.status).toHaveBeenCalledWith(400);
     expect(mocks.update).not.toHaveBeenCalled();
+  });
+
+  it('clears the resolved import notice while preserving an unrelated execution error', async () => {
+    mocks.get.mockResolvedValue({
+      id: 'task-1',
+      branchName: 'feature/one',
+      error: 'Provider execution failed',
+      executionNotice: {
+        kind: 'error',
+        source: 'delivery',
+        message:
+          'Acceptance evidence could not be imported: Invalid acceptance screenshot timestamp',
+      },
+    });
+    mocks.collect.mockResolvedValue({ status: 'passed', screenshots: [] });
+    await invoke();
+    const updates = mocks.update.mock.calls[0][2];
+    expect(updates).toHaveProperty('executionNotice', undefined);
+    expect(updates).not.toHaveProperty('error');
+    expect(updates).not.toHaveProperty('status');
   });
 
   it('never falls back to another worktree when the task branch is missing', async () => {

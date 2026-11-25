@@ -74,8 +74,10 @@ export const CardBadges = memo(function CardBadges({ feature }: CardBadgesProps)
                 <AlertCircle className="w-3.5 h-3.5" />
               </div>
             </TooltipTrigger>
+            {/* Long notices (delivery blockers, run errors) fold here too: the
+                untruncated text stays behind the card's 查看详情 dialog. */}
             <TooltipContent side="bottom" className="text-xs max-w-[250px]">
-              <p>{feature.error}</p>
+              <p className="line-clamp-3 break-words">{feature.error}</p>
             </TooltipContent>
           </Tooltip>
         </div>

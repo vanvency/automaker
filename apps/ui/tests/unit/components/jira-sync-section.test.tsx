@@ -105,4 +105,45 @@ describe('project Jira configuration', () => {
       })
     );
   });
+  it('previews the latest Jira work and requires a second click before discarding it', async () => {
+    mocks.fetch.mockImplementation(async (url: string) => ({
+      ok: true,
+      json: async () => ({
+        success: true,
+        result: url.endsWith('/status')
+          ? {
+              config,
+              runs: [],
+              running: false,
+              jobCount: 1,
+              jobs: [{ issueKey: 'AIP-1', featureId: 'old-card', status: 'ready', claimed: false }],
+            }
+          : url.endsWith('/reset-preview')
+            ? {
+                reset: {
+                  featureId: 'old-card',
+                  issueKey: 'AIP-1',
+                  title: 'Latest title',
+                  oldBranch: 'old',
+                  oldWorktree: '/project/.worktrees/old',
+                  newBranch: 'new',
+                  hasLocalChanges: true,
+                  snapshot: 'a'.repeat(64),
+                },
+              }
+            : { reset: { featureId: 'new-card' } },
+      }),
+    }));
+    view();
+    fireEvent.click(await screen.findByText('任务映射与派发状态（1）'));
+    fireEvent.click(screen.getByRole('button', { name: '重置 Work' }));
+    await screen.findByText(/旧 Worktree 有未提交修改/);
+    expect(mocks.fetch.mock.calls.some(([url]) => url.endsWith('/reset-work'))).toBe(false);
+    fireEvent.click(screen.getByRole('button', { name: '确认丢弃旧 Work 并重建' }));
+    await waitFor(() =>
+      expect(mocks.fetch).toHaveBeenCalledWith('/api/jira-sync/reset-work', 'POST', {
+        body: { projectPath: '/project', featureId: 'old-card', snapshot: 'a'.repeat(64) },
+      })
+    );
+  });
 });

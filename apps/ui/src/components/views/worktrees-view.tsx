@@ -8,7 +8,8 @@
  * project.
  */
 
-import { useCallback, useMemo, useState, type ComponentType } from 'react';
+import { useCallback, useEffect, useMemo, useState, type ComponentType } from 'react';
+import { useQueryClient } from '@tanstack/react-query';
 import { useNavigate } from '@tanstack/react-router';
 import { toast } from 'sonner';
 import {
@@ -18,34 +19,66 @@ import {
   Clock,
   Copy,
   CopyCheck,
+  MoreHorizontal,
   GitBranch,
   GitCommit,
   GitPullRequest,
+  FileText,
   LayoutGrid,
   Loader2,
+  Plus,
   Play,
   RefreshCw,
   Rows3,
-  Search,
   Bot,
   XCircle,
+  Archive,
+  createLucideIcon,
+  PlayCircle,
 } from 'lucide-react';
 import type {
+  Feature,
   WorktreeProgressAttention,
   WorktreeProgressStage,
   WorktreeProgressTask,
 } from '@automaker/types';
 import { useAppStore } from '@/store/app-store';
 import { getElectronAPI, isElectron } from '@/lib/electron';
-import { withPageAuthParams } from '@/lib/api-fetch';
+import { apiFetch, withPageAuthParams } from '@/lib/api-fetch';
 import { useRunningAgents, useWorktreeProgress, type WorktreeProgressRow } from '@/hooks/queries';
 import { cn, formatRelativeTime } from '@/lib/utils';
+import { writeToClipboard } from '@/lib/clipboard-utils';
+import { queryKeys } from '@/lib/query-keys';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import {
+  DropdownMenu,
+  DropdownMenuTrigger,
+  DropdownMenuContent,
+  DropdownMenuItem,
+} from '@/components/ui/dropdown-menu';
+import { BoardSearchBar } from './board-view/board-search-bar';
+import { ArchiveTaskDialog } from './board-view/dialogs/archive-task-dialog';
+import { AgentOutputModal } from './board-view/dialogs/agent-output-modal';
+import { ResetWorkAction } from './board-view/dialogs/reset-work-action';
 import { Spinner } from '@/components/ui/spinner';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { WorktreePreviewControls } from './worktree-preview';
+import { CreateWorktreeDialog } from './board-view/dialogs/create-worktree-dialog';
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog';
+
+const SnoozeIcon = createLucideIcon('Snooze', [
+  ['circle', { cx: '12', cy: '13', r: '8', key: 'clock' }],
+  ['path', { d: 'M9 10h6l-6 6h6', key: 'sleep' }],
+  ['path', { d: 'M5 3 2 6m20 0-3-3M6.4 19 4 22m13.6-3L20 22', key: 'alarm' }],
+]);
 
 type BoardLane = 'planned' | 'in_progress' | 'failed' | 'waiting' | 'done';
 type StageFilter = 'all' | BoardLane;
@@ -210,6 +243,7 @@ const BOARD_COLUMNS: Array<{
   label: string;
   hint: string;
   icon: ComponentType<{ className?: string }>;
+  colorClass: string;
   tone?: 'brand' | 'warning' | 'error' | 'success';
 }> = [
   {
@@ -217,18 +251,21 @@ const BOARD_COLUMNS: Array<{
     label: 'Backlog',
     hint: 'Queued but not started',
     icon: CircleDot,
+    colorClass: 'text-[var(--status-backlog)]',
   },
   {
     id: 'in_progress',
     label: 'In Progress',
     hint: 'An agent is working in this worktree',
     icon: Play,
+    colorClass: 'text-[var(--status-in-progress)]',
   },
   {
     id: 'failed',
     label: 'Needs Attention',
     hint: 'Execution failed, merge conflict or interrupted run - a human has to act',
     icon: AlertTriangle,
+    colorClass: 'text-[var(--status-error)]',
     tone: 'error',
   },
   {
@@ -236,6 +273,7 @@ const BOARD_COLUMNS: Array<{
     label: 'Waiting Review',
     hint: 'The agent has stopped and is waiting for review',
     icon: Clock,
+    colorClass: 'text-[var(--status-waiting)]',
     tone: 'warning',
   },
   {
@@ -243,6 +281,7 @@ const BOARD_COLUMNS: Array<{
     label: 'Done',
     hint: 'Verified or merged',
     icon: CheckCircle2,
+    colorClass: 'text-[var(--status-success)]',
     tone: 'success',
   },
 ];
@@ -450,20 +489,30 @@ function WorktreeTaskCard({
   isCurrentProject,
   herdrBusy,
   onOpenBoard,
-  onCopyPath,
+  onCopyJiraId,
   onOpenLink,
   onLocateTask,
   onOpenHerdr,
+  onViewLogs,
+  onSnooze,
+  onArchive,
+  archiveBusy,
+  onReset,
 }: {
   row: WorktreeProgressRow;
   running: boolean;
   isCurrentProject: boolean;
   herdrBusy: boolean;
   onOpenBoard: (row: WorktreeProgressRow) => void;
-  onCopyPath: (row: WorktreeProgressRow) => void;
+  onCopyJiraId: (row: WorktreeProgressRow) => void;
   onOpenLink: (url: string) => void;
   onLocateTask: (row: WorktreeProgressRow, task: WorktreeProgressTask) => void;
   onOpenHerdr: (row: WorktreeProgressRow) => void;
+  onViewLogs: (row: WorktreeProgressRow, featureId: string) => void;
+  onSnooze: (row: WorktreeProgressRow) => void;
+  onArchive: (row: WorktreeProgressRow) => void;
+  archiveBusy: boolean;
+  onReset: () => void | Promise<void>;
 }) {
   const attention = row.attention ? ATTENTION_META[row.attention] : undefined;
   const title = row.feature?.title || row.branch;
@@ -479,12 +528,12 @@ function WorktreeTaskCard({
       tabIndex={0}
       onClick={() => onOpenBoard(row)}
       onKeyDown={(event) => {
-        if (event.key === 'Enter' || event.key === ' ') {
+        if (event.target === event.currentTarget && (event.key === 'Enter' || event.key === ' ')) {
           event.preventDefault();
           onOpenBoard(row);
         }
       }}
-      className="cursor-pointer space-y-2 rounded-lg border border-border/50 bg-card p-2.5 transition-colors hover:border-brand-500/40 hover:bg-accent/40 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-500/50"
+      className="group cursor-pointer space-y-3 rounded-xl border border-border/60 bg-card p-3 shadow-sm transition-colors hover:border-brand-500/40 hover:bg-accent/20 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-500/50"
       data-testid={`task-card-${row.branch}`}
       title={row.path}
     >
@@ -500,6 +549,49 @@ function WorktreeTaskCard({
             {attention.label}
           </Badge>
         )}
+        <div className="ml-auto flex shrink-0 items-center gap-0.5" data-testid="work-card-actions">
+          {row.feature?.jiraKey && !row.isMain && !row.archivedAt && (
+            <ResetWorkAction
+              projectPath={row.projectPath}
+              featureId={row.feature.id}
+              icon
+              disabled={
+                running || archiveBusy || tasks.length !== 1 || tasks[0]?.id !== row.feature.id
+              }
+              onReset={onReset}
+            />
+          )}
+          <Button
+            variant="ghost"
+            size="icon-sm"
+            className="h-7 w-7"
+            onClick={(event) => {
+              stop(event);
+              onSnooze(row);
+            }}
+            title="Snooze Work"
+            aria-label="Snooze Work"
+            disabled={running || row.isMain || row.branch === '(detached)'}
+            onKeyDown={(event) => event.stopPropagation()}
+            data-testid={`snooze-worktree-${row.branch}`}
+          >
+            <SnoozeIcon className="h-3.5 w-3.5" />
+          </Button>
+          <Button
+            variant="ghost"
+            size="icon-sm"
+            className="h-7 w-7"
+            aria-label="Archive Work"
+            title="Archive Work"
+            disabled={archiveBusy || running || row.isMain || !row.tasks?.length}
+            onClick={(event) => {
+              stop(event);
+              onArchive(row);
+            }}
+          >
+            <Archive className="h-3.5 w-3.5" />
+          </Button>
+        </div>
       </div>
 
       <div className="line-clamp-2 text-sm font-medium leading-snug" title={row.feature?.title}>
@@ -511,7 +603,11 @@ function WorktreeTaskCard({
         <span className="truncate font-mono" title={row.branch}>
           {row.branch}
         </span>
-        {row.feature?.jiraKey && (
+      </div>
+
+      {row.feature?.jiraKey && (
+        <div className="flex items-center gap-1.5 text-xs" data-testid="work-jira-row">
+          <span className="text-muted-foreground">Jira</span>
           <button
             type="button"
             className="shrink-0 rounded bg-muted px-1 text-[10px] hover:bg-accent hover:text-foreground"
@@ -526,8 +622,36 @@ function WorktreeTaskCard({
           >
             {row.feature.jiraKey}
           </button>
-        )}
-      </div>
+          <Button
+            variant="ghost"
+            size="icon-sm"
+            onClick={(event) => {
+              stop(event);
+              onCopyJiraId(row);
+            }}
+            onKeyDown={(event) => event.stopPropagation()}
+            disabled={!row.feature?.jiraKey}
+            title={row.feature?.jiraKey ? `Copy ${row.feature.jiraKey}` : 'No Jira ID linked'}
+            aria-label="Copy Jira ID"
+          >
+            <Copy className="h-3.5 w-3.5" />
+          </Button>
+        </div>
+      )}
+      <dl className="grid gap-1 text-xs text-muted-foreground">
+        <div className="flex gap-2">
+          <dt className="w-16 shrink-0">Reporter</dt>
+          <dd className="truncate" title={row.feature?.jiraReporter || undefined}>
+            {row.feature?.jiraReporterDisplayName || row.feature?.jiraReporter || 'Not available'}
+          </dd>
+        </div>
+        <div className="flex gap-2">
+          <dt className="w-16 shrink-0">Assignee</dt>
+          <dd className="truncate" title={row.feature?.jiraAssignee || undefined}>
+            {row.feature?.jiraAssigneeDisplayName || row.feature?.jiraAssignee || 'Unassigned'}
+          </dd>
+        </div>
+      </dl>
 
       <TaskRollup row={row} />
 
@@ -604,6 +728,22 @@ function WorktreeTaskCard({
           )}
           Agent
         </Button>
+        {getWorktreeLane(row, running) === 'failed' && (mainTask || row.feature) && (
+          <Button
+            variant="secondary"
+            size="sm"
+            className="h-6 px-1.5 text-[11px]"
+            onClick={(event) => {
+              stop(event);
+              onViewLogs(row, mainTask?.id ?? row.feature!.id);
+            }}
+            title="Logs"
+            aria-label="Logs"
+          >
+            <FileText className="mr-1 h-3 w-3" />
+            Logs
+          </Button>
+        )}
         <div className="ml-auto flex items-center gap-0.5">
           {row.pr && (
             <Button
@@ -618,17 +758,6 @@ function WorktreeTaskCard({
               <GitPullRequest className="h-3.5 w-3.5" />
             </Button>
           )}
-          <Button
-            variant="ghost"
-            size="icon-sm"
-            onClick={(event) => {
-              stop(event);
-              onCopyPath(row);
-            }}
-            aria-label="Copy worktree path"
-          >
-            <Copy className="h-3.5 w-3.5" />
-          </Button>
         </div>
       </div>
     </div>
@@ -682,10 +811,32 @@ function StatCard({
 
 export function WorktreesView() {
   const navigate = useNavigate();
+  const queryClient = useQueryClient();
   const { projects, currentProject, setCurrentProject } = useAppStore();
 
   const [search, setSearch] = useState('');
-  const [projectFilter, setProjectFilter] = useState<string>('all');
+  const [reporterFilter, setReporterFilter] = useState('');
+  const [assigneeFilter, setAssigneeFilter] = useState('');
+  const [archiveSelection, setArchiveSelection] = useState<{
+    projectPath: string;
+    ids: string[];
+    features: Pick<Feature, 'id' | 'title' | 'jiraKey'>[];
+    loading: boolean;
+  } | null>(null);
+  const [archiveBusy, setArchiveBusy] = useState(false);
+  useEffect(() => {
+    setReporterFilter('');
+    setAssigneeFilter('');
+    setArchiveSelection(null);
+  }, [currentProject?.path]);
+  const [createWorkOpen, setCreateWorkOpen] = useState(false);
+  const [archiveOpen, setArchiveOpen] = useState(false);
+  const [archiveSearch, setArchiveSearch] = useState('');
+  const [snoozeOpen, setSnoozeOpen] = useState(false);
+  const [snoozeRow, setSnoozeRow] = useState<WorktreeProgressRow | null>(null);
+  const [snoozeReason, setSnoozeReason] = useState('');
+  const [snoozeBusy, setSnoozeBusy] = useState(false);
+  const [snoozeSearch, setSnoozeSearch] = useState('');
   const [stageFilter, setStageFilter] = useState<StageFilter>('all');
   const [onlyWithChanges, setOnlyWithChanges] = useState(false);
   const [hideMain, setHideMain] = useState(true);
@@ -696,14 +847,13 @@ export function WorktreesView() {
   const [viewMode, setViewMode] = useState<'board' | 'table'>('board');
   /** Worktrees whose Herdr attach is being resolved (per project+path) */
   const [herdrBusy, setHerdrBusy] = useState<Set<string>>(new Set());
+  const [logTarget, setLogTarget] = useState<{
+    projectPath: string;
+    featureId: string;
+    branchName: string;
+  } | null>(null);
 
-  const activeProjects = useMemo(
-    () =>
-      projectFilter === 'all'
-        ? projects
-        : projects.filter((project) => project.path === projectFilter),
-    [projects, projectFilter]
-  );
+  const activeProjects = useMemo(() => (currentProject ? [currentProject] : []), [currentProject]);
 
   const { data, isLoading, isFetching, refetch, error } = useWorktreeProgress(
     activeProjects,
@@ -716,14 +866,82 @@ export function WorktreesView() {
     [runningAgentsData]
   );
 
-  const rows = useMemo(() => data?.rows ?? [], [data]);
+  const rows = useMemo(
+    () => (data?.rows ?? []).filter((row) => row.projectPath === currentProject?.path),
+    [data, currentProject?.path]
+  );
+  const peopleOptions = useMemo(() => {
+    const options = (role: 'Reporter' | 'Assignee') =>
+      [
+        ...new Map(
+          rows.flatMap(({ feature }) => {
+            const id = feature?.[`jira${role}`] || feature?.[`jira${role}DisplayName`];
+            return id ? [[id, feature?.[`jira${role}DisplayName`] || id] as [string, string]] : [];
+          })
+        ).entries(),
+      ].sort((a, b) => a[1].localeCompare(b[1]));
+    return { reporter: options('Reporter'), assignee: options('Assignee') };
+  }, [rows]);
+  const archivedRows = useMemo(
+    () =>
+      rows
+        .filter(
+          (row) => row.archivedAt && !row.snoozedAt && !isWorktreeRunning(row, runningFeatureIds)
+        )
+        .sort((a, b) => Date.parse(b.archivedAt!) - Date.parse(a.archivedAt!)),
+    [rows, runningFeatureIds]
+  );
+  const archivedKeys = useMemo(
+    () => new Set(archivedRows.map((row) => `${row.projectPath}:${row.branch}`)),
+    [archivedRows]
+  );
+  const snoozedRows = useMemo(
+    () =>
+      rows
+        .filter((row) => row.snoozedAt && !isWorktreeRunning(row, runningFeatureIds))
+        .sort((a, b) => Date.parse(b.snoozedAt!) - Date.parse(a.snoozedAt!)),
+    [rows, runningFeatureIds]
+  );
+  const snoozedKeys = useMemo(
+    () => new Set(snoozedRows.map((row) => `${row.projectPath}:${row.branch}`)),
+    [snoozedRows]
+  );
+  const visibleSnoozed = snoozedRows.filter((row) =>
+    [
+      row.projectName,
+      row.branch,
+      row.snoozeReason,
+      ...(row.tasks ?? []).map((task) => `${task.title} ${task.jiraKey} ${task.id}`),
+    ]
+      .join(' ')
+      .toLowerCase()
+      .includes(snoozeSearch.trim().toLowerCase())
+  );
+  const visibleArchives = archivedRows.filter((row) =>
+    [
+      row.projectName,
+      row.branch,
+      ...(row.tasks ?? []).map((task) => `${task.title} ${task.jiraKey} ${task.id}`),
+    ]
+      .join(' ')
+      .toLowerCase()
+      .includes(archiveSearch.trim().toLowerCase())
+  );
 
   const scopedRows = useMemo(() => {
     const query = search.trim().toLowerCase();
 
     const filtered = rows.filter((row) => {
+      if (archivedKeys.has(`${row.projectPath}:${row.branch}`)) return false;
+      if (snoozedKeys.has(`${row.projectPath}:${row.branch}`)) return false;
       if (hideMain && row.isMain) return false;
       if (onlyWithChanges && !row.hasChanges && !row.hasConflicts) return false;
+      const reporter =
+        row.feature?.jiraReporter || row.feature?.jiraReporterDisplayName || '__missing__';
+      const assignee =
+        row.feature?.jiraAssignee || row.feature?.jiraAssigneeDisplayName || '__missing__';
+      if (reporterFilter && reporter !== reporterFilter) return false;
+      if (assigneeFilter && assignee !== assigneeFilter) return false;
 
       if (!query) return true;
       const haystack = [
@@ -733,6 +951,10 @@ export function WorktreesView() {
         row.feature?.id,
         row.feature?.title,
         row.feature?.jiraKey,
+        row.feature?.jiraReporter,
+        row.feature?.jiraReporterDisplayName,
+        row.feature?.jiraAssignee,
+        row.feature?.jiraAssigneeDisplayName,
         row.head?.subject,
         row.head?.sha,
       ]
@@ -743,7 +965,16 @@ export function WorktreesView() {
     });
 
     return filtered;
-  }, [rows, search, hideMain, onlyWithChanges]);
+  }, [
+    rows,
+    search,
+    hideMain,
+    onlyWithChanges,
+    archivedKeys,
+    snoozedKeys,
+    reporterFilter,
+    assigneeFilter,
+  ]);
 
   const laneRows = useMemo(
     () =>
@@ -843,20 +1074,85 @@ export function WorktreesView() {
       // Carry the work line into the board so the URL restores this worktree.
       navigate({
         to: '/board',
-        search: row.branch === '(detached)' ? {} : { worktree: row.branch },
+        search: {
+          projectPath: row.projectPath,
+          ...(row.branch === '(detached)' ? {} : { worktree: row.branch }),
+        },
       });
     },
     [projects, setCurrentProject, navigate]
   );
 
-  const copyPath = useCallback(async (row: WorktreeProgressRow) => {
-    try {
-      await navigator.clipboard.writeText(row.path);
-      toast.success('Worktree path copied');
-    } catch {
-      toast.error('Could not copy path');
+  const copyJiraId = useCallback(async (row: WorktreeProgressRow) => {
+    const jiraKey = row.feature?.jiraKey;
+    if (!jiraKey) return;
+    if (await writeToClipboard(jiraKey)) {
+      toast.success(`${jiraKey} copied`);
+    } else {
+      toast.error('Could not copy Jira ID');
     }
   }, []);
+
+  const openArchive = async (row: WorktreeProgressRow) => {
+    if (archiveBusy) return;
+    const selection = {
+      projectPath: row.projectPath,
+      ids: (row.tasks ?? []).map((task) => task.id),
+      features: row.tasks ?? [],
+      loading: true,
+    };
+    setArchiveSelection(selection);
+    setArchiveBusy(true);
+    try {
+      const result = await getElectronAPI().features?.getAll(row.projectPath);
+      if (!result?.success || !result.features)
+        throw new Error(result?.error || 'Could not load tasks');
+      const ids = result.features
+        .filter((feature) => feature.branchName === row.branch && !feature.archive)
+        .map((feature) => feature.id);
+      if (!ids.length) throw new Error('No active tasks to archive');
+      setArchiveSelection((current) =>
+        current === selection
+          ? { projectPath: row.projectPath, ids, features: result.features!, loading: false }
+          : current
+      );
+    } catch (error) {
+      setArchiveSelection((current) => (current === selection ? null : current));
+      toast.error(error instanceof Error ? error.message : 'Could not load tasks');
+    } finally {
+      setArchiveBusy(false);
+    }
+  };
+
+  const updateSnooze = useCallback(
+    async (row: WorktreeProgressRow, snoozed: boolean) => {
+      setSnoozeBusy(true);
+      try {
+        const response = await apiFetch('/api/worktree/snooze', 'POST', {
+          body: {
+            projectPath: row.projectPath,
+            branchName: row.branch,
+            snoozed,
+            reason: snoozed ? snoozeReason : undefined,
+          },
+        });
+        const result = await response.json();
+        if (!response.ok || !result.success)
+          throw new Error(result.error || 'Could not update worktree');
+        toast.success(snoozed ? 'Worktree snoozed' : 'Worktree resumed');
+        if (snoozed) setSnoozeOpen(false);
+        setSnoozeRow(null);
+        setSnoozeReason('');
+        await queryClient.invalidateQueries({ queryKey: queryKeys.features.all(row.projectPath) });
+        await refetch();
+      } catch (error) {
+        toast.error(error instanceof Error ? error.message : 'Could not update worktree');
+      } finally {
+        setSnoozeBusy(false);
+      }
+    },
+    [refetch, snoozeReason, queryClient]
+  );
 
   // Open the level-2 board on a specific card: a worktree can hold several
   // cards, so the subtask list deep-links to the one that was clicked.
@@ -867,6 +1163,7 @@ export function WorktreesView() {
       navigate({
         to: '/board',
         search: {
+          projectPath: row.projectPath,
           ...(row.branch === '(detached)' ? {} : { worktree: row.branch }),
           featureId: task.id,
         },
@@ -931,10 +1228,12 @@ export function WorktreesView() {
     }
   }, []);
 
-  if (projects.length === 0) {
+  if (!currentProject) {
     return (
       <div className="flex flex-1 items-center justify-center p-6 text-muted-foreground">
-        Add a project to see its worktrees.
+        <Button onClick={() => void navigate({ to: '/dashboard' })}>
+          Open or create a project
+        </Button>
       </div>
     );
   }
@@ -949,43 +1248,94 @@ export function WorktreesView() {
 
   return (
     <div className="flex min-w-0 flex-1 flex-col overflow-hidden p-3 lg:p-4">
+      <CreateWorktreeDialog
+        key={currentProject.path}
+        open={createWorkOpen}
+        onOpenChange={setCreateWorkOpen}
+        projectPath={currentProject.path}
+        onCreated={(worktree) => {
+          const store = useAppStore.getState();
+          store.setWorktrees(currentProject.path, [
+            ...store
+              .getWorktrees(currentProject.path)
+              .filter((tree) => tree.path !== worktree.path),
+            { ...worktree, isMain: false, isCurrent: false, hasWorktree: true },
+          ]);
+          store.setCurrentWorktree(currentProject.path, worktree.path, worktree.branch);
+          void queryClient.invalidateQueries({
+            queryKey: queryKeys.worktrees.all(currentProject.path),
+          });
+          void navigate({
+            to: '/board',
+            search: { projectPath: currentProject.path, worktree: worktree.branch },
+          });
+        }}
+      />
       {/* Header */}
-      <div className="mb-4 flex flex-wrap items-start justify-between gap-4">
-        <div className="flex items-center gap-3">
-          <div className="rounded-lg bg-brand-500/10 p-2">
-            <GitBranch className="h-6 w-6 text-brand-500" />
+      <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+        <div className="flex min-w-0 items-center gap-2">
+          <div className="rounded-md bg-brand-500/10 p-1.5">
+            <GitBranch className="h-4 w-4 text-brand-500" />
           </div>
           <div>
-            <h1 className="text-2xl font-bold">Work Board</h1>
-            <p className="text-sm text-muted-foreground">
+            <h1 className="text-base font-semibold leading-5">Work Board</h1>
+            <p className="text-[11px] text-muted-foreground">
               {stats.total} worktree{stats.total === 1 ? '' : 's'}
+              {currentProject ? ` · ${currentProject.name}` : ''}
               {activeProjects.length > 1 ? ` across ${activeProjects.length} projects` : ''}
               {baseBranches.length > 0 ? ` · compared against ${baseBranches.join(', ')}` : ''}
             </p>
           </div>
         </div>
-        <div className="flex items-center gap-3">
+        <div className="ml-auto flex shrink-0 items-center gap-1.5">
           <Button
-            variant="outline"
+            variant="default"
             size="sm"
-            onClick={() => {
-              const project =
-                projects.find((item) => item.path === projectFilter) ??
-                currentProject ??
-                activeProjects[0];
-              if (project) setCurrentProject(project);
-              void navigate({ to: '/similar-tasks' });
-            }}
-            data-testid="work-board-similar-tasks"
+            onClick={() => setCreateWorkOpen(true)}
+            disabled={!currentProject}
+            data-testid="new-work-button"
           >
-            <CopyCheck className="h-4 w-4" />
-            Similar Works
+            <Plus className="h-4 w-4" />
+            New Work
           </Button>
-          {lastUpdatedAt && (
-            <span className="text-xs text-muted-foreground">
-              updated {formatRelativeTime(lastUpdatedAt)}
-            </span>
-          )}
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button
+                variant="ghost"
+                size="icon-sm"
+                aria-label="More work actions"
+                title="More work actions"
+              >
+                <MoreHorizontal className="h-4 w-4" />
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end">
+              <DropdownMenuItem
+                onSelect={() => setArchiveOpen(true)}
+                data-testid="archived-works-button"
+              >
+                <Archive className="h-4 w-4" /> Archived Works ({archivedRows.length})
+              </DropdownMenuItem>
+              <DropdownMenuItem
+                onSelect={() => {
+                  setSnoozeRow(null);
+                  setSnoozeSearch('');
+                  setSnoozeOpen(true);
+                }}
+                data-testid="snoozed-works-button"
+              >
+                <SnoozeIcon className="h-4 w-4" /> Snoozed Works ({snoozedRows.length})
+              </DropdownMenuItem>
+              <DropdownMenuItem
+                onSelect={() => {
+                  void navigate({ to: '/similar-tasks' });
+                }}
+                data-testid="work-board-similar-tasks"
+              >
+                <CopyCheck className="h-4 w-4" /> Similar Works
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
           <div className="flex items-center rounded-md border border-border/60 p-0.5">
             <Button
               variant={viewMode === 'board' ? 'secondary' : 'ghost'}
@@ -1008,16 +1358,238 @@ export function WorktreesView() {
               <Rows3 className="h-4 w-4" />
             </Button>
           </div>
-          <Button variant="outline" size="sm" onClick={() => refetch()} disabled={isFetching}>
+          <Button
+            variant="ghost"
+            size="sm"
+            className="gap-1.5 px-2 text-xs text-muted-foreground"
+            aria-label="Refresh work board"
+            title={
+              lastUpdatedAt
+                ? `Refresh · updated ${formatRelativeTime(lastUpdatedAt)}`
+                : 'Refresh work board'
+            }
+            onClick={() => refetch()}
+            disabled={isFetching}
+          >
             {isFetching ? (
               <Loader2 className="h-4 w-4 animate-spin" />
             ) : (
               <RefreshCw className="h-4 w-4" />
             )}
-            Refresh
+            <span className="hidden sm:inline">
+              {isFetching
+                ? 'Refreshing…'
+                : lastUpdatedAt
+                  ? `Updated ${formatRelativeTime(lastUpdatedAt)}`
+                  : 'Refresh'}
+            </span>
           </Button>
         </div>
       </div>
+
+      <Dialog
+        open={snoozeOpen}
+        onOpenChange={(open) => {
+          if (!snoozeBusy) setSnoozeOpen(open);
+        }}
+      >
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>{snoozeRow ? 'Snooze Worktree' : 'Snoozed Works'}</DialogTitle>
+            <DialogDescription>
+              Snoozed work is hidden from active lanes and excluded from automatic dispatch.
+              Existing code and task history are preserved.
+              {' Showing the selected project.'}
+            </DialogDescription>
+          </DialogHeader>
+          {snoozeRow ? (
+            <>
+              <p className="text-sm font-medium">{snoozeRow.feature?.title || snoozeRow.branch}</p>
+              <p className="text-xs text-muted-foreground">{snoozeRow.branch}</p>
+              <Input
+                aria-label="Snooze reason"
+                placeholder="Optional reason"
+                maxLength={500}
+                value={snoozeReason}
+                onChange={(event) => setSnoozeReason(event.target.value)}
+                disabled={snoozeBusy}
+              />
+              <div className="flex justify-end gap-2">
+                <Button
+                  variant="outline"
+                  onClick={() => setSnoozeOpen(false)}
+                  disabled={snoozeBusy}
+                >
+                  Cancel
+                </Button>
+                <Button
+                  onClick={() => void updateSnooze(snoozeRow, true)}
+                  disabled={snoozeBusy}
+                  data-testid="confirm-snooze"
+                >
+                  <SnoozeIcon className="mr-1 h-4 w-4" />
+                  Snooze Worktree
+                </Button>
+              </div>
+            </>
+          ) : (
+            <div className="max-h-[60vh] space-y-3 overflow-y-auto">
+              <Input
+                aria-label="Search snoozed works"
+                placeholder="Search project, branch or task..."
+                value={snoozeSearch}
+                onChange={(event) => setSnoozeSearch(event.target.value)}
+              />
+              {snoozedRows.length === 0 ? (
+                <p className="py-8 text-center text-sm text-muted-foreground">No snoozed works.</p>
+              ) : (
+                visibleSnoozed.map((row) => (
+                  <article
+                    key={`${row.projectPath}:${row.branch}`}
+                    className="rounded-lg border p-3"
+                  >
+                    <p className="font-medium">{row.feature?.title || row.branch}</p>
+                    <p className="text-xs text-muted-foreground">
+                      {row.projectName} · {row.branch}
+                    </p>
+                    {row.snoozeReason && (
+                      <p className="mt-2 text-sm text-muted-foreground">{row.snoozeReason}</p>
+                    )}
+                    <p className="mt-2 text-xs text-muted-foreground">
+                      Snoozed: {new Date(row.snoozedAt!).toLocaleString()}
+                    </p>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => {
+                        setSnoozeOpen(false);
+                        openOnBoard(row);
+                      }}
+                    >
+                      Open tasks
+                    </Button>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="mt-3"
+                      onClick={() => void updateSnooze(row, false)}
+                      disabled={snoozeBusy}
+                    >
+                      <PlayCircle className="mr-1 h-4 w-4" />
+                      Resume Worktree
+                    </Button>
+                  </article>
+                ))
+              )}
+              {snoozedRows.length > 0 && visibleSnoozed.length === 0 && (
+                <p className="py-8 text-center text-sm text-muted-foreground">
+                  No matching snoozed works.
+                </p>
+              )}
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
+
+      {archiveSelection && (
+        <ArchiveTaskDialog
+          projectPath={archiveSelection.projectPath}
+          featureIds={archiveSelection.ids}
+          features={archiveSelection.features}
+          loading={archiveSelection.loading}
+          workScope
+          onClose={() => setArchiveSelection(null)}
+          onArchived={() => {
+            void refetch();
+          }}
+        />
+      )}
+      {logTarget && (
+        <AgentOutputModal
+          open
+          onClose={() => setLogTarget(null)}
+          projectPath={logTarget.projectPath}
+          featureId={logTarget.featureId}
+          branchName={logTarget.branchName}
+        />
+      )}
+      <Dialog open={archiveOpen} onOpenChange={setArchiveOpen}>
+        <DialogContent
+          className="max-w-4xl max-h-[85vh] flex flex-col"
+          data-testid="archived-works-dialog"
+        >
+          <DialogHeader>
+            <DialogTitle>Archived Works</DialogTitle>
+            <DialogDescription>
+              Archived works include manually archived tasks and works that have been Done for 7
+              days. Code and task history are preserved. New or reopened tasks return the work to
+              the board.
+              {' Showing the selected project.'}
+            </DialogDescription>
+          </DialogHeader>
+          <Input
+            aria-label="Search archived works"
+            placeholder="Search project, branch or task…"
+            value={archiveSearch}
+            onChange={(event) => setArchiveSearch(event.target.value)}
+          />
+          <div className="min-h-0 overflow-y-auto space-y-3">
+            {archivedRows.length === 0 && (
+              <p className="py-8 text-center text-muted-foreground">No archived works yet.</p>
+            )}
+            {archivedRows.length > 0 && visibleArchives.length === 0 && (
+              <p className="py-8 text-center text-muted-foreground">No matching archived works.</p>
+            )}
+            {visibleArchives.map((row) => (
+              <article
+                key={`${row.projectPath}:${row.branch}`}
+                className="rounded-lg border p-4 space-y-2"
+              >
+                <div className="flex items-start justify-between gap-3">
+                  <h3 className="font-medium break-words">{row.feature?.title || row.branch}</h3>
+                  <Badge variant={row.manuallyArchived ? 'muted' : 'success'}>
+                    {row.manuallyArchived ? 'Archived' : 'Done'}
+                  </Badge>
+                </div>
+                <p className="text-sm text-muted-foreground break-all">
+                  {row.projectName} · {row.branch}
+                </p>
+                <p className="text-xs text-muted-foreground">
+                  Completed: {row.doneAt ? new Date(row.doneAt).toLocaleString() : '—'} · Archived:{' '}
+                  {new Date(row.archivedAt!).toLocaleString()}
+                </p>
+                {row.checkoutMissing && (
+                  <p className="text-xs text-muted-foreground">
+                    Local checkout released. Task records and conversation history are retained.
+                  </p>
+                )}
+                <ul className="space-y-1 text-sm">
+                  {(row.tasks ?? []).map((task) => (
+                    <li key={task.id} className="break-words">
+                      {task.title || task.jiraKey || task.id}{' '}
+                      <span className="text-muted-foreground">
+                        · {row.manuallyArchived ? 'Archived' : 'Done'}
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+                {!row.checkoutMissing && (
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => {
+                      setArchiveOpen(false);
+                      openOnBoard(row);
+                    }}
+                  >
+                    Open tasks
+                  </Button>
+                )}
+              </article>
+            ))}
+          </div>
+        </DialogContent>
+      </Dialog>
 
       {error && (
         <div className="mb-4 flex items-center gap-2 rounded-lg border border-[var(--status-error)]/30 bg-[var(--status-error-bg)] px-3 py-2 text-sm text-[var(--status-error)]">
@@ -1053,30 +1625,45 @@ export function WorktreesView() {
 
       {/* Toolbar */}
       <div className="mb-3 flex flex-wrap items-center gap-2">
-        <div className="relative min-w-[220px] flex-1 sm:max-w-xs">
-          <Search className="absolute left-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-          <Input
-            value={search}
-            onChange={(event) => setSearch(event.target.value)}
-            placeholder="Search branch, feature, commit…"
-            className="pl-8"
-          />
-        </div>
-
-        {projects.length > 1 && (
+        <BoardSearchBar
+          searchQuery={search}
+          onSearchChange={setSearch}
+          isCreatingSpec={false}
+          showConversations={false}
+          placeholder="Search work, Jira ID or person..."
+        />
+        {(['reporter', 'assignee'] as const).map((role) => (
           <select
-            value={projectFilter}
-            onChange={(event) => setProjectFilter(event.target.value)}
-            className="h-9 rounded-md border border-input bg-background px-3 text-sm"
-            aria-label="Filter by project"
+            key={role}
+            aria-label={`Filter by ${role}`}
+            value={role === 'reporter' ? reporterFilter : assigneeFilter}
+            onChange={(event) =>
+              (role === 'reporter' ? setReporterFilter : setAssigneeFilter)(event.target.value)
+            }
+            className="h-9 max-w-[220px] rounded-md border border-input bg-background px-3 text-sm"
           >
-            <option value="all">All projects</option>
-            {projects.map((project) => (
-              <option key={project.path} value={project.path}>
-                {project.name}
+            <option value="">All {role === 'reporter' ? 'reporters' : 'assignees'}</option>
+            <option value="__missing__">
+              {role === 'reporter' ? 'Reporter not available' : 'Unassigned'}
+            </option>
+            {peopleOptions[role].map(([value, label]) => (
+              <option key={value} value={value}>
+                {label}
               </option>
             ))}
           </select>
+        ))}
+        {(reporterFilter || assigneeFilter) && (
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={() => {
+              setReporterFilter('');
+              setAssigneeFilter('');
+            }}
+          >
+            Clear filters
+          </Button>
         )}
 
         <label className="flex cursor-pointer items-center gap-1.5 text-xs text-muted-foreground">
@@ -1104,6 +1691,7 @@ export function WorktreesView() {
         <div className="flex min-h-0 flex-1 gap-3 overflow-x-auto pb-1">
           {BOARD_COLUMNS.filter((column) => stageFilter === 'all' || column.id === stageFilter).map(
             (column) => {
+              const ColumnIcon = column.icon;
               const columnRows = visibleRows
                 .map((row) => ({ row, running: isWorktreeRunning(row, runningFeatureIds) }))
                 .filter(({ row, running }) => getWorktreeLane(row, running) === column.id);
@@ -1111,15 +1699,35 @@ export function WorktreesView() {
               return (
                 <section
                   key={column.id}
-                  className="flex min-w-[170px] flex-1 basis-0 flex-col rounded-lg border border-border/50 bg-card/40"
+                  className="flex min-w-[200px] flex-1 basis-0 flex-col rounded-xl border border-border/60 bg-card/80"
+                  aria-labelledby={`work-lane-${column.id}`}
                   data-testid={`task-column-${column.id}`}
                 >
                   <header
-                    className="flex items-center justify-between gap-2 border-b border-border/40 px-3 py-2"
+                    className="flex items-center gap-2 border-b border-border/40 px-3 py-2.5"
                     title={column.hint}
                   >
-                    <span className="text-xs font-semibold">{column.label}</span>
-                    <span className="text-xs text-muted-foreground">{columnRows.length}</span>
+                    <span
+                      className={cn(
+                        'flex h-7 w-7 shrink-0 items-center justify-center rounded-md bg-current/10',
+                        column.colorClass
+                      )}
+                      aria-hidden="true"
+                    >
+                      <ColumnIcon className="h-4 w-4" />
+                    </span>
+                    <h2
+                      id={`work-lane-${column.id}`}
+                      className="min-w-0 flex-1 text-sm font-semibold tracking-tight text-foreground/90"
+                    >
+                      {column.label}
+                    </h2>
+                    <span
+                      className="rounded-md bg-muted/50 px-2 py-0.5 text-xs font-medium tabular-nums text-muted-foreground/80"
+                      aria-label={`${columnRows.length} works`}
+                    >
+                      {columnRows.length}
+                    </span>
                   </header>
                   <div
                     className={cn(
@@ -1137,10 +1745,25 @@ export function WorktreesView() {
                         isCurrentProject={currentProject?.path === row.projectPath}
                         herdrBusy={herdrBusy.has(`${row.projectPath}:${row.path}`)}
                         onOpenBoard={openOnBoard}
-                        onCopyPath={copyPath}
+                        onCopyJiraId={copyJiraId}
                         onOpenLink={openLink}
                         onLocateTask={locateTask}
                         onOpenHerdr={openHerdr}
+                        onViewLogs={(row, featureId) =>
+                          setLogTarget({
+                            projectPath: row.projectPath,
+                            featureId,
+                            branchName: row.branch,
+                          })
+                        }
+                        onArchive={openArchive}
+                        archiveBusy={archiveBusy}
+                        onReset={() => void refetch()}
+                        onSnooze={(row) => {
+                          setSnoozeRow(row);
+                          setSnoozeReason('');
+                          setSnoozeOpen(true);
+                        }}
                       />
                     ))}
                     {columnRows.length === 0 && (
@@ -1274,6 +1897,17 @@ export function WorktreesView() {
                             <span className="truncate">
                               {row.feature.jiraKey ?? row.feature.id}
                             </span>
+                            {row.feature.jiraKey && (
+                              <Button
+                                variant="ghost"
+                                size="icon-sm"
+                                aria-label="Copy Jira ID"
+                                title={`Copy ${row.feature.jiraKey}`}
+                                onClick={() => copyJiraId(row)}
+                              >
+                                <Copy className="h-3.5 w-3.5" />
+                              </Button>
+                            )}
                             {row.featureCount > 1 && (
                               <span className="shrink-0">+{row.featureCount - 1} more</span>
                             )}
@@ -1286,6 +1920,18 @@ export function WorktreesView() {
                               </button>
                             )}
                           </div>
+                          <p className="mt-1 text-xs text-muted-foreground">
+                            Reporter:{' '}
+                            {row.feature.jiraReporterDisplayName ||
+                              row.feature.jiraReporter ||
+                              'Not available'}
+                          </p>
+                          <p className="text-xs text-muted-foreground">
+                            Assignee:{' '}
+                            {row.feature.jiraAssigneeDisplayName ||
+                              row.feature.jiraAssignee ||
+                              'Unassigned'}
+                          </p>
                         </div>
                       ) : (
                         <span className="text-xs text-muted-foreground">No feature linked</span>
@@ -1317,19 +1963,44 @@ export function WorktreesView() {
 
                     <td className="px-3 py-2">
                       <div className="flex items-center justify-end gap-1">
-                        <Tooltip>
-                          <TooltipTrigger asChild>
-                            <Button
-                              variant="ghost"
-                              size="icon-sm"
-                              onClick={() => copyPath(row)}
-                              aria-label="Copy worktree path"
-                            >
-                              <Copy className="h-3.5 w-3.5" />
-                            </Button>
-                          </TooltipTrigger>
-                          <TooltipContent>{row.path}</TooltipContent>
-                        </Tooltip>
+                        {row.feature?.jiraKey && !row.isMain && !row.archivedAt && (
+                          <ResetWorkAction
+                            projectPath={row.projectPath}
+                            featureId={row.feature.id}
+                            icon
+                            disabled={
+                              running ||
+                              archiveBusy ||
+                              row.tasks?.length !== 1 ||
+                              row.tasks[0]?.id !== row.feature.id
+                            }
+                            onReset={() => void refetch()}
+                          />
+                        )}
+                        <Button
+                          variant="ghost"
+                          size="icon-sm"
+                          aria-label="Archive Work"
+                          title="Archive Work"
+                          disabled={archiveBusy || running || row.isMain || !row.tasks?.length}
+                          onClick={() => void openArchive(row)}
+                        >
+                          <Archive className="h-3.5 w-3.5" />
+                        </Button>
+                        <Button
+                          variant="ghost"
+                          size="icon-sm"
+                          aria-label="Snooze worktree"
+                          disabled={running || row.isMain || row.branch === '(detached)'}
+                          onClick={() => {
+                            setSnoozeRow(row);
+                            setSnoozeReason('');
+                            setSnoozeOpen(true);
+                          }}
+                        >
+                          <SnoozeIcon className="h-3.5 w-3.5" />
+                        </Button>
+
                         <Tooltip>
                           <TooltipTrigger asChild>
                             <Button

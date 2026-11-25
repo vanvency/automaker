@@ -7,13 +7,8 @@ export function validateArchiveRequest(value: unknown): TaskArchiveRequest {
   const input = value as TaskArchiveRequest;
   if (!input || !Object.hasOwn(TASK_ARCHIVE_REASONS, input.reason))
     throw new Error('Select an archive reason');
-  if (
-    typeof input.description !== 'string' ||
-    input.description.trim().length < 5 ||
-    input.description.length > 8000
-  ) {
-    throw new Error('Provide a detailed archive description (5–8000 characters)');
-  }
+  if (input.reason === 'completed') throw new Error('Use Confirm to archive a completed delivery');
+  if (typeof input.description !== 'string') throw new Error('Archive description must be text');
   if (
     input.reason === 'duplicate' &&
     (typeof input.duplicateOf !== 'string' || !/^[\w-]+$/.test(input.duplicateOf))
@@ -89,10 +84,8 @@ export class TaskArchiveService {
         (await this.conversationBusy(project, tasks))
       )
         throw new Error('Stop the running task or conversation before archiving');
-      if (tasks.some((f) => f.consolidationPlanId || f.supersededBy))
-        throw new Error(
-          'A task is being consolidated or already covered; use Similar Works to inspect it'
-        );
+      if (tasks.some((f) => f.consolidationPlanId))
+        throw new Error('A task is being consolidated; use Similar Works to inspect it');
       const results = [];
       for (const task of tasks) {
         if (task.archive) {
@@ -125,20 +118,23 @@ export class TaskArchiveService {
     this.locks.add(project);
     try {
       const task = await this.loader.get(project, id);
-      if (!task?.archive) throw new Error('Task has no archive record');
+      if (!task || (!task.archive && task.status !== 'completed'))
+        throw new Error('Task has no archive record');
       if (task.supersededBy || task.consolidationPlanId)
         throw new Error('Resolve task consolidation first');
       const archive = task.archive;
       const status =
-        ['completed', 'in_progress', 'interrupted'].includes(archive.previousStatus) ||
-        archive.previousStatus.startsWith('pipeline_')
-          ? 'waiting_approval'
-          : archive.previousStatus;
+        !archive || archive.reason === 'completed'
+          ? 'verified'
+          : ['completed', 'in_progress', 'interrupted'].includes(archive.previousStatus) ||
+              archive.previousStatus.startsWith('pipeline_')
+            ? 'waiting_approval'
+            : archive.previousStatus;
       return await this.loader.update(project, id, {
         status,
         archive: undefined,
         archiveHistory: (task.archiveHistory ?? []).map((record) =>
-          record.archivedAt === archive.archivedAt
+          record.archivedAt === archive?.archivedAt
             ? { ...record, restoredAt: new Date().toISOString() }
             : record
         ),

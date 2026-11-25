@@ -7,7 +7,7 @@ export const activeDeliveryProjects = new Set<string>();
 export const activeCompletions = new Set<string>();
 export const activeCompletionRepairs = new Set<string>();
 export const completionKey = (project: string, id: string) => `${project}:${id}`;
-export const deliverySteps = ['merge', 'jira', 'preview'] as const;
+export const deliverySteps = ['preview', 'merge', 'jira'] as const;
 
 export function newDelivery(previous?: FeatureDelivery): FeatureDelivery {
   return {

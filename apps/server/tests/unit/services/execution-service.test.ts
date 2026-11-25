@@ -1,4 +1,12 @@
+vi.mock('../../../src/services/work-snooze.js', () => ({
+  readWorkSnoozes: vi.fn().mockResolvedValue({}),
+  workSnoozeFor: vi.fn(),
+  assertWorkNotSnoozed: vi.fn().mockResolvedValue(undefined),
+  changingWorkSnoozes: new Set(),
+  WorkSnoozedError: class extends Error {},
+}));
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { assertWorkNotSnoozed, WorkSnoozedError } from '../../../src/services/work-snooze.js';
 import path from 'path';
 import type { Feature } from '@automaker/types';
 
@@ -472,6 +480,16 @@ describe('execution-service.ts', () => {
   });
 
   describe('executeFeature', () => {
+    it('rejects snoozed work before changing status or starting an agent', async () => {
+      vi.mocked(assertWorkNotSnoozed).mockRejectedValueOnce(
+        new WorkSnoozedError('Work is snoozed')
+      );
+      await expect(service.executeFeature('/test/project', 'feature-1')).rejects.toThrow(
+        'Work is snoozed'
+      );
+      expect(mockRunAgentFn).not.toHaveBeenCalled();
+      expect(mockUpdateFeatureStatusFn).not.toHaveBeenCalled();
+    });
     it('throws if feature not found', async () => {
       mockLoadFeatureFn = vi.fn().mockResolvedValue(null);
       const svc = new ExecutionService(
@@ -1793,14 +1811,46 @@ describe('execution-service.ts', () => {
       const updateFeatureFields = vi.fn().mockResolvedValue(undefined);
       const svc = createServiceWithMocks({ updateFeatureFields });
       await svc.executeFeature('/test/project', 'feature-1');
-      expect(updateFeatureFields).toHaveBeenCalledWith('/test/project', 'feature-1', {
-        error: expect.stringContaining('Screenshot escapes directory'),
-      });
+      expect(updateFeatureFields).toHaveBeenCalledWith(
+        '/test/project',
+        'feature-1',
+        expect.objectContaining({
+          error: expect.stringContaining('Screenshot escapes directory'),
+          executionNotice: expect.objectContaining({ kind: 'error', source: 'delivery' }),
+        })
+      );
       expect(mockUpdateFeatureStatusFn).toHaveBeenCalledWith(
         '/test/project',
         'feature-1',
         'waiting_approval'
       );
+    });
+
+    it('does not overwrite an evidence import failure with a successful delivery summary', async () => {
+      vi.mocked(collectAcceptanceEvidence).mockRejectedValueOnce(
+        new Error('Invalid acceptance screenshots[0].capturedAt')
+      );
+      vi.mocked(secureFs.readFile).mockImplementation(async (file: unknown) =>
+        String(file).endsWith('jira/feature-1/jira-result.json')
+          ? JSON.stringify({
+              outcome: 'development_complete',
+              summary: 'Development complete',
+              blockers: [],
+            })
+          : makeAgentOutput(5)
+      );
+      const updateFeatureFields = vi.fn().mockResolvedValue(undefined);
+      await createServiceWithMocks({ updateFeatureFields }).executeFeature(
+        '/test/project',
+        'feature-1'
+      );
+      const notices = updateFeatureFields.mock.calls
+        .map((call) => call[2].executionNotice)
+        .filter(Boolean);
+      expect(notices.at(-1)).toMatchObject({
+        kind: 'error',
+        message: expect.stringContaining('screenshots[0].capturedAt'),
+      });
     });
 
     // Helper to generate realistic agent output with tool markers
@@ -1878,7 +1928,7 @@ describe('execution-service.ts', () => {
       );
     });
 
-    it('accepts completed development without requiring MRs', async () => {
+    it('hands development to the shared review gate and tells the agent to prepare Draft MRs', async () => {
       vi.mocked(secureFs.readFile).mockImplementation(async (readPath: unknown) =>
         String(readPath).endsWith('jira/feature-1/jira-result.json')
           ? JSON.stringify({ outcome: 'development_complete', blockers: [], mergeRequests: [] })
@@ -1890,7 +1940,7 @@ describe('execution-service.ts', () => {
         'feature-1',
         'waiting_approval'
       );
-      expect(mockRunAgentFn.mock.calls[0][2]).toContain('no MR is required');
+      expect(mockRunAgentFn.mock.calls[0][2]).toContain('Missing or non-draft MRs block delivery');
     });
 
     it('persists changed projects and MRs from a delivery receipt', async () => {
@@ -2460,6 +2510,74 @@ describe('execution-service.ts', () => {
         featureStateManager
       );
     };
+
+    it.each([false, true])(
+      'collects a detached pipeline turn with its original run ID (outputApplied=%s)',
+      async (outputApplied) => {
+        const feature = {
+          id: 'feature-1',
+          title: 'Existing work',
+          status: 'pipeline_review',
+          description: 'Task',
+          jiraIssueId: '101',
+          executionRunId: 'original-run',
+          branchName: 'task/a',
+          herdrExecution: {
+            paneId: 'p1',
+            workspaceId: 'w1',
+            tabId: 't1',
+            workDir: '/test/worktree',
+            startCursor: 4,
+            prompt: 'Original review step',
+            startedAt: '2026-09-21T00:00:00Z',
+            executionRunId: 'original-run',
+            status: 'pipeline_review',
+            planningMode: 'skip',
+            outputApplied,
+          },
+        } as Feature;
+        const fields = vi.fn().mockResolvedValue(undefined);
+        vi.mocked(pipelineService.getPipelineConfig).mockResolvedValue({
+          version: 1,
+          steps: [
+            { id: 'build', order: 0 },
+            { id: 'review', order: 1 },
+            { id: 'verify', order: 2 },
+          ],
+        } as any);
+        const svc = createServiceForSession(feature, { updateFeatureFields: fields });
+        await svc.executeFeature('/test/project', feature.id, true, false, undefined, {
+          reattachHerdr: true,
+          _calledInternally: true,
+        });
+        expect(fields.mock.calls.some((call) => call[2].executionRunId)).toBe(false);
+        expect(mockResumeFeatureFn).not.toHaveBeenCalled();
+        if (outputApplied) expect(mockRunAgentFn).not.toHaveBeenCalled();
+        else
+          expect(mockRunAgentFn).toHaveBeenCalledWith(
+            '/test/worktree',
+            feature.id,
+            expect.any(String),
+            expect.any(AbortController),
+            '/test/project',
+            undefined,
+            expect.any(String),
+            expect.objectContaining({
+              reattachHerdr: true,
+              planningMode: 'skip',
+              status: 'pipeline_review',
+            })
+          );
+        expect(mockExecutePipelineFn).toHaveBeenCalledWith(
+          expect.objectContaining({
+            steps: [{ id: 'verify', order: 2 }],
+          })
+        );
+        expect(fields).toHaveBeenCalledWith('/test/project', feature.id, {
+          herdrExecution: undefined,
+        });
+      }
+    );
 
     it('ignores old Jira receipts and tells the agent which run ID to report', async () => {
       const feature = {

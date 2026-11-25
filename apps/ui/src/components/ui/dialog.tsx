@@ -66,7 +66,7 @@ function DialogOverlay({
     <DialogOverlayPrimitive
       data-slot="dialog-overlay"
       className={cn(
-        'fixed inset-0 z-50 bg-black/60 backdrop-blur-sm',
+        'fixed inset-0 z-50 bg-black/45 backdrop-blur-[3px]',
         'data-[state=open]:animate-in data-[state=closed]:animate-out',
         'data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0',
         'duration-200',
@@ -112,9 +112,9 @@ const DialogContent = React.forwardRef<HTMLDivElement, DialogContentProps>(
           className={cn(
             'fixed left-[50%] z-50 translate-x-[-50%] translate-y-[-50%]',
             'top-[calc(50%_+_(env(safe-area-inset-top,0px)_-_env(safe-area-inset-bottom,0px))_/_2)]',
-            'flex flex-col w-full max-w-[calc(100%-2rem)]',
+            'flex flex-col gap-4 min-w-0 w-full max-w-[calc(100%-2rem)] overflow-y-auto overscroll-contain',
             'max-h-[calc(100dvh_-_4rem_-_env(safe-area-inset-top,0px)_-_env(safe-area-inset-bottom,0px))]',
-            'bg-card border border-border rounded-xl shadow-2xl',
+            'bg-card text-card-foreground border border-border/70 rounded-2xl shadow-2xl',
             // Premium shadow
             'shadow-[0_25px_50px_-12px_rgba(0,0,0,0.25)]',
             // Animations - smoother with scale
@@ -123,11 +123,12 @@ const DialogContent = React.forwardRef<HTMLDivElement, DialogContentProps>(
             'data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95',
             'data-[state=closed]:slide-out-to-top-[2%] data-[state=open]:slide-in-from-top-[2%]',
             'duration-200',
+            'motion-reduce:animate-none',
             compact
               ? 'max-w-[min(56rem,calc(100%-2rem))] p-4'
               : !hasCustomMaxWidth
-                ? 'sm:max-w-2xl p-6'
-                : 'p-6',
+                ? 'sm:max-w-2xl p-4 sm:p-6'
+                : 'p-4 sm:p-6',
             className
           )}
           {...props}
@@ -162,7 +163,7 @@ function DialogHeader({ className, ...props }: React.ComponentProps<'div'>) {
   return (
     <div
       data-slot="dialog-header"
-      className={cn('flex flex-col gap-2 text-center sm:text-left', className)}
+      className={cn('flex shrink-0 flex-col gap-1.5 pr-10 text-left', className)}
       {...props}
     />
   );
@@ -172,7 +173,10 @@ function DialogFooter({ className, ...props }: React.ComponentProps<'div'>) {
   return (
     <div
       data-slot="dialog-footer"
-      className={cn('flex flex-col-reverse gap-2 sm:flex-row sm:justify-end mt-6', className)}
+      className={cn(
+        'flex shrink-0 flex-col-reverse gap-2 border-t border-border/50 pt-4 sm:flex-row sm:flex-wrap sm:justify-end mt-2',
+        className
+      )}
       {...props}
     />
   );
@@ -189,7 +193,7 @@ function DialogTitle({
   return (
     <DialogTitlePrimitive
       data-slot="dialog-title"
-      className={cn('text-lg leading-none font-semibold tracking-tight', className)}
+      className={cn('text-lg leading-snug font-semibold tracking-tight break-words', className)}
       {...props}
     >
       {children}
@@ -210,7 +214,7 @@ function DialogDescription({
   return (
     <DialogDescriptionPrimitive
       data-slot="dialog-description"
-      className={cn('text-muted-foreground text-sm leading-relaxed', className)}
+      className={cn('text-muted-foreground text-sm leading-relaxed break-words', className)}
       title={title}
       {...props}
     >

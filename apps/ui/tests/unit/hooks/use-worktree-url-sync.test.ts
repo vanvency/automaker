@@ -1,6 +1,7 @@
 import { renderHook } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 import { useWorktreeUrlSync } from '@/components/views/board-view/hooks/use-worktree-url-sync';
+import { useRecentWorktreesStore } from '@/store/recent-worktrees-store';
 const trees = [
   { path: '/p/859', branch: 'AIP-114859' },
   { path: '/p/830', branch: 'AIP-114830' },
@@ -19,6 +20,27 @@ function setup(urlBranch = 'AIP-114830', selectedBranch = 'AIP-114859') {
   };
 }
 describe('worktree URL and selection synchronization', () => {
+  it('records reopening a restored selection without requiring a switch', () => {
+    useRecentWorktreesStore.setState({ pathsByProject: { '/p': ['/p/448'] } });
+    const options = setup('AIP-114859');
+    const { rerender, unmount } = renderHook(useWorktreeUrlSync, { initialProps: options });
+    expect(options.select).not.toHaveBeenCalled();
+    expect(useRecentWorktreesStore.getState().pathsByProject['/p']).toEqual(['/p/859', '/p/448']);
+    useRecentWorktreesStore.getState().visit('/p', '/p/830');
+    rerender({ ...options, worktrees: [...trees] });
+    expect(useRecentWorktreesStore.getState().pathsByProject['/p'][0]).toBe('/p/830');
+    unmount();
+    renderHook(useWorktreeUrlSync, { initialProps: options });
+    expect(useRecentWorktreesStore.getState().pathsByProject['/p'][0]).toBe('/p/859');
+  });
+  it('does not record a temporary selection while resolving an incoming link', () => {
+    useRecentWorktreesStore.setState({ pathsByProject: {} });
+    const options = setup();
+    const { rerender } = renderHook(useWorktreeUrlSync, { initialProps: options });
+    expect(useRecentWorktreesStore.getState().pathsByProject).toEqual({});
+    rerender({ ...options, selectedBranch: options.urlBranch });
+    expect(useRecentWorktreesStore.getState().pathsByProject['/p']).toEqual(['/p/830']);
+  });
   it('does not navigate back to 114859 while applying an incoming task link', () => {
     const options = setup();
     const { rerender } = renderHook(useWorktreeUrlSync, { initialProps: options });

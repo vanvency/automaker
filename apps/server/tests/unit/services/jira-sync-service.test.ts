@@ -149,6 +149,28 @@ describe('managed Jira configuration and scheduling', () => {
     expect((await service.status(project)).runs[0].status).toBe('success');
   });
 
+  it('previews and confirms reset under the Jira project lock', async () => {
+    await service.save(project, config);
+    const worker = vi.spyOn(service as any, 'worker').mockResolvedValue({
+      message: 'Fresh Jira snapshot ready',
+      changes: [],
+      reset: { snapshot: 'a'.repeat(64), issueKey: 'AIP-1' },
+    });
+    const preview = await service.resetWork(project, 'jira-card');
+    expect(preview.reset.snapshot).toBe('a'.repeat(64));
+    expect(worker).toHaveBeenCalledWith(
+      expect.objectContaining({ mode: 'reset-preview', featureId: 'jira-card' })
+    );
+    await service.resetWork(project, 'jira-card', 'a'.repeat(64));
+    expect(worker).toHaveBeenCalledWith(
+      expect.objectContaining({ mode: 'reset', snapshot: 'a'.repeat(64) })
+    );
+    await expect(service.resetWork(project, '../other')).rejects.toThrow('Invalid work ID');
+    await expect(service.resetWork(project, 'jira-card', 'invalid')).rejects.toThrow(
+      'Invalid reset preview token'
+    );
+  });
+
   it('retains existing manual/auto label rules during legacy config conversion', () => {
     expect(
       legacyJiraConfig({

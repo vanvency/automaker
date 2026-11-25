@@ -148,6 +148,53 @@ describe('settings-service.ts', () => {
       expect(updated.maxConcurrency).toBe(3); // Preserved from initial
     });
 
+    it('should preserve a project opened by another tab when a stale list is saved', async () => {
+      const initial: GlobalSettings = {
+        ...DEFAULT_GLOBAL_SETTINGS,
+        projects: [
+          { id: 'proj1', name: 'Project 1', path: '/tmp/project-1' },
+          { id: 'proj2', name: 'Project 2', path: '/tmp/project-2' },
+        ] as any,
+      };
+      await fs.writeFile(path.join(testDataDir, 'settings.json'), JSON.stringify(initial, null, 2));
+
+      const updated = await settingsService.updateGlobalSettings({
+        projects: [initial.projects[0]] as any,
+      });
+
+      expect(updated.projects.map((project) => project.id)).toEqual(['proj1', 'proj2']);
+    });
+
+    it('preserves concurrent project additions and still permits explicit removal', async () => {
+      const first = { id: 'first', name: 'First', path: '/tmp/first' };
+      const second = { id: 'second', name: 'Second', path: '/tmp/second' };
+      await Promise.all([
+        settingsService.updateGlobalSettings({ projects: [first] }),
+        settingsService.updateGlobalSettings({ projects: [second] }),
+      ]);
+      const saved = await settingsService.getGlobalSettings();
+      expect(saved.projects.map((project) => project.id).sort()).toEqual(['first', 'second']);
+
+      await settingsService.updateGlobalSettings({ removedProjectIds: ['second'] });
+      expect((await settingsService.getGlobalSettings()).projects).toEqual([first]);
+      const removedLast = await settingsService.updateGlobalSettings({
+        removedProjectIds: ['first'],
+      });
+      expect(removedLast.projects).toEqual([]);
+      expect(removedLast).not.toHaveProperty('removedProjectIds');
+    });
+
+    it('moves the named project to trash without removing other tabs projects', async () => {
+      const first = { id: 'first', name: 'First', path: '/tmp/first' };
+      const second = { id: 'second', name: 'Second', path: '/tmp/second' };
+      await settingsService.updateGlobalSettings({ projects: [first, second] });
+      const saved = await settingsService.updateGlobalSettings({
+        projects: [],
+        trashedProjects: [{ ...first, trashedAt: new Date().toISOString() }],
+      });
+      expect(saved.projects).toEqual([second]);
+    });
+
     it('should deep merge keyboard shortcuts', async () => {
       const updates: Partial<GlobalSettings> = {
         keyboardShortcuts: {

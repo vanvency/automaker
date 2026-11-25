@@ -21,8 +21,9 @@
  */
 
 import { create } from 'zustand';
-import { persist } from 'zustand/middleware';
+import { createJSONStorage, persist } from 'zustand/middleware';
 import { sanitizeWorktreeByProject } from '@/lib/settings-utils';
+import { storage } from '@/lib/storage';
 import { useAppStore } from '@/store/app-store';
 
 interface UICacheState {
@@ -61,6 +62,8 @@ export const useUICacheStore = create<UICacheState & UICacheActions>()(
     }),
     {
       name: STORE_NAME,
+      // Cache persistence is optional; storage failures must not interrupt app-store subscribers.
+      storage: createJSONStorage(() => storage),
       version: 2,
       partialize: (state) => ({
         cachedProjectId: state.cachedProjectId,

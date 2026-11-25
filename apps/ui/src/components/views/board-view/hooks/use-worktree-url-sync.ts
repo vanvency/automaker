@@ -1,4 +1,5 @@
 import { useEffect, useRef } from 'react';
+import { useRecentWorktreesStore } from '@/store/recent-worktrees-store';
 
 interface WorktreeTarget {
   path: string;
@@ -30,6 +31,23 @@ export function useWorktreeUrlSync({
   const observedUrl = useRef<string | undefined>(undefined);
   const publishedUrls = useRef<string[]>([]);
   const pendingBranch = useRef<string | undefined>(undefined);
+  const lastVisit = useRef<string | undefined>(undefined);
+  useEffect(() => {
+    if (!projectPath || loading || (urlProjectPath && urlProjectPath !== projectPath)) return;
+    // Record visits even when hydration already restored this selection and no
+    // setCurrentWorktree call is needed. Wait for an incoming URL to be applied.
+    if (urlBranch && urlBranch !== selectedBranch) return;
+    const target = worktrees.find((tree) => tree.branch === selectedBranch);
+    if (!target) return;
+    const visitKey = JSON.stringify([projectPath, target.path]);
+    if (lastVisit.current === visitKey) return;
+    lastVisit.current = visitKey;
+    try {
+      useRecentWorktreesStore.getState().visit(projectPath, target.isMain ? null : target.path);
+    } catch {
+      // History is optional and must not interrupt opening the board.
+    }
+  }, [projectPath, urlProjectPath, urlBranch, selectedBranch, worktrees, loading]);
   useEffect(() => {
     if (!projectPath || loading || (urlProjectPath && urlProjectPath !== projectPath)) return;
     const key = (branch?: string | null) => JSON.stringify([projectPath, branch ?? null]);

@@ -391,11 +391,10 @@ MRs and receipt before resuming it through Automaker. Do not delete its state re
 blindly: that can cause duplicate work. Polling errors are kept in `lastError` and
 retried on the next timer tick. The monitor does not silently switch away from Codex.
 
-The GitLab publishing instruction uses documented
-[Git push options](https://docs.gitlab.com/topics/git/commit/) to create MRs to `dev`.
+The GitLab delivery instruction creates or reuses one verified Draft MR per changed repository, targeting `dev` by default. The agent must read each MR back and confirm its Draft state, source branch, target branch and current revision before the card can enter Waiting Review.
 Git commands for these jobs use an explicit SSH configuration because the host's
 global SSH client configuration contains an invalid `PermitRootLogin` directive.
 
 Validation: `python3 -m unittest discover -s scripts -p test_jira_monitor.py -v`.
 With no matching Jira issues, only polling and simulated dispatch tests can be
-validated; real implementation, testing and MR creation await the first matching issue.
+validated; real implementation, testing and Draft MR creation await the first matching issue.

@@ -71,6 +71,7 @@ describe('AgentView herdr preview', () => {
     // Web mode shares an origin with the server (the Vite proxy).
     expect(src.startsWith(window.location.origin)).toBe(true);
     expect(screen.getByTestId('herdr-preview-reused')).toBeInTheDocument();
+    expect(screen.getByTestId('herdr-agent-preview')).toHaveClass('herdr-light');
   });
 
   it('points the frame at the API server when the renderer has its own origin', async () => {

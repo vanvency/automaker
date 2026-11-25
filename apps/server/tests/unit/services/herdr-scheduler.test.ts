@@ -194,6 +194,33 @@ describe('herdr-scheduler', () => {
     expect(result.tasks.map((task) => task.id)).toEqual(['AIP-101', 'AIP-102']);
   });
 
+  it('runs an explicitly approved Story as one existing card without proposing a new split', async () => {
+    const { service } = createTaskService();
+    const scheduler = new HerdrScheduler(service);
+    const feature = {
+      ...FEATURE,
+      jiraKey: 'AIP-116826',
+      issueType: 'Story',
+      jiraDelivery: {
+        issueKey: 'AIP-116826',
+        branch: 'epic/aip-116825-dodo',
+        worktree: '/proj/wt',
+        subtaskKeys: [],
+        requiresDecision: false,
+        rule: 'parent-with-jira-subtasks' as const,
+        storyExecutionApproved: true,
+      },
+    };
+    const result = await scheduler.dispatch({ projectPath: '/proj', feature, workDir: '/proj/wt' });
+    expect(service.startLeader).not.toHaveBeenCalled();
+    expect(result.tasks.map((task) => task.id)).toEqual(['AIP-116826']);
+    expect(service.promptAndWait).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.stringContaining('Do not split the Story or create cards'),
+      expect.anything()
+    );
+  });
+
   it('refuses to split a parent issue a human has to split in Jira', async () => {
     const { service } = createTaskService();
     const scheduler = new HerdrScheduler(service);

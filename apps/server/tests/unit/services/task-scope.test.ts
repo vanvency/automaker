@@ -18,6 +18,33 @@ function feature(overrides: Partial<Feature> = {}): Feature {
 }
 
 describe('task-scope', () => {
+  it('executes only an explicitly approved existing Jira Story card without splitting it', () => {
+    const story = feature({
+      jiraKey: 'AIP-116826',
+      issueType: 'Story',
+      jiraSummary: 'Maintain tree labels',
+      jiraDelivery: {
+        issueKey: 'AIP-116826',
+        subtaskKeys: [],
+        branch: 'epic/aip-116825-dodo',
+        worktree: '/project/.worktrees/epic',
+        requiresDecision: false,
+        rule: 'parent-with-jira-subtasks',
+        storyExecutionApproved: true,
+      },
+    });
+    expect(resolveTaskScope(story)).toEqual({
+      kind: 'approved-story',
+      story: { key: 'AIP-116826', summary: 'Maintain tree labels' },
+    });
+    expect(
+      resolveTaskScope({
+        ...story,
+        jiraDelivery: { ...story.jiraDelivery!, storyExecutionApproved: false },
+      })
+    ).toEqual({ kind: 'propose-decomposition' });
+  });
+
   it('treats the Jira sub-tasks as the units when Jira already split the issue', () => {
     const scope = resolveTaskScope(
       feature({

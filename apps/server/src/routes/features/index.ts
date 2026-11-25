@@ -54,10 +54,21 @@ export function createFeaturesRoutes(
   const router = Router();
   router.use(['/update', '/bulk-update'], async (req, res, next) => {
     const updates = req.body?.updates;
-    if (updates && ('archive' in updates || 'archiveHistory' in updates)) {
+    if (req.path === '/bulk-update' && updates?.attentionOverride) {
       res.status(400).json({
         success: false,
-        error: 'Use the archive/restore-archive endpoints to change archive records',
+        error: 'Confirm manual attention moves individually through the update endpoint',
+      });
+      return;
+    }
+    if (
+      updates &&
+      ('archive' in updates || 'archiveHistory' in updates || 'deliveryApproval' in updates)
+    ) {
+      res.status(400).json({
+        success: false,
+        error:
+          'Use the archive/restore-archive or Complete endpoints to change archive/approval records',
       });
       return;
     }
@@ -81,7 +92,7 @@ export function createFeaturesRoutes(
   router.post(
     '/acceptance-evidence',
     validatePathParams('projectPath'),
-    createAcceptanceEvidenceHandler(featureLoader)
+    createAcceptanceEvidenceHandler(featureLoader, events)
   );
 
   router.post(
@@ -97,10 +108,16 @@ export function createFeaturesRoutes(
   router.post(
     '/complete',
     validatePathParams('projectPath'),
-    createCompleteHandler(featureLoader, settingsService, async (project) =>
-      ((await autoModeService?.getRunningAgents()) ?? [])
-        .filter((agent) => agent.projectPath === project)
-        .map((agent) => agent.featureId)
+    createCompleteHandler(
+      featureLoader,
+      settingsService,
+      async (project) =>
+        ((await autoModeService?.getRunningAgents()) ?? [])
+          .filter((agent) => agent.projectPath === project)
+          .map((agent) => agent.featureId),
+      undefined,
+      undefined,
+      autoModeService
     )
   );
   router.post(
@@ -142,7 +159,11 @@ export function createFeaturesRoutes(
   router.post(
     '/update',
     validatePathParams('projectPath'),
-    createUpdateHandler(featureLoader, events, settingsService)
+    createUpdateHandler(featureLoader, events, settingsService, async (projectPath, featureId) =>
+      ((await autoModeService?.getRunningAgents()) ?? []).some(
+        (agent) => agent.projectPath === projectPath && agent.featureId === featureId
+      )
+    )
   );
   router.post(
     '/bulk-update',

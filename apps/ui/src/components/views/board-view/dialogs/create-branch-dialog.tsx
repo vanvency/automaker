@@ -66,6 +66,7 @@ export function CreateBranchDialog({
   const [error, setError] = useState<string | null>(null);
   const [baseBranchPopoverOpen, setBaseBranchPopoverOpen] = useState(false);
   const baseBranchTriggerRef = useRef<HTMLButtonElement>(null);
+  const draftWorktreeRef = useRef<string | null>(null);
   const [baseBranchTriggerWidth, setBaseBranchTriggerWidth] = useState<number>(0);
 
   // Stash confirmation state
@@ -107,14 +108,15 @@ export function CreateBranchDialog({
     }
   }, [worktree]);
 
-  // Reset state and fetch branches when dialog opens
+  // Keep unfinished branch choices when the same worktree is reopened.
   useEffect(() => {
     if (open) {
-      setBranchName('');
-      setBaseBranch('');
-      // Update the ref synchronously so fetchBranches() sees the cleared value
-      // immediately, rather than the stale value from the previous open.
-      baseBranchRef.current = '';
+      if (draftWorktreeRef.current !== worktree?.path) {
+        draftWorktreeRef.current = worktree?.path ?? null;
+        setBranchName('');
+        setBaseBranch('');
+        baseBranchRef.current = '';
+      }
       setError(null);
       setBranches([]);
       setBaseBranchPopoverOpen(false);
@@ -123,7 +125,7 @@ export function CreateBranchDialog({
       setIsChecking(false);
       fetchBranches();
     }
-  }, [open, fetchBranches]);
+  }, [open, fetchBranches, worktree?.path]);
 
   // Track trigger width for popover sizing
   useEffect(() => {
@@ -178,6 +180,7 @@ export function CreateBranchDialog({
             toast.success(result.result.message, { description: desc });
           }
           onCreated();
+          draftWorktreeRef.current = null;
           onOpenChange(false);
         } else {
           setError(result.error || 'Failed to create branch');

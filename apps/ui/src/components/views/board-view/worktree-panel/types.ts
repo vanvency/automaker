@@ -1,6 +1,7 @@
 // Re-export shared types from @automaker/types
 export type { PRState, WorktreePRInfo } from '@automaker/types';
 import type { PRState, WorktreePRInfo } from '@automaker/types';
+import type { ReactNode } from 'react';
 
 export interface WorktreeInfo {
   path: string;
@@ -125,6 +126,8 @@ export interface StashApplyConflictInfo {
 }
 
 export interface WorktreePanelProps {
+  /** Controls aligned to the right of the worktree selector. */
+  trailingControls?: ReactNode;
   projectPath: string;
   onCreateWorktree: () => void;
   onDeleteWorktree: (worktree: WorktreeInfo) => void;

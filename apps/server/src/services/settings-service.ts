@@ -105,6 +105,7 @@ async function writeSettingsJson(filePath: string, data: unknown): Promise<void>
  * Updates use deep merge for nested objects like keyboardShortcuts and apiKeys.
  */
 export class SettingsService {
+  private globalUpdateQueue: Promise<unknown> = Promise.resolve();
   private dataDir: string;
 
   /**
@@ -538,7 +539,18 @@ export class SettingsService {
    * @param updates - Partial GlobalSettings to merge (only provided fields are updated)
    * @returns Promise resolving to complete updated GlobalSettings
    */
-  async updateGlobalSettings(updates: Partial<GlobalSettings>): Promise<GlobalSettings> {
+  updateGlobalSettings(
+    updates: Partial<GlobalSettings> & { removedProjectIds?: string[] }
+  ): Promise<GlobalSettings> {
+    // Serialize read/merge/write so concurrent tabs cannot lose each other's additions.
+    const result = this.globalUpdateQueue.then(() => this.writeGlobalSettings(updates));
+    this.globalUpdateQueue = result.catch(() => {});
+    return result;
+  }
+
+  private async writeGlobalSettings(
+    updates: Partial<GlobalSettings> & { removedProjectIds?: string[] }
+  ): Promise<GlobalSettings> {
     await ensureDataDir(this.dataDir);
     const settingsPath = getGlobalSettingsPath(this.dataDir);
 
@@ -548,6 +560,8 @@ export class SettingsService {
     // During auth transitions, the UI can briefly have default/empty state and accidentally
     // sync it, wiping persisted settings (especially `projects`).
     const sanitizedUpdates: Partial<GlobalSettings> = { ...updates };
+    const removedProjectIds = new Set(updates.removedProjectIds ?? []);
+    delete (sanitizedUpdates as Record<string, unknown>).removedProjectIds;
     let attemptedProjectWipe = false;
 
     const ignoreEmptyArrayOverwrite = <K extends keyof GlobalSettings>(key: K): void => {
@@ -674,11 +688,44 @@ export class SettingsService {
       delete sanitizedUpdates.theme;
     }
 
+    // Project settings are written by multiple browser tabs. Merge additions from
+    // a stale tab instead of allowing its older project list to erase a project
+    // that another tab just opened. Removal requires an explicit ID or trash entry.
+    if (Array.isArray(sanitizedUpdates.projects) && currentProjectsLen > 0) {
+      const incomingProjects = sanitizedUpdates.projects;
+      const incomingTrashed = Array.isArray(sanitizedUpdates.trashedProjects)
+        ? sanitizedUpdates.trashedProjects
+        : [];
+      const trashedKeys = new Set(
+        incomingTrashed.flatMap((project) => [project.id, project.path]).filter(Boolean)
+      );
+      const incomingKeys = new Set(
+        incomingProjects.flatMap((project) => [project.id, project.path]).filter(Boolean)
+      );
+      const preservedProjects = current.projects.filter(
+        (project) =>
+          !incomingKeys.has(project.id) &&
+          !incomingKeys.has(project.path) &&
+          !trashedKeys.has(project.id) &&
+          !trashedKeys.has(project.path) &&
+          !removedProjectIds.has(project.id)
+      );
+      if (preservedProjects.length > 0) {
+        sanitizedUpdates.projects = [...incomingProjects, ...preservedProjects];
+      }
+    }
+
     const updated: GlobalSettings = {
       ...current,
       ...sanitizedUpdates,
       version: SETTINGS_VERSION,
     };
+    if (removedProjectIds.size > 0) {
+      updated.projects = updated.projects.filter((project) => !removedProjectIds.has(project.id));
+      if (updated.currentProjectId && removedProjectIds.has(updated.currentProjectId)) {
+        updated.currentProjectId = null;
+      }
+    }
 
     // Deep merge keyboard shortcuts if provided
     if (sanitizedUpdates.keyboardShortcuts) {

@@ -49,7 +49,7 @@ export function SidebarHeader({
     async (project: Project) => {
       if (project.id === currentProject?.id) {
         setDropdownOpen(false);
-        navigate({ to: '/board' });
+        navigate({ to: '/worktrees' });
         return;
       }
       try {
@@ -65,7 +65,7 @@ export function SidebarHeader({
       startTransition(() => {
         setCurrentProject(project);
         setDropdownOpen(false);
-        navigate({ to: '/board' });
+        navigate({ to: '/worktrees' });
       });
     },
     [currentProject?.id, setCurrentProject, navigate]

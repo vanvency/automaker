@@ -1,10 +1,11 @@
-import { useState, useCallback, useEffect } from 'react';
+import { useState, useCallback, useEffect, useRef } from 'react';
 import { createLogger } from '@automaker/utils/logger';
 import { DragStartEvent, DragEndEvent } from '@dnd-kit/core';
 import { Feature } from '@/store/app-store';
 import { useAppStore } from '@/store/app-store';
 import { toast } from 'sonner';
-import { COLUMNS, ColumnId } from '../constants';
+import { COLUMNS, ColumnId, isNeedsAttentionStatus } from '../constants';
+import { hasFeatureAttentionError } from '@automaker/types';
 
 const logger = createLogger('BoardDragDrop');
 
@@ -22,6 +23,12 @@ export interface PendingDependencyLink {
   targetFeature: Feature;
 }
 
+export interface PendingAttentionMove {
+  feature: Feature;
+  targetStatus: 'backlog' | 'in_progress' | 'waiting_approval' | 'verified';
+  projectPath: string;
+}
+
 interface UseBoardDragDropProps {
   features: Feature[];
   currentProject: { path: string; id: string } | null;
@@ -33,7 +40,7 @@ interface UseBoardDragDropProps {
 
 export function useBoardDragDrop({
   features,
-  currentProject: _currentProject,
+  currentProject,
   runningAutoTasks,
   persistFeatureUpdate,
   handleStartImplementation,
@@ -43,6 +50,77 @@ export function useBoardDragDrop({
   const [pendingDependencyLink, setPendingDependencyLink] = useState<PendingDependencyLink | null>(
     null
   );
+  const [pendingAttentionMove, setPendingAttentionMove] = useState<PendingAttentionMove | null>(
+    null
+  );
+  const [confirmingAttentionMove, setConfirmingAttentionMove] = useState(false);
+  const confirmingRef = useRef(false);
+  useEffect(() => {
+    setPendingAttentionMove(null);
+  }, [currentProject?.path]);
+  const cancelAttentionMove = useCallback(() => {
+    if (!confirmingRef.current) setPendingAttentionMove(null);
+  }, []);
+  const confirmAttentionMove = useCallback(async () => {
+    if (!pendingAttentionMove || confirmingRef.current) return;
+    const { feature: snapshot, targetStatus, projectPath } = pendingAttentionMove;
+    const feature = features.find((item) => item.id === snapshot.id);
+    if (
+      currentProject?.path !== projectPath ||
+      !feature ||
+      feature.archive ||
+      feature.status === 'completed' ||
+      feature.status === 'in_progress' ||
+      feature.status.startsWith('pipeline_') ||
+      runningAutoTasks.includes(feature.id) ||
+      feature.status !== snapshot.status ||
+      feature.executionRunId !== snapshot.executionRunId ||
+      feature.error !== snapshot.error ||
+      feature.executionNotice?.message !== snapshot.executionNotice?.message
+    ) {
+      setPendingAttentionMove(null);
+      toast.error('Task changed; reload and try the move again.');
+      return;
+    }
+    confirmingRef.current = true;
+    setConfirmingAttentionMove(true);
+    try {
+      if (targetStatus === 'in_progress') {
+        await handleStartImplementation(feature);
+      } else {
+        await persistFeatureUpdate(feature.id, {
+          status: targetStatus,
+          ...CLEAR_ATTENTION_NOTICE,
+          ...(targetStatus === 'verified' ? { completionSource: 'human' } : {}),
+          ...(['waiting_approval', 'verified'].includes(targetStatus)
+            ? {
+                attentionOverride: {
+                  fromStatus: feature.status,
+                  targetStatus: targetStatus as 'waiting_approval' | 'verified',
+                  acceptedAt: new Date().toISOString(),
+                  previousError: feature.error || feature.executionNotice?.message,
+                  executionRunId:
+                    typeof feature.executionRunId === 'string' ? feature.executionRunId : undefined,
+                },
+              }
+            : {}),
+        });
+      }
+      setPendingAttentionMove(null);
+    } catch (error) {
+      toast.error('Could not move task', { description: (error as Error).message });
+    } finally {
+      confirmingRef.current = false;
+      setConfirmingAttentionMove(false);
+    }
+  }, [
+    pendingAttentionMove,
+    features,
+    currentProject?.path,
+    runningAutoTasks,
+    handleStartImplementation,
+    persistFeatureUpdate,
+  ]);
   // IMPORTANT: Use individual selectors instead of bare useAppStore() to prevent
   // subscribing to the entire store. Bare useAppStore() causes the host component
   // (BoardView) to re-render on EVERY store change, which cascades through effects
@@ -93,6 +171,7 @@ export function useBoardDragDrop({
       // Find the feature being dragged
       const draggedFeature = features.find((f) => f.id === featureId);
       if (!draggedFeature) return;
+      if (draggedFeature.archive || draggedFeature.status === 'completed') return;
 
       // Check if this is a running task (non-skipTests, TDD)
       const isRunningTask = runningAutoTasks.includes(featureId);
@@ -116,7 +195,7 @@ export function useBoardDragDrop({
           if (!targetFeature) return;
 
           // Don't allow linking completed features (they're already done)
-          if (draggedFeature.status === 'completed' || targetFeature.status === 'completed') {
+          if (targetFeature.status === 'completed') {
             toast.error('Cannot link features', {
               description: 'Completed features cannot be linked.',
             });
@@ -219,7 +298,29 @@ export function useBoardDragDrop({
         }
       }
 
-      if (!targetStatus) return;
+      if (!targetStatus || targetStatus === 'failed') return;
+
+      const needsAttention =
+        isNeedsAttentionStatus(draggedFeature.status) || hasFeatureAttentionError(draggedFeature);
+      if (needsAttention && draggedFeature.status !== 'in_progress') {
+        if (isRunningTask) {
+          toast.error('Cannot move running feature', {
+            description: 'Stop the agent before moving this task.',
+          });
+          return;
+        }
+        if (
+          currentProject &&
+          ['backlog', 'in_progress', 'waiting_approval', 'verified'].includes(targetStatus)
+        ) {
+          setPendingAttentionMove({
+            feature: draggedFeature,
+            targetStatus: targetStatus as PendingAttentionMove['targetStatus'],
+            projectPath: currentProject.path,
+          });
+        }
+        return;
+      }
 
       // Same column, nothing to do
       if (targetStatus === draggedFeature.status) return;
@@ -375,6 +476,7 @@ export function useBoardDragDrop({
     },
     [
       features,
+      currentProject,
       runningAutoTasks,
       updateFeature,
       persistFeatureUpdate,
@@ -389,5 +491,9 @@ export function useBoardDragDrop({
     handleDragEnd,
     pendingDependencyLink,
     clearPendingDependencyLink,
+    pendingAttentionMove,
+    confirmingAttentionMove,
+    confirmAttentionMove,
+    cancelAttentionMove,
   };
 }

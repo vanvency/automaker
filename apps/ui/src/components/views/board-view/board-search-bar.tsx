@@ -10,6 +10,8 @@ interface BoardSearchBarProps {
   isCreatingSpec: boolean;
   creatingSpecProjectPath?: string;
   currentProjectPath?: string;
+  placeholder?: string;
+  showConversations?: boolean;
 }
 
 export function BoardSearchBar({
@@ -18,6 +20,8 @@ export function BoardSearchBar({
   isCreatingSpec,
   creatingSpecProjectPath,
   currentProjectPath,
+  placeholder = 'Search features by keyword...',
+  showConversations = true,
 }: BoardSearchBarProps) {
   const searchInputRef = useRef<HTMLInputElement>(null);
   const [conversationSearchOpen, setConversationSearchOpen] = useState(false);
@@ -28,6 +32,13 @@ export function BoardSearchBar({
       // Only focus if not typing in an input/textarea
       if (
         e.key === '/' &&
+        !e.ctrlKey &&
+        !e.metaKey &&
+        !e.altKey &&
+        !(
+          e.target instanceof HTMLElement &&
+          e.target.closest('[contenteditable="true"], [role="dialog"], select')
+        ) &&
         !(e.target instanceof HTMLInputElement) &&
         !(e.target instanceof HTMLTextAreaElement)
       ) {
@@ -47,7 +58,9 @@ export function BoardSearchBar({
         <Input
           ref={searchInputRef}
           type="text"
-          placeholder="Search features by keyword..."
+          placeholder={placeholder}
+          aria-label="Search"
+          aria-keyshortcuts="/"
           value={searchQuery}
           onChange={(e) => onSearchChange(e.target.value)}
           className="pl-9 pr-12 border-border"
@@ -73,20 +86,24 @@ export function BoardSearchBar({
       </div>
       {/* Conversations are searched on the server: a card's transcript outlives
           its herdr tab and its worktree, so the board's own filter cannot see it. */}
-      <button
-        onClick={() => setConversationSearchOpen(true)}
-        className="flex items-center gap-1.5 px-2 py-1.5 rounded-md border border-border text-xs text-muted-foreground hover:text-foreground hover:bg-accent transition-colors shrink-0"
-        title="Search all task conversations"
-        data-testid="conversation-search-trigger"
-      >
-        <History className="w-3.5 h-3.5" />
-        Conversations
-      </button>
-      <ConversationSearchDialog
-        open={conversationSearchOpen}
-        onOpenChange={setConversationSearchOpen}
-        projectPath={currentProjectPath}
-      />
+      {showConversations && (
+        <button
+          onClick={() => setConversationSearchOpen(true)}
+          className="flex items-center gap-1.5 px-2 py-1.5 rounded-md border border-border text-xs text-muted-foreground hover:text-foreground hover:bg-accent transition-colors shrink-0"
+          title="Search all task conversations"
+          data-testid="conversation-search-trigger"
+        >
+          <History className="w-3.5 h-3.5" />
+          Conversations
+        </button>
+      )}
+      {showConversations && (
+        <ConversationSearchDialog
+          open={conversationSearchOpen}
+          onOpenChange={setConversationSearchOpen}
+          projectPath={currentProjectPath}
+        />
+      )}
       {/* Spec Creation Loading Badge */}
       {isCreatingSpec && currentProjectPath === creatingSpecProjectPath && (
         <div

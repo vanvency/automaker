@@ -8,6 +8,7 @@ import {
 } from '@automaker/types';
 import { apiFetch } from '@/lib/api-fetch';
 import { Button } from '@/components/ui/button';
+import { ResetWorkAction } from '../board-view/dialogs/reset-work-action';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { PhaseModelSelector } from '../settings-view/model-defaults/phase-model-selector';
@@ -436,6 +437,7 @@ export function JiraSyncSection({ project }: { project: { path: string } }) {
                   <th>Jira</th>
                   <th>任务卡</th>
                   <th>同步状态</th>
+                  <th>操作</th>
                 </tr>
               </thead>
               <tbody>
@@ -446,6 +448,15 @@ export function JiraSyncSection({ project }: { project: { path: string } }) {
                     <td>
                       {job.status}
                       {job.claimed ? ' · 已认领' : ''}
+                    </td>
+                    <td>
+                      {job.featureId && (
+                        <ResetWorkAction
+                          projectPath={project.path}
+                          featureId={job.featureId}
+                          disabled={Boolean(busy)}
+                        />
+                      )}
                     </td>
                   </tr>
                 ))}

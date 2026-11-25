@@ -19,6 +19,15 @@ function card(fields: Partial<Feature> = {}): Feature {
 }
 
 describe('released worktree notice', () => {
+  it('shows the Agent run completion time on the task card', () => {
+    render(
+      <CardContentSections feature={card({ lastExecutionCompletedAt: '2026-11-07T09:00:00Z' })} />
+    );
+    expect(screen.getByText(/最近开发完成：/).querySelector('time')).toHaveAttribute(
+      'dateTime',
+      '2026-11-07T09:00:00Z'
+    );
+  });
   it('explains the released checkout and the rebuild', () => {
     render(
       <CardContentSections

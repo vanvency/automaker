@@ -32,20 +32,76 @@ const features = [
   { id: 'superseded', title: 'Superseded export', supersededBy: 'b' },
   { id: 'consolidating', title: 'Consolidating export', consolidationPlanId: 'plan' },
 ] as Feature[];
-function view() {
+function view(workScope = false) {
   render(
     <QueryClientProvider client={new QueryClient()}>
       <ArchiveTaskDialog
         projectPath="/project"
         featureIds={['a']}
         features={features}
+        workScope={workScope}
         onClose={vi.fn()}
       />
     </QueryClientProvider>
   );
 }
 describe('archive task form', () => {
-  it('requires reason and description and a target for duplicates', async () => {
+  it('allows an empty description for Work Board reasons', () => {
+    view(true);
+    const submit = screen.getByRole('button', { name: 'Archive Work' });
+    expect(screen.getByLabelText('Archive reason')).toHaveValue('already_taken');
+    expect(screen.getByText('Detailed description (optional)')).toBeVisible();
+    expect(submit).toBeEnabled();
+    fireEvent.change(screen.getByLabelText('Archive reason'), { target: { value: 'deferred' } });
+    expect(submit).toBeEnabled();
+    fireEvent.change(screen.getByLabelText('Archive description'), { target: { value: 'abc' } });
+    expect(submit).toBeEnabled();
+  });
+  it.each([true, false])(
+    'offers Done with an optional description (work scope: %s)',
+    (workScope) => {
+      view(workScope);
+      const name = workScope ? 'Archive Work' : 'Archive Task';
+      fireEvent.change(screen.getByLabelText('Archive reason'), { target: { value: 'done' } });
+      expect(screen.getByRole('option', { name: 'Done', exact: true })).toBeInTheDocument();
+      expect(screen.getByRole('button', { name })).toBeEnabled();
+      fireEvent.change(screen.getByLabelText('Archive description'), { target: { value: '好' } });
+      expect(screen.getByRole('button', { name })).toBeEnabled();
+    }
+  );
+  it('submits already-taken reason only to the local archive endpoint', async () => {
+    view();
+    fireEvent.change(screen.getByLabelText('Archive reason'), {
+      target: { value: 'already_taken' },
+    });
+    expect(
+      screen.getByRole('option', { name: 'Already taken (completed by someone else)' })
+    ).toBeInTheDocument();
+    expect(screen.getByText(/does not change Jira fields, comments or status/)).toBeVisible();
+    fireEvent.change(screen.getByLabelText('Archive description'), {
+      target: { value: 'Completed by another developer.' },
+    });
+    mocks.api.mockResolvedValue({
+      ok: true,
+      json: async () => ({ success: true, archivedCount: 1, features: [] }),
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Archive Task' }));
+    await waitFor(() =>
+      expect(mocks.api).toHaveBeenCalledWith('/api/features/archive', 'POST', {
+        body: {
+          projectPath: '/project',
+          featureIds: ['a'],
+          archive: {
+            reason: 'already_taken',
+            description: 'Completed by another developer.',
+            duplicateOf: undefined,
+          },
+        },
+      })
+    );
+    expect(mocks.api).toHaveBeenCalledTimes(1);
+  });
+  it('requires a reason and a target for duplicates', async () => {
     view();
     const submit = screen.getByRole('button', { name: 'Archive Task' });
     expect(submit).toBeDisabled();

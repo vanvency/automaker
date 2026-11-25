@@ -12,6 +12,7 @@ import { toast } from 'sonner';
 import { writeToClipboard } from '@/lib/clipboard-utils';
 import { CardBadges, PriorityBadges } from './card-badges';
 import { CardHeaderSection } from './card-header';
+import { cardPreviewText } from './card-preview-text';
 import { CardContentSections } from './card-content-sections';
 import { CardDetailsDialog } from './card-details-dialog';
 import { AcceptanceEvidenceDialog } from '../acceptance-evidence';
@@ -22,6 +23,7 @@ import { AgentInfoPanel } from './agent-info-panel';
 import { CardActions } from './card-actions';
 import { HerdrStatusBadge } from './herdr-status-badge';
 import { MrConflictNotice } from './mr-conflict-notice';
+import { isNeedsAttentionStatus } from '../../constants';
 
 function getCardBorderStyle(enabled: boolean, opacity: number): React.CSSProperties {
   if (!enabled) {
@@ -166,9 +168,8 @@ export const KanbanCard = memo(function KanbanCard({
     !!isCurrentAutoTask &&
     !isInExecutionState &&
     (feature.status === 'backlog' ||
-      feature.status === 'merge_conflict' ||
-      feature.status === 'ready' ||
-      feature.status === 'interrupted');
+      isNeedsAttentionStatus(feature.status) ||
+      feature.status === 'ready');
   // Show running visual treatment for both fully confirmed and stale-status running tasks
   const showRunningVisuals = isActivelyRunning || isRunningWithStaleStatus;
   const [isLifted, setIsLifted] = useState(false);
@@ -185,8 +186,7 @@ export const KanbanCard = memo(function KanbanCard({
     !isSelectionMode &&
     !isRunningWithStaleStatus &&
     (feature.status === 'backlog' ||
-      feature.status === 'merge_conflict' ||
-      feature.status === 'interrupted' ||
+      isNeedsAttentionStatus(feature.status) ||
       feature.status === 'ready' ||
       feature.status === 'waiting_approval' ||
       feature.status === 'verified' ||
@@ -284,7 +284,7 @@ export const KanbanCard = memo(function KanbanCard({
 
   const handleCardClick = (e: React.MouseEvent) => {
     // Portalled dialogs are React descendants but are not part of the card face.
-    if (!e.currentTarget.contains(e.target as Node)) return;
+    if (!e.currentTarget.contains(e.target as globalThis.Node)) return;
     if (isSelectable && onToggleSelect) {
       e.preventDefault();
       e.stopPropagation();
@@ -326,7 +326,9 @@ export const KanbanCard = memo(function KanbanCard({
           />
         )}
         <CardTitle className="flex-1 min-w-0 text-sm font-semibold text-foreground line-clamp-2">
-          {feature.title || feature.description || feature.id}
+          {feature.jiraKey || feature.jiraImported
+            ? cardPreviewText(feature)
+            : feature.title || feature.description || feature.id}
         </CardTitle>
       </div>
 
@@ -478,6 +480,7 @@ export const KanbanCard = memo(function KanbanCard({
       <AcceptanceEvidenceDialog
         evidence={feature.acceptanceEvidence}
         projectPath={currentProject?.path ?? ''}
+        branchName={feature.branchName}
         open={isEvidenceOpen}
         onOpenChange={setIsEvidenceOpen}
         onConfirm={

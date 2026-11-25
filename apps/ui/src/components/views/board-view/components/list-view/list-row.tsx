@@ -8,6 +8,7 @@ import { RowActions, type RowActionHandlers } from './row-actions';
 import { getColumnWidth, getColumnAlign } from './list-header';
 import { JiraTypeBadge } from '../jira-type-badge';
 import { JiraReleaseBadges } from '../jira-release-badges';
+import { jiraRequirementText } from '../kanban-card/card-preview-text';
 
 export interface ListRowProps {
   /** The feature to display */
@@ -178,7 +179,7 @@ const IndicatorBadges = memo(function IndicatorBadges({
             </div>
           </TooltipTrigger>
           <TooltipContent side="top" className="text-xs max-w-[250px]">
-            <p>{badge.tooltip}</p>
+            <p className="line-clamp-3 break-words">{badge.tooltip}</p>
           </TooltipContent>
         </Tooltip>
       ))}
@@ -359,9 +360,9 @@ export const ListRow = memo(function ListRow({
             feature.title !== feature.description && (
               <p
                 className="text-xs text-muted-foreground truncate mt-0.5"
-                title={feature.description}
+                title={jiraRequirementText(feature)}
               >
-                {feature.description}
+                {jiraRequirementText(feature)}
               </p>
             )
           )}

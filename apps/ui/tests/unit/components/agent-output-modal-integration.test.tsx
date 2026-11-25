@@ -381,6 +381,7 @@ Successfully implemented a responsive navigation menu with hamburger menu for mo
     it('merges resident sessions and one-shot calls when the tab is opened', async () => {
       mockGetElectronAPI.mockReturnValue({
         features: {
+          get: vi.fn().mockResolvedValue({ success: true, feature: { tasks: [] } }),
           timeline: vi.fn().mockResolvedValue({
             success: true,
             entries: [
@@ -417,6 +418,46 @@ Successfully implemented a responsive navigation menu with hamburger menu for mo
       });
       expect(screen.getByTestId('timeline-entry-one-shot')).toBeInTheDocument();
       expect(screen.getByText('常驻会话 · litellm/worker')).toBeInTheDocument();
+    });
+
+    it('shows conversation timestamps and expands the original request in place', async () => {
+      const request = `Original request: ${'Please implement this carefully. '.repeat(15)}`;
+      mockGetElectronAPI.mockReturnValue({
+        features: {
+          get: vi.fn().mockResolvedValue({ success: true, feature: { tasks: [] } }),
+          timeline: vi.fn().mockResolvedValue({
+            success: true,
+            entries: [
+              {
+                id: 'reply:one',
+                kind: 'reply',
+                at: '2026-09-19T14:00:00.000Z',
+                developmentAt: '2026-09-19T14:01:00.000Z',
+                verificationAt: '2026-09-19T14:03:00.000Z',
+                title: 'Reply',
+                detail: request,
+              },
+            ],
+          }),
+        },
+      } as never);
+      render(<AgentOutputModal {...defaultProps} projectPath="/tmp/project" />);
+      fireEvent.click(screen.getByTestId('view-mode-timeline'));
+
+      const entry = await screen.findByTestId('timeline-entry-reply');
+      expect(entry).toHaveTextContent('启动');
+      expect(entry).toHaveTextContent('开发');
+      expect(entry).toHaveTextContent('验证');
+      expect(entry).toHaveTextContent('请求原文');
+      expect(entry.querySelectorAll('p')).toHaveLength(1);
+      const more = screen.getByRole('button', { name: '展开更多' });
+      expect(more).toHaveAttribute('aria-expanded', 'false');
+      expect(entry.querySelector('p')).toHaveClass('line-clamp-3');
+      fireEvent.click(more);
+      expect(entry.querySelectorAll('p')).toHaveLength(1);
+      expect(entry.querySelector('p')?.textContent).toBe(request);
+      expect(entry.querySelector('p')).not.toHaveClass('line-clamp-3');
+      expect(screen.getByRole('button', { name: '收起' })).toHaveAttribute('aria-expanded', 'true');
     });
   });
 

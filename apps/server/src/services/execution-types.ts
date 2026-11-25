@@ -38,6 +38,8 @@ export type RunAgentFn = (
     branchName?: string | null;
     /** Provider-native conversation id, so follow-up runs continue the same session. */
     sdkSessionId?: string;
+    reattachHerdr?: boolean;
+    status?: string;
   }
 ) => Promise<void>;
 
@@ -145,7 +147,7 @@ export type ExecuteFeatureFn = (
   useWorktrees: boolean,
   isAutoMode: boolean,
   providedWorktreePath?: string,
-  options?: { continuationPrompt?: string; _calledInternally?: boolean }
+  options?: { continuationPrompt?: string; _calledInternally?: boolean; reattachHerdr?: boolean }
 ) => Promise<void>;
 
 /**

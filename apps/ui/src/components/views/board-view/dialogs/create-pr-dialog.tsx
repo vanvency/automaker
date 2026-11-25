@@ -82,6 +82,7 @@ export function CreatePRDialog({
   const [showBrowserFallback, setShowBrowserFallback] = useState(false);
   // Track whether an operation completed that warrants a refresh
   const operationCompletedRef = useRef(false);
+  const draftWorktreeRef = useRef(worktree?.path);
 
   // Remote selection state
   const [remotes, setRemotes] = useState<RemoteInfo[]>([]);
@@ -287,7 +288,7 @@ export function CreatePRDialog({
     setBody('');
     setCommitMessage('');
     setBaseBranch(defaultBaseBranch);
-    setIsDraft(false);
+    setIsDraft(true);
     setError(null);
     setPrUrl(null);
     setBrowserUrl(null);
@@ -300,10 +301,12 @@ export function CreatePRDialog({
     operationCompletedRef.current = false;
   }, [defaultBaseBranch]);
 
-  // Reset state when dialog opens or worktree changes
+  // Keep unfinished PR text when dismissed, but never carry it to another worktree.
   useEffect(() => {
-    // Reset all state on both open and close
-    resetState();
+    if (draftWorktreeRef.current !== worktree?.path || (open && operationCompletedRef.current)) {
+      draftWorktreeRef.current = worktree?.path;
+      resetState();
+    }
   }, [open, worktree?.path, resetState]);
 
   const handleGenerateDescription = async () => {
@@ -504,7 +507,6 @@ export function CreatePRDialog({
       onCreated(prUrl || undefined);
     }
     onOpenChange(false);
-    // State reset is handled by useEffect when open becomes false
   };
 
   if (!worktree) return null;

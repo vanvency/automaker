@@ -18,6 +18,8 @@ ExecStart=/usr/bin/node dist/index.js
 Restart=on-failure
 RestartSec=10
 TimeoutStopSec=60
+# Herdr owns detached agents; API shutdown handles its own CLI children.
+KillMode=process
 
 [Install]
 WantedBy=multi-user.target

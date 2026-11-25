@@ -1,4 +1,7 @@
 import { activeDeliveryProjects } from '../delivery-completion.js';
+import { isShuttingDown } from '../../lib/shutdown-state.js';
+import { recordFeatureReply } from '../feature-reply-history.js';
+import { assertWorkNotSnoozed } from '../work-snooze.js';
 /**
  * AutoModeServiceFacade - Clean interface for auto-mode functionality
  *
@@ -105,7 +108,14 @@ export class AutoModeServiceFacade {
     branchName: string | null,
     primaryBranch: string | null
   ): boolean {
-    if (feature.archive || feature.supersededBy || feature.consolidationPlanId) return false;
+    if (
+      feature.archive ||
+      feature.supersededBy ||
+      feature.consolidationPlanId ||
+      feature.worktreeSnooze ||
+      feature.herdrExecution
+    )
+      return false;
     const isEligibleStatus =
       feature.status === 'backlog' ||
       feature.status === 'ready' ||
@@ -206,7 +216,7 @@ export class AutoModeServiceFacade {
     ): string => {
       const title =
         feature.title || feature.description?.split('\n')[0]?.substring(0, 60) || 'Untitled';
-      let prompt = `## Feature Implementation Task\n\n**Feature ID:** ${feature.id}\n**Title:** ${title}\n**Description:** ${feature.description}\n`;
+      let prompt = featurePromptBlock({ ...feature, title });
       if (feature.spec) {
         prompt += `\n**Specification:**\n${feature.spec}\n`;
       }
@@ -264,18 +274,32 @@ export class AutoModeServiceFacade {
           branchName?: string | null;
           sdkSessionId?: string;
           status?: string; // Feature status for pipeline summary check
+          reattachHerdr?: boolean;
           [key: string]: unknown;
         }
       ): Promise<void> => {
+        if (isShuttingDown())
+          throw new Error('API is shutting down; no new agent turn was submitted');
+        const task = await featureStateManager.loadFeature(pPath, featureId);
+        await assertWorkNotSnoozed(pPath, task?.branchName);
         const resolvedModel = resolveModelString(model, DEFAULT_MODELS.claude);
         let provider = ProviderFactory.getProviderForModel(resolvedModel);
-        if (provider.getName() === 'pi') {
+        if (provider.getName() === 'pi' || opts?.reattachHerdr) {
           const feature = await featureStateManager.loadFeature(pPath, featureId);
           if (!feature) throw new Error(`Feature ${featureId} not found`);
           provider = new HerdrFeaturePiProvider({
             projectPath: pPath,
             feature,
             persist: (fields) => featureStateManager.updateFeatureFields(pPath, featureId, fields),
+            reattach: opts?.reattachHerdr,
+            initialPrompt: prompt,
+            load: () => featureStateManager.loadFeature(pPath, featureId),
+            execution: {
+              status: opts?.status || feature.status || 'in_progress',
+              planningMode: opts?.planningMode,
+              requirePlanApproval: opts?.requirePlanApproval,
+              previousContent: opts?.previousContent,
+            },
           });
         }
         const effectiveBareModel = stripProviderPrefix(resolvedModel);
@@ -366,6 +390,16 @@ export class AutoModeServiceFacade {
             reasoningEffort: opts?.reasoningEffort as ReasoningEffort | undefined,
             branchName: opts?.branchName as string | null | undefined,
             sdkSessionId: opts?.sdkSessionId as string | undefined,
+            ...(opts?.reattachHerdr && task?.herdrExecution?.taskId && task.planSpec?.content
+              ? {
+                  existingApprovedPlanContent: task.planSpec.content,
+                  persistedTasks: task.planSpec.tasks?.map((entry) =>
+                    entry.id === task.herdrExecution!.taskId
+                      ? { ...entry, status: 'pending' as const }
+                      : entry
+                  ),
+                }
+              : {}),
             status: opts?.status as string | undefined,
             provider,
             effectiveBareModel,
@@ -400,6 +434,14 @@ export class AutoModeServiceFacade {
             },
           }
         );
+        if (!abortController.signal.aborted && provider instanceof HerdrFeaturePiProvider) {
+          const latest = await featureStateManager.loadFeature(pPath, featureId);
+          if (latest?.herdrExecution) {
+            await featureStateManager.updateFeatureFields(pPath, featureId, {
+              herdrExecution: { ...latest.herdrExecution, outputApplied: true },
+            });
+          }
+        }
       };
 
     // PipelineOrchestrator - runAgentFn delegates to AgentExecutor via shared helper
@@ -662,6 +704,7 @@ export class AutoModeServiceFacade {
     options?: {
       continuationPrompt?: string;
       _calledInternally?: boolean;
+      reattachHerdr?: boolean;
     }
   ): Promise<void> {
     try {
@@ -745,6 +788,13 @@ export class AutoModeServiceFacade {
       const feature = await this.featureStateManager.loadFeature(this.projectPath, featureId);
       if (!feature) throw new Error(`Feature ${featureId} not found`);
 
+      const reply = await recordFeatureReply(this.projectPath, featureId, prompt, imagePaths);
+      this.eventBus.emitAutoModeEvent('features_reconciled', {
+        projectPath: this.projectPath,
+        featureId,
+        reason: 'reply_recorded',
+      });
+
       // Read previous agent output as context
       const featureDir = getFeatureDir(this.projectPath, featureId);
       let previousContext = '';
@@ -770,6 +820,7 @@ export class AutoModeServiceFacade {
         .replace(/\{\{featurePrompt\}\}/g, featurePrompt)
         .replace(/\{\{previousContext\}\}/g, previousContextBlock(previousContext, { continuing }))
         .replace(/\{\{followUpInstructions\}\}/g, prompt);
+      continuationPrompt += `\n\nAutomaker reply ID: ${reply.id}`;
 
       // Store image paths on the feature so executeFeature can pick them up
       if (imagePaths && imagePaths.length > 0) {

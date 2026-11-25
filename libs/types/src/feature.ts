@@ -50,7 +50,8 @@ export interface AcceptanceEvidence {
   status: 'passed' | 'failed' | 'blocked';
   summary: string;
   previewUrl?: string;
-  verifiedAt: string;
+  /** Omitted for legacy evidence that did not record the verification time. */
+  verifiedAt?: string;
   importedAt: string;
   commit?: string;
   checks: Array<{
@@ -62,7 +63,8 @@ export interface AcceptanceEvidence {
     kind: 'prototype' | 'actual';
     path: string;
     title: string;
-    capturedAt: string;
+    /** Omitted when capture time was not recorded; never inferred from import time. */
+    capturedAt?: string;
     sourceUrl?: string;
   }>;
 }
@@ -141,6 +143,19 @@ export interface Feature {
   textFilePaths?: FeatureTextFilePath[];
   acceptanceEvidence?: AcceptanceEvidence;
   deliveryCompletion?: FeatureDelivery;
+  /** Human approval of the exact MR revisions and review feedback, before Confirm. */
+  deliveryApproval?: {
+    approvedAt: string;
+    reviews: Array<{ url: string; sha?: string; feedbackHash: string }>;
+  };
+  /** Explicit human acceptance of an unresolved attention notice for a board move. */
+  attentionOverride?: {
+    fromStatus: string;
+    targetStatus: 'waiting_approval' | 'verified';
+    acceptedAt: string;
+    executionRunId?: string;
+    previousError?: string;
+  };
   // Branch info - worktree path is derived at runtime from branchName
   branchName?: string | null; // Name of the feature branch (undefined/null = use current worktree)
   skipTests?: boolean;
@@ -182,7 +197,32 @@ export interface Feature {
   jiraDelivery?: import('./jira-sync.js').JiraDeliveryScope;
   jiraInstanceUrl?: string;
   jiraStatus?: string;
+  jiraAssignee?: string | null;
+  jiraAssigneeDisplayName?: string | null;
+  jiraReporter?: string | null;
+  jiraReporterDisplayName?: string | null;
   executionRunId?: string;
+  /** Durable ownership of one Pi turn running outside the API process in Herdr. */
+  herdrExecution?: {
+    paneId: string;
+    workspaceId: string;
+    tabId: string;
+    workDir: string;
+    sessionFile?: string;
+    sessionId?: string;
+    /** Replay this turn from its start to rebuild output after reconnecting. */
+    startCursor: number;
+    prompt: string;
+    startedAt: string;
+    executionRunId?: string;
+    status: string;
+    planningMode?: PlanningMode;
+    requirePlanApproval?: boolean;
+    previousContent?: string;
+    taskId?: string;
+    /** The executor has durably written the turn output; only finalization remains. */
+    outputApplied?: boolean;
+  };
   jiraDispatchRunId?: string;
   jiraPendingDescription?: string;
   jiraSyncHistory?: Array<{
@@ -222,6 +262,10 @@ export interface Feature {
   };
   /** True when the card was imported from Jira, so it is never re-decomposed. */
   jiraImported?: boolean;
+  /** Jira's issue summary, separate from the agent's implementation summary. */
+  jiraSummary?: string;
+  /** Import/execution contract kept out of the user-facing requirements. */
+  jiraExecutionInstructions?: string;
   /**
    * Automaker-side decomposition of a card that Jira did not split.
    *
@@ -260,6 +304,8 @@ export interface Feature {
   createdAt?: string; // ISO timestamp when feature was created
   updatedAt?: string; // ISO timestamp of the last state change
   startedAt?: string;
+  /** Latest Agent run that reached review; retained across manual status changes. */
+  lastExecutionCompletedAt?: string;
   /** When the card entered Done (verified); cleared when work resumes on it. */
   verifiedAt?: string;
   /**
@@ -272,6 +318,11 @@ export interface Feature {
     /** Checkout path that was removed and is reused when rebuilding */
     path: string;
     branch: string;
+  };
+  /** Worktree-level pause state. Snoozed work is excluded from auto-dispatch. */
+  worktreeSnooze?: {
+    snoozedAt: string;
+    reason?: string;
   };
   descriptionHistory?: DescriptionHistoryEntry[]; // History of description changes
   [key: string]: unknown; // Keep catch-all for extensibility

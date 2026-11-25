@@ -10,6 +10,7 @@ import { Feature } from '@/store/app-store';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Markdown } from '@/components/ui/markdown';
 import { Button } from '@/components/ui/button';
+import { jiraRequirementText } from './card-preview-text';
 import { Spinner } from '@/components/ui/spinner';
 import { getElectronAPI } from '@/lib/electron';
 import { queryKeys } from '@/lib/query-keys';
@@ -124,7 +125,7 @@ export function CardDetailsDialog({
   const goals = Array.isArray(feature.goals) ? (feature.goals as GoalProgress[]) : [];
   const { development: developmentGoals, merge: mergeGoals } = splitGoals(goals);
   const changedProjects = getChangedProjects(feature);
-  const description = feature.description || feature.summary || '';
+  const description = jiraRequirementText(feature) || feature.summary || '';
   // The UI Feature type is a thin wrapper; these come straight from the shared type.
   const jiraChanges = feature.jiraChanges as JiraChange[] | undefined;
   const subtasks = feature.jiraSubtasks as JiraSubtask[] | undefined;
@@ -243,6 +244,20 @@ export function CardDetailsDialog({
               </div>
             </Section>
           )}
+          {(feature.jiraExecutionInstructions || description !== feature.description) && (
+            <details className="rounded-lg border border-border/50 p-3 text-xs">
+              <summary className="cursor-pointer text-muted-foreground">
+                Agent execution instructions
+              </summary>
+              <div className="mt-3">
+                <Markdown>
+                  {typeof feature.jiraExecutionInstructions === 'string'
+                    ? feature.jiraExecutionInstructions
+                    : feature.description}
+                </Markdown>
+              </div>
+            </details>
+          )}
 
           {developmentGoals.length > 0 && (
             <Section
@@ -282,7 +297,11 @@ export function CardDetailsDialog({
 
           <Section title="验收证据">
             {hasEvidence ? (
-              <AcceptanceEvidence evidence={evidence} projectPath={projectPath ?? ''} />
+              <AcceptanceEvidence
+                evidence={evidence}
+                projectPath={projectPath ?? ''}
+                branchName={feature.branchName}
+              />
             ) : (
               <div className="space-y-2 rounded-lg border border-dashed border-border/60 p-3">
                 <p className="text-xs text-muted-foreground">

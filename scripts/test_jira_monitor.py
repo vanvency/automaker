@@ -196,16 +196,28 @@ class MonitorTests(unittest.TestCase):
         self.assertNotIn('Autonomous decomposition', prompt)
         self.assertNotIn('Manual decomposition only', prompt)
 
-    def test_prompt_hands_off_development_without_requiring_merge_requests(self):
+    def test_prompt_requires_draft_merge_requests_before_review(self):
         task = dict(self.issue, fields=dict(
             self.issue['fields'], issueType={'name': 'Task', 'subtask': False},
             Subtasks=[]))
         prompt = monitor.task_description(task, self.config, '/tmp/wt', 'jira/aip-123-kaka')
-        self.assertIn('Development completion does not', prompt)
-        self.assertIn('Do not create/update MRs', prompt)
-        self.assertIn('development_complete', prompt)
+        self.assertIn('one open Draft MR', prompt)
+        self.assertIn('confirm draft == true', prompt)
+        self.assertIn('mr_created', prompt)
+        self.assertIn('review and merge are handled separately', prompt)
 
-    def test_development_receipt_requires_checks_but_not_mrs(self):
+    def test_vibe_delivery_does_not_require_routine_root_gitlink_commits(self):
+        prompt = monitor.delivery_directive('AIP-123', '/tmp/wt', 'task/aip-123')
+        self.assertIn('For vibe-llmops', prompt)
+        self.assertIn('Do not stage or commit submodule gitlink', prompt)
+        self.assertIn('do not create a root MR solely because submodule', prompt)
+        self.assertIn('user explicitly requests an', prompt)
+        self.assertIn('integration/release version-lock update', prompt)
+        self.assertIn('Other projects follow', prompt)
+        self.assertIn('include the root project only when it has its own committed changes', prompt)
+        self.assertNotIn('Update root gitlinks for changed submodules', prompt)
+
+    def test_development_receipt_cannot_omit_mrs(self):
         log = self.root / 'tests.log'
         log.write_text('checks passed')
         receipt = {
@@ -213,7 +225,7 @@ class MonitorTests(unittest.TestCase):
             'tests': [{'command': 'npm test', 'exitCode': 0}],
             'testLog': str(log), 'mergeRequests': [], 'blockers': [],
         }
-        self.assertTrue(monitor.validate_receipt(
+        self.assertFalse(monitor.validate_receipt(
             receipt, 'AIP-123', str(self.root), self.config['gitlabHost']))
         for updates in ({'blockers': ['Missing authorization check']},
                         {'tests': []}, {'issueKey': 'AIP-999'},

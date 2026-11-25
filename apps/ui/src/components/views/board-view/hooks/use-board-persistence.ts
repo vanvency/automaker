@@ -63,6 +63,7 @@ export function useBoardPersistence({ currentProject }: UseBoardPersistenceProps
           if (previousFeatures) {
             queryClient.setQueryData(queryKeys.features.all(currentProject.path), previousFeatures);
           }
+          if (updates.attentionOverride) throw new Error('Features API not available');
           return;
         }
 
@@ -105,6 +106,8 @@ export function useBoardPersistence({ currentProject }: UseBoardPersistenceProps
           queryClient.invalidateQueries({
             queryKey: queryKeys.features.all(currentProject.path),
           });
+          if (updates.attentionOverride)
+            throw new Error(result.error || 'Could not save the manual task move');
         }
       } catch (error) {
         logger.error('Failed to persist feature update:', error);
@@ -115,6 +118,7 @@ export function useBoardPersistence({ currentProject }: UseBoardPersistenceProps
         queryClient.invalidateQueries({
           queryKey: queryKeys.features.all(currentProject.path),
         });
+        if (updates.attentionOverride) throw error;
       }
     },
     [currentProject, updateFeature, queryClient]

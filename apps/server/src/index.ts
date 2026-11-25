@@ -65,6 +65,7 @@ import { createTaskConsolidationRoutes } from './routes/task-consolidation/index
 import { createJiraSyncRoutes } from './routes/jira-sync/index.js';
 import { AgentService } from './services/agent-service.js';
 import { FeatureLoader } from './services/feature-loader.js';
+import { AutoPreviewOnCompletion } from './services/auto-preview-on-completion.js';
 import { AutoModeServiceCompat } from './services/auto-mode/index.js';
 import { getTerminalService } from './services/terminal-service.js';
 import { SettingsService } from './services/settings-service.js';
@@ -347,6 +348,7 @@ const events: EventEmitter = createEventEmitter();
 const settingsService = new SettingsService(DATA_DIR);
 const agentService = new AgentService(DATA_DIR, events, settingsService);
 const featureLoader = new FeatureLoader();
+new AutoPreviewOnCompletion(events, featureLoader);
 
 // Auto-mode services: compatibility layer provides old interface while using new architecture
 const autoModeService = new AutoModeServiceCompat(
@@ -564,7 +566,10 @@ app.use('/api/pi-web', createPiWebRoutes());
 app.use('/api/herdr', createHerdrRoutes());
 app.use('/api/auto-mode', createAutoModeRoutes(autoModeService, featureLoader));
 app.use('/api/enhance-prompt', createEnhancePromptRoutes(settingsService));
-app.use('/api/worktree', createWorktreeRoutes(events, settingsService, featureLoader));
+app.use(
+  '/api/worktree',
+  createWorktreeRoutes(events, settingsService, featureLoader, autoModeService)
+);
 app.use('/api/git', createGitRoutes());
 app.use('/api/models', createModelsRoutes());
 app.use('/api/spec-regeneration', createSpecRegenerationRoutes(events, settingsService));
@@ -1040,8 +1045,8 @@ const gracefulShutdown = async (signal: string) => {
     process.exit(1);
   }, SHUTDOWN_TIMEOUT_MS);
 
-  // Persist, mark interrupted and abort all running features so they can be
-  // resumed automatically on the next server start.
+  // Persist execution owners; aborting Herdr observers only detaches the API.
+  // Local providers are interrupted and resumed on the next server start.
   await autoModeService.prepareForShutdown(`${signal} signal received`);
 
   terminalService.cleanup();

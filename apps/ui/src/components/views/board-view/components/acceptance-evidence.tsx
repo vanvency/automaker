@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { ChevronLeft, ChevronRight, ExternalLink, Images, Loader2 } from 'lucide-react';
 import type { AcceptanceEvidence as Evidence } from '@automaker/types';
 import { getAuthenticatedImageUrl } from '@/lib/api-fetch';
+import { getElectronAPI } from '@/lib/electron';
 import { Button } from '@/components/ui/button';
 import {
   Dialog,
@@ -25,34 +26,104 @@ const safeLink = (url?: string) => {
   }
 };
 
+function CaptureStamp({ capturedAt }: { capturedAt?: string }) {
+  return (
+    <span className="pointer-events-none absolute bottom-2 right-2 rounded bg-black/75 px-2 py-1 text-[11px] text-white shadow-sm">
+      {capturedAt ? (
+        <time dateTime={capturedAt}>{new Date(capturedAt).toLocaleString()}</time>
+      ) : (
+        '截图时间未记录'
+      )}
+    </span>
+  );
+}
+
+async function readCurrentPreview(
+  projectPath: string,
+  branchName?: string
+): Promise<string | undefined> {
+  const api = getElectronAPI().worktree;
+  if (!api?.listAll || !api.previewStatus) return undefined;
+  const listed = await api.listAll(projectPath);
+  if (!listed.success) throw new Error(listed.error || 'Could not list worktrees');
+  const tree = listed.worktrees?.find((item) =>
+    branchName ? item.branch === branchName : item.isMain
+  );
+  if (!tree) return undefined;
+  const status = await api.previewStatus(projectPath, tree.path);
+  if (!status.success) throw new Error(status.error || 'Could not read preview');
+  return status.preview?.status === 'ready' ? safeLink(status.preview.url) : undefined;
+}
+
+/** Resolve the task's current worktree before reading its live preview URL. */
+function useCurrentPreview(projectPath: string, branchName: string | undefined, enabled: boolean) {
+  const key = `${projectPath}\0${branchName ?? '__main__'}\0${enabled}`;
+  const [preview, setPreview] = useState<{ key: string; url?: string; loading: boolean }>({
+    key: '',
+    loading: true,
+  });
+  useEffect(() => {
+    if (!enabled || !projectPath) {
+      setPreview({ key, loading: false });
+      return;
+    }
+    let active = true;
+    setPreview({ key, loading: true });
+    const refresh = () => {
+      void readCurrentPreview(projectPath, branchName)
+        .then((url) => {
+          if (active) setPreview({ key, url, loading: false });
+        })
+        .catch(() => {
+          if (active) setPreview({ key, loading: false });
+        });
+    };
+    refresh();
+    const interval = setInterval(refresh, 15_000);
+    return () => {
+      active = false;
+      clearInterval(interval);
+    };
+  }, [projectPath, branchName, enabled, key]);
+  return enabled && projectPath
+    ? preview.key === key
+      ? preview
+      : { url: undefined, loading: true }
+    : { url: undefined, loading: false };
+}
+
 /** Durable outputs are separate from the task's input/reference attachments. */
 export function AcceptanceEvidence({
   evidence,
   projectPath,
+  branchName,
 }: {
   evidence?: Evidence;
   projectPath: string;
+  branchName?: string;
 }) {
   const [open, setOpen] = useState(false);
+  const preview = useCurrentPreview(projectPath, branchName, !!evidence);
   if (!evidence) return null;
-  const previewUrl = safeLink(evidence.previewUrl);
   const renderImage = (shot: Evidence['screenshots'][number], large = false) => (
     <figure key={shot.path + shot.kind} className="min-w-0 space-y-1">
-      <img
-        src={getAuthenticatedImageUrl(shot.path, projectPath, evidence.importedAt)}
-        alt={`${shot.kind === 'prototype' ? '原型图' : '真实截图'}：${shot.title}`}
-        loading="lazy"
-        className={
-          large
-            ? 'max-h-[65vh] w-full rounded border object-contain'
-            : 'h-24 w-full rounded border object-contain'
-        }
-      />
+      <div className="relative w-fit max-w-full">
+        <img
+          src={getAuthenticatedImageUrl(shot.path, projectPath, evidence.importedAt)}
+          alt={`${shot.kind === 'prototype' ? '原型图' : '真实截图'}：${shot.title}`}
+          loading="lazy"
+          className={
+            large
+              ? 'max-h-[65vh] w-full rounded border object-contain'
+              : 'h-24 w-full rounded border object-contain'
+          }
+        />
+        <CaptureStamp capturedAt={shot.capturedAt} />
+      </div>
       <figcaption className="break-words text-xs text-muted-foreground">
         {shot.kind === 'prototype' ? '原型图' : '真实截图'} · {shot.title}
         {large && (
           <div className="mt-1 space-x-2">
-            <time dateTime={shot.capturedAt}>{new Date(shot.capturedAt).toLocaleString()}</time>
             {safeLink(shot.sourceUrl) && (
               <a
                 href={shot.sourceUrl}
@@ -119,21 +190,28 @@ export function AcceptanceEvidence({
           <Images className="mr-1 h-3 w-3" />
           查看验收材料
         </Button>
-        {previewUrl && (
+        {preview.url && (
           <a
-            href={previewUrl}
+            href={preview.url}
             target="_blank"
             rel="noopener noreferrer"
             className="inline-flex items-center gap-1 text-xs text-brand-500 hover:underline"
           >
             <ExternalLink className="h-3 w-3" />
-            打开验证环境
+            打开当前 Worktree 预览
           </a>
+        )}
+        {preview.loading && <span className="text-xs text-muted-foreground">正在检查预览…</span>}
+        {!preview.loading && !preview.url && evidence.previewUrl && (
+          <span className="text-xs text-muted-foreground">
+            当前预览不可用；验收记录保留历史地址
+          </span>
         )}
       </div>
       <AcceptanceEvidenceDialog
         evidence={evidence}
         projectPath={projectPath}
+        branchName={branchName}
         open={open}
         onOpenChange={setOpen}
       />
@@ -150,16 +228,19 @@ export function AcceptanceEvidence({
 export function AcceptanceEvidenceDialog({
   evidence,
   projectPath,
+  branchName,
   open,
   onOpenChange,
   onConfirm,
 }: {
   evidence?: Evidence;
   projectPath: string;
+  branchName?: string;
   open: boolean;
   onOpenChange: (open: boolean) => void;
   onConfirm?: () => void | boolean | Promise<void | boolean>;
 }) {
+  const preview = useCurrentPreview(projectPath, branchName, open);
   const [imageIndex, setImageIndex] = useState<number | null>(null);
   const [confirming, setConfirming] = useState(false);
   const [confirmError, setConfirmError] = useState<string | null>(null);
@@ -182,12 +263,12 @@ export function AcceptanceEvidenceDialog({
     getAuthenticatedImageUrl(shot.path, projectPath, evidence?.importedAt);
   const imageLabel = (shot: Evidence['screenshots'][number]) =>
     `${shot.kind === 'prototype' ? '原型图' : '真实截图'}：${shot.title}`;
-  const dialogPreviewUrl = safeLink(evidence?.previewUrl);
-  let dialogPreviewLabel = '打开独立验证环境';
+  const dialogPreviewUrl = preview.url;
+  let dialogPreviewLabel = '打开当前 Worktree 预览';
   if (dialogPreviewUrl) {
     try {
       const parsed = new URL(dialogPreviewUrl);
-      dialogPreviewLabel = `打开验证环境 · ${parsed.hostname}${parsed.port ? `:${parsed.port}` : ''}`;
+      dialogPreviewLabel = `打开当前预览 · ${parsed.hostname}${parsed.port ? `:${parsed.port}` : ''}`;
     } catch {
       // safeLink already filters malformed URLs.
     }
@@ -246,6 +327,12 @@ export function AcceptanceEvidenceDialog({
               : '查看验收结果并确认 Verify 后，任务进入 Done；点击 Complete 后才执行 MR 合并并关闭 Jira。'}
           </DialogDescription>
         </DialogHeader>
+        {!activeImage && evidence && (
+          <p className="text-xs text-muted-foreground">
+            截图由 Agent
+            在任务执行时采集并自动导入；重新部署不会重新拍摄。请核对每张截图的拍摄时间与当前部署时间。
+          </p>
+        )}
         {!activeImage && dialogPreviewUrl && (
           <div
             className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-brand-500/40 bg-brand-500/10 px-4 py-3"
@@ -268,13 +355,34 @@ export function AcceptanceEvidenceDialog({
             </a>
           </div>
         )}
+        {!activeImage && safeLink(evidence?.previewUrl) && (
+          <p className="break-all text-xs text-muted-foreground">
+            验收时记录的地址：{safeLink(evidence?.previewUrl)}（历史记录，可能已失效）
+          </p>
+        )}
+        {!activeImage && dialogPreviewUrl && evidence?.previewUrl !== dialogPreviewUrl && (
+          <p className="text-xs text-muted-foreground">
+            当前预览已重新部署；请核对页面内容与截图所记录的版本是否一致。
+          </p>
+        )}
+        {!activeImage && preview.loading && (
+          <p className="text-xs text-muted-foreground">正在检查当前 Worktree 预览…</p>
+        )}
+        {!activeImage && !preview.loading && !dialogPreviewUrl && evidence?.previewUrl && (
+          <p className="text-xs text-muted-foreground">
+            当前 Worktree 预览不可用，请在 Work Board 部署后再打开。
+          </p>
+        )}
         {activeImage ? (
           <div className="space-y-3" data-testid="evidence-image-viewer">
-            <img
-              src={imageUrl(activeImage)}
-              alt={imageLabel(activeImage)}
-              className="max-h-[65vh] w-full rounded border object-contain"
-            />
+            <div className="relative w-fit max-w-full">
+              <img
+                src={imageUrl(activeImage)}
+                alt={imageLabel(activeImage)}
+                className="max-h-[65vh] w-full rounded border object-contain"
+              />
+              <CaptureStamp capturedAt={activeImage.capturedAt} />
+            </div>
             <div className="flex flex-wrap items-center justify-between gap-2">
               <Button variant="outline" onClick={() => setImageIndex(null)}>
                 返回验收结果
@@ -318,7 +426,12 @@ export function AcceptanceEvidenceDialog({
               <>
                 <p className="whitespace-pre-wrap break-words text-sm">{evidence.summary}</p>
                 <div className="flex flex-wrap gap-3 text-xs text-muted-foreground">
-                  <span>验证时间：{new Date(evidence.verifiedAt).toLocaleString()}</span>
+                  <span>
+                    验证时间：
+                    {evidence.verifiedAt
+                      ? new Date(evidence.verifiedAt).toLocaleString()
+                      : '未记录'}
+                  </span>
                   {evidence.commit && (
                     <span className="break-all">代码版本：{evidence.commit}</span>
                   )}
@@ -339,19 +452,19 @@ export function AcceptanceEvidenceDialog({
                                 onClick={() => setImageIndex(index)}
                                 aria-label={`放大${imageLabel(shot)}`}
                               >
-                                <img
-                                  src={imageUrl(shot)}
-                                  alt={imageLabel(shot)}
-                                  loading="lazy"
-                                  className="max-h-64 w-full rounded border object-contain"
-                                />
+                                <span className="relative block w-fit max-w-full">
+                                  <img
+                                    src={imageUrl(shot)}
+                                    alt={imageLabel(shot)}
+                                    loading="lazy"
+                                    className="max-h-64 w-full rounded border object-contain"
+                                  />
+                                  <CaptureStamp capturedAt={shot.capturedAt} />
+                                </span>
                               </button>
                               <figcaption className="break-words text-xs text-muted-foreground">
                                 {imageLabel(shot)}
                                 <div className="mt-1 space-x-2">
-                                  <time dateTime={shot.capturedAt}>
-                                    {new Date(shot.capturedAt).toLocaleString()}
-                                  </time>
                                   {safeLink(shot.sourceUrl) && (
                                     <a
                                       href={shot.sourceUrl}

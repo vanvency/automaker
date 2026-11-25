@@ -436,6 +436,14 @@ describe('terminal-service.ts', () => {
   });
 
   describe('resize', () => {
+    it('keeps direct TUI redraw output when resizing a reused terminal', async () => {
+      const session = await service.createSession({ command: '/usr/local/bin/herdr' });
+      service.resize(session!.id, 120, 40);
+      const onData = mockPtyProcess.onData.mock.calls[0][0];
+      onData('\x1b[2Jcurrent workspace');
+      expect(service.getScrollback(session!.id)).toContain('current workspace');
+    });
+
     it('should resize existing session', async () => {
       vi.mocked(platform.systemPathExists).mockReturnValue(true);
       vi.mocked(secureFs.stat).mockResolvedValue({ isDirectory: () => true } as any);

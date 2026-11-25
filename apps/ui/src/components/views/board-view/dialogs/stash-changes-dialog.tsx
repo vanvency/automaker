@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo, useCallback } from 'react';
+import { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import {
   Dialog,
   DialogContent,
@@ -232,6 +232,14 @@ export function StashChangesDialog({
     }
   }, [open, worktree, loadDiffs]);
 
+  const draftWorktreeRef = useRef(worktree?.path);
+  useEffect(() => {
+    if (draftWorktreeRef.current !== worktree?.path) {
+      draftWorktreeRef.current = worktree?.path;
+      setMessage('');
+    }
+  }, [worktree?.path]);
+
   const handleToggleFile = useCallback((filePath: string) => {
     setSelectedFiles((prev) => {
       const next = new Set(prev);
@@ -314,15 +322,7 @@ export function StashChangesDialog({
   const allSelected = selectedFiles.size === files.length && files.length > 0;
 
   return (
-    <Dialog
-      open={open}
-      onOpenChange={(isOpen) => {
-        if (!isOpen) {
-          setMessage('');
-        }
-        onOpenChange(isOpen);
-      }}
-    >
+    <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent
         className="sm:max-w-[700px] max-h-[85vh] flex flex-col"
         onKeyDown={handleKeyDown}

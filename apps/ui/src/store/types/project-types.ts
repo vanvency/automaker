@@ -42,12 +42,16 @@ export interface Feature extends Omit<
   dependencies?: string[]; // Explicit type to override BaseFeature's index signature
   model?: string; // Explicit type to override BaseFeature's index signature
   error?: string; // Explicit type to override BaseFeature's index signature
+  executionNotice?: BaseFeature['executionNotice'];
+  executionRunId?: string;
+  jiraKey?: string;
   branchName?: string; // Explicit type to override BaseFeature's index signature
   thinkingLevel?: ThinkingLevel; // Explicit type to override BaseFeature's index signature
   reasoningEffort?: ReasoningEffort; // Explicit type to override BaseFeature's index signature
   providerId?: string; // Explicit type to override BaseFeature's index signature
   acceptanceEvidence?: BaseFeature['acceptanceEvidence'];
   deliveryCompletion?: BaseFeature['deliveryCompletion'];
+  attentionOverride?: BaseFeature['attentionOverride'];
   summary?: string; // Explicit type to override BaseFeature's index signature
 }
 

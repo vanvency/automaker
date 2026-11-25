@@ -191,7 +191,7 @@ export function useNavigation({
     const sections: NavSection[] = [
       {
         // Navigation prefixes ids with '/', so the empty id opens the home route.
-        items: [{ id: '', label: '首页', icon: Home }],
+        items: [{ id: '', label: 'Home', icon: Home }],
       },
       // Project section - expanded by default
       {

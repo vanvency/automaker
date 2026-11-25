@@ -534,6 +534,8 @@ function RootLayoutContent() {
           void (async () => {
             try {
               const api = getHttpApiClient();
+              const projectsBeforeFetch = useAppStore.getState().projects;
+              const selectionBeforeFetch = useAppStore.getState().currentProject;
               const [sessionValid, settingsResult] = await Promise.all([
                 // verifySession() returns true (valid), false (401/403), or throws (transient).
                 // Map throws → null so we can distinguish "definitively invalid" from "couldn't check".
@@ -563,20 +565,8 @@ function RootLayoutContent() {
                   '[FAST_HYDRATE] Background verify inconclusive — keeping session active'
                 );
               }
-              // Update the localStorage cache with fresh server data so the NEXT
-              // cold start uses up-to-date settings. But do NOT call
-              // hydrateStoreFromSettings() here — the store was already hydrated
-              // from localStorage cache moments ago. Re-hydrating from the server
-              // response would create new object references for projects, settings
-              // arrays, etc., which triggers useSettingsSync's store subscriber
-              // to fire an immediate sync-back POST, causing a visible re-render
-              // flash (board → spinner → board) on mobile.
-              //
-              // The localStorage cache and server data are nearly always identical
-              // (the sync hook wrote the cache from the last successful sync).
-              // Any genuine differences (e.g., settings changed on another device)
-              // will be picked up on the next user interaction or the sync hook's
-              // periodic reconciliation.
+              // Reconcile changed project references without rehydrating unrelated
+              // UI state. The warm cache can predate changes made in another tab.
               if (settingsResult.success && settingsResult.settings) {
                 try {
                   const { settings: finalSettings } = await performSettingsMigration(
@@ -586,8 +576,27 @@ function RootLayoutContent() {
                   );
                   // Persist fresh server data to localStorage for the next cold start
                   setItem('automaker-settings-cache', JSON.stringify(finalSettings));
+                  // A warm cache may predate a project opened in another tab. Restore
+                  // the authoritative list unless this tab edited it during the fetch.
+                  const current = useAppStore.getState();
+                  if (
+                    current.projects === projectsBeforeFetch &&
+                    JSON.stringify(current.projects) !== JSON.stringify(finalSettings.projects)
+                  ) {
+                    useAppStore.setState({
+                      projects: finalSettings.projects,
+                      ...(current.currentProject === selectionBeforeFetch
+                        ? {
+                            currentProject:
+                              finalSettings.projects.find(
+                                (project) => project.id === finalSettings.currentProjectId
+                              ) ?? null,
+                          }
+                        : {}),
+                    });
+                  }
                   logger.info(
-                    '[FAST_HYDRATE] Background reconcile: cache updated (store untouched)'
+                    '[FAST_HYDRATE] Background reconcile: cache and project list updated'
                   );
 
                   // Selectively reconcile event hooks and ntfy endpoints from server.

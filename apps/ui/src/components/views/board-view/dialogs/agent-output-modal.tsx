@@ -57,9 +57,12 @@ type ViewMode = (typeof MODAL_CONSTANTS.VIEW_MODES)[keyof typeof MODAL_CONSTANTS
 
 interface FeatureTimelineEntry {
   id: string;
-  kind: 'session' | 'one-shot' | 'lifecycle' | 'jira';
+  kind: 'session' | 'one-shot' | 'lifecycle' | 'jira' | 'reply';
+  imagePaths?: string[];
   at: string;
   endedAt?: string | null;
+  developmentAt?: string;
+  verificationAt?: string;
   title: string;
   detail?: string;
   model?: string;
@@ -77,6 +80,34 @@ function formatTimelineTime(value: string): string {
     minute: '2-digit',
     second: '2-digit',
   });
+}
+
+function TimelineRequest({ text }: { text: string }) {
+  const [expanded, setExpanded] = useState(false);
+  const collapsible = text.length > 200 || text.split('\n').length > 3;
+  return (
+    <div className="mt-2 text-xs">
+      <div className="mb-1 font-medium text-muted-foreground">请求原文</div>
+      <p
+        className={cn(
+          'whitespace-pre-wrap break-words text-foreground select-text',
+          collapsible && !expanded && 'line-clamp-3'
+        )}
+      >
+        {text}
+      </p>
+      {collapsible && (
+        <button
+          type="button"
+          className="mt-1 text-primary hover:underline focus-visible:rounded-sm focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
+          aria-expanded={expanded}
+          onClick={() => setExpanded((value) => !value)}
+        >
+          {expanded ? '收起' : '展开更多'}
+        </button>
+      )}
+    </div>
+  );
 }
 
 /**
@@ -252,10 +283,11 @@ export function AgentOutputModal({
   }, [resolvedProjectPath, featureId]);
 
   useEffect(() => {
-    if (open && viewMode === MODAL_CONSTANTS.VIEW_MODES.TIMELINE && !timeline) {
-      void loadTimeline();
-    }
-  }, [open, viewMode, timeline, loadTimeline]);
+    if (!open || viewMode !== MODAL_CONSTANTS.VIEW_MODES.TIMELINE) return;
+    void loadTimeline();
+    const timer = window.setInterval(() => void loadTimeline(), 10000);
+    return () => window.clearInterval(timer);
+  }, [open, viewMode, loadTimeline]);
 
   // Combine initial output from query with streamed content from WebSocket
   const output = initialOutput + streamedContent;
@@ -796,7 +828,7 @@ export function AgentOutputModal({
                   data-testid={`timeline-entry-${entry.kind}`}
                 >
                   <div className="flex items-center gap-2 text-xs">
-                    {entry.kind === 'session' ? (
+                    {entry.kind === 'session' || entry.kind === 'reply' ? (
                       <MessageSquare className="w-3.5 h-3.5 shrink-0 text-brand-500" />
                     ) : entry.kind === 'one-shot' ? (
                       <Zap className="w-3.5 h-3.5 shrink-0 text-amber-500" />
@@ -807,6 +839,7 @@ export function AgentOutputModal({
                     )}
                     <span className="truncate font-medium">{entry.title}</span>
                     <span className="ml-auto shrink-0 text-[10px] text-muted-foreground">
+                      {['session', 'one-shot', 'reply'].includes(entry.kind) && '启动 '}
                       {formatTimelineTime(entry.at)}
                     </span>
                   </div>
@@ -819,11 +852,38 @@ export function AgentOutputModal({
                     {typeof entry.turns === 'number' && <span>{entry.turns} 轮</span>}
                     {entry.endedAt && <span>结束 {formatTimelineTime(entry.endedAt)}</span>}
                     {entry.status === 'error' && <span className="text-destructive">出错</span>}
+                    {['session', 'one-shot', 'reply'].includes(entry.kind) && (
+                      <>
+                        <span title="首次 Agent 响应">
+                          开发时间：
+                          {entry.developmentAt ? formatTimelineTime(entry.developmentAt) : '未记录'}
+                        </span>
+                        <span title="首次识别到的测试命令">
+                          验证时间：
+                          {entry.verificationAt
+                            ? formatTimelineTime(entry.verificationAt)
+                            : '未记录'}
+                        </span>
+                      </>
+                    )}
                   </div>
-                  {entry.detail && (
-                    <p className="mt-1 line-clamp-2 text-[11px] text-muted-foreground">
-                      {entry.detail}
-                    </p>
+                  {entry.detail && ['session', 'one-shot', 'reply'].includes(entry.kind) ? (
+                    <TimelineRequest text={entry.detail} />
+                  ) : (
+                    entry.detail && (
+                      <p className="mt-1 line-clamp-2 text-[11px] text-muted-foreground">
+                        {entry.detail}
+                      </p>
+                    )
+                  )}
+                  {!!entry.imagePaths?.length && (
+                    <ul className="mt-2 text-xs text-muted-foreground">
+                      {entry.imagePaths.map((image, index) => (
+                        <li key={`${index}:${image}`} className="break-all">
+                          Attachment: {image.split(/[\\/]/).pop()}
+                        </li>
+                      ))}
+                    </ul>
                   )}
                 </div>
               ))

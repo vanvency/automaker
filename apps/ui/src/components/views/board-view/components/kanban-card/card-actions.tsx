@@ -331,11 +331,11 @@ export const CardActions = memo(function CardActions({
               }}
               onPointerDown={(e) => e.stopPropagation()}
               data-testid={`complete-${feature.id}`}
-              title="Complete"
-              aria-label="Complete"
+              title={feature.deliveryApproval ? 'Confirm' : 'Complete'}
+              aria-label={feature.deliveryApproval ? 'Confirm' : 'Complete'}
             >
               <Archive className="w-3 h-3 mr-1 shrink-0" />
-              <span className="truncate">Complete</span>
+              <span className="truncate">{feature.deliveryApproval ? 'Confirm' : 'Complete'}</span>
             </Button>
           )}
           {/* Feedback button - reopens a finished card when the task turned out to
@@ -363,7 +363,8 @@ export const CardActions = memo(function CardActions({
       {!isCurrentAutoTask &&
         !isRunningTask &&
         (feature.status === 'waiting_approval' ||
-          (['backlog', 'ready', 'interrupted', 'merge_conflict'].includes(feature.status) &&
+          isNeedsAttentionStatus(feature.status) ||
+          (['backlog', 'ready'].includes(feature.status) &&
             (hasContext || feature.providerSessionId || feature.error))) && (
           <>
             {/* Verification comes first in this lane: the human reviews the
@@ -412,6 +413,23 @@ export const CardActions = memo(function CardActions({
                     {shortcutKey}
                   </span>
                 )}
+              </Button>
+            )}
+            {needsAttention && onViewOutput && (
+              <Button
+                variant="secondary"
+                size="sm"
+                className="h-7 text-[11px] px-2"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onViewOutput();
+                }}
+                onPointerDown={(e) => e.stopPropagation()}
+                data-testid={`view-output-${feature.id}`}
+                title="Logs"
+                aria-label="Logs"
+              >
+                <FileText className="w-3 h-3" />
               </Button>
             )}
           </>
@@ -477,7 +495,7 @@ export const CardActions = memo(function CardActions({
           feature.status === 'interrupted' ||
           feature.status === 'ready') && (
           <>
-            {showBacklogLogsButton && (
+            {showBacklogLogsButton && !needsAttention && (
               <Button
                 variant="outline"
                 size="sm"

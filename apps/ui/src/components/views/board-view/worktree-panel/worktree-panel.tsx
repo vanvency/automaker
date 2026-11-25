@@ -75,6 +75,7 @@ export function WorktreePanel({
   features = [],
   branchCardCounts,
   refreshTrigger = 0,
+  trailingControls,
 }: WorktreePanelProps) {
   const {
     isLoading,
@@ -989,7 +990,7 @@ export function WorktreePanel({
     const selectedWorktree = worktrees.find((w) => isWorktreeSelected(w)) || mainWorktree;
 
     return (
-      <div className="flex items-center gap-2 px-3 py-2 border-b border-border bg-glass/50 backdrop-blur-sm">
+      <div className="flex flex-wrap items-center gap-2 px-3 py-2 border-b border-border bg-glass/50 backdrop-blur-sm">
         <WorktreeMobileDropdown
           projectPath={projectPath}
           worktrees={worktrees}
@@ -1123,6 +1124,7 @@ export function WorktreePanel({
           </>
         )}
 
+        {trailingControls && <div className="ml-auto min-w-0 max-w-full">{trailingControls}</div>}
         {/* View Changes Dialog */}
         <ViewWorktreeChangesDialog
           open={viewChangesDialogOpen}
@@ -1549,6 +1551,7 @@ export function WorktreePanel({
         </>
       )}
 
+      {trailingControls && <div className="ml-auto min-w-0 max-w-full">{trailingControls}</div>}
       {/* View Changes Dialog */}
       <ViewWorktreeChangesDialog
         open={viewChangesDialogOpen}

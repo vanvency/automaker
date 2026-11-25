@@ -7,7 +7,7 @@ import type { EventEmitter } from '../../lib/events.js';
 import { validatePathParams } from '../../middleware/validate-paths.js';
 import { requireValidWorktree, requireValidProject, requireGitRepoOnly } from './middleware.js';
 import { createInfoHandler } from './routes/info.js';
-import { createPreviewHandler } from './routes/preview.js';
+import { createPreviewHandler, createPreviewConfigHandler } from './routes/preview.js';
 import { createStatusHandler } from './routes/status.js';
 import { createListHandler } from './routes/list.js';
 import { createWorktreeProgressHandler } from './routes/progress.js';
@@ -74,11 +74,14 @@ import { createSyncHandler } from './routes/sync.js';
 import { createUpdatePRNumberHandler } from './routes/update-pr-number.js';
 import type { SettingsService } from '../../services/settings-service.js';
 import type { FeatureLoader } from '../../services/feature-loader.js';
+import type { AutoModeServiceCompat } from '../../services/auto-mode/index.js';
+import { createSnoozeHandler } from './routes/snooze.js';
 
 export function createWorktreeRoutes(
   events: EventEmitter,
   settingsService?: SettingsService,
-  featureLoader?: FeatureLoader
+  featureLoader?: FeatureLoader,
+  autoModeService?: AutoModeServiceCompat
 ): Router {
   const router = Router();
 
@@ -87,6 +90,14 @@ export function createWorktreeRoutes(
       `/preview-${action}`,
       validatePathParams('projectPath', 'worktreePath'),
       createPreviewHandler(action)
+    );
+  }
+  for (const action of ['read', 'save'] as const) {
+    router.post(
+      `/preview-config-${action}`,
+      validatePathParams('projectPath'),
+      requireValidProject,
+      createPreviewConfigHandler(action)
     );
   }
 
@@ -98,6 +109,13 @@ export function createWorktreeRoutes(
     validatePathParams('projectPath'),
     createWorktreeProgressHandler(featureLoader)
   );
+  if (featureLoader) {
+    router.post(
+      '/snooze',
+      validatePathParams('projectPath'),
+      createSnoozeHandler(featureLoader, autoModeService)
+    );
+  }
   router.post('/diffs', validatePathParams('projectPath'), createDiffsHandler(featureLoader));
   router.post('/file-diff', validatePathParams('projectPath', 'filePath'), createFileDiffHandler());
   router.post(

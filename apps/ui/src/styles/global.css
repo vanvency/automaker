@@ -312,9 +312,10 @@
  * Some third-party libraries (e.g. React Flow) also add `.light`/`.dark` classes
  * to nested containers. If we define CSS variables on `.light` broadly, those
  * nested containers will override the app theme and cause "white cards" in dark themes.
- * Scoping to `:root.light` ensures only the root theme toggle controls variables.
+ * Only the root theme and the explicitly light Herdr page should override variables.
  */
-:root.light {
+:root.light,
+.herdr-light {
   /* Explicit light mode - same as root but ensures it overrides any dark defaults */
   --background: oklch(1 0 0); /* White */
   --background-50: oklch(1 0 0 / 0.5);
@@ -544,6 +545,15 @@
 }
 
 /* Glass morphism utilities */
+/* Custom dialog widths still need a viewport gutter on small screens.
+   Explicit full-screen viewers retain their safe-area layout below. */
+@media (max-width: 639px) {
+  [data-slot='dialog-content']:not(.dialog-fullscreen-mobile) {
+    width: calc(100vw - 1.5rem);
+    max-width: calc(100vw - 1.5rem);
+  }
+}
+
 @layer utilities {
   .glass {
     @apply backdrop-blur-md border-white/10;

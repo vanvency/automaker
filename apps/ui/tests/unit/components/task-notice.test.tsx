@@ -4,6 +4,34 @@ import type { Feature } from '@automaker/types';
 import { TaskNotice } from '../../../src/components/views/board-view/components/task-notice';
 
 describe('task notice details', () => {
+  it('shows a blocked task’s Agent feedback beside the gate failure', () => {
+    const message =
+      'Draft MR delivery required before review: Development is not complete; resolve the delivery receipt blockers first.';
+    const summary =
+      '## Summary: AIP-116615 执行 E2E\n\n### Verification Status\n\n真实 E2E 缺少测试账号和目标空间；浏览器套件有断言失败。';
+    render(
+      <TaskNotice
+        feature={
+          {
+            id: 'task',
+            status: 'failed',
+            error: message,
+            summary,
+            executionNotice: {
+              kind: 'error',
+              source: 'delivery',
+              message,
+              occurredAt: '2026-11-09T13:45:40Z',
+            },
+          } as Feature
+        }
+      />
+    );
+    fireEvent.click(screen.getByRole('button', { name: '查看任务提示详情' }));
+    expect(screen.getByRole('dialog')).toHaveTextContent(summary.replace(/\s+/g, ' ').trim());
+    expect(screen.getByRole('dialog')).toHaveTextContent(message);
+  });
+
   it('opens the complete error with its source and time without editing the card', () => {
     const edit = vi.fn();
     const message = '429: No deployments available\n' + 'Long error detail. '.repeat(100);

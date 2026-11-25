@@ -29,6 +29,8 @@ import type { ConcurrencyManager } from './concurrency-manager.js';
 import { pipelineService } from './pipeline-service.js';
 import type { TestRunnerService, TestRunStatus } from './test-runner-service.js';
 import { DEVELOPMENT_COMPLETION_POLICY } from './continuation-prompt.js';
+import { assertWorkNotSnoozed } from './work-snooze.js';
+import { isShuttingDown } from '../lib/shutdown-state.js';
 import type {
   PipelineContext,
   PipelineStatusInfo,
@@ -224,6 +226,7 @@ export class PipelineOrchestrator {
     useWorktrees: boolean,
     pipelineInfo: PipelineStatusInfo
   ): Promise<void> {
+    await assertWorkNotSnoozed(projectPath, feature.branchName);
     const featureId = feature.id;
     const contextPath = path.join(getFeatureDir(projectPath, featureId), 'agent-output.md');
     let hasContext = false;
@@ -244,7 +247,7 @@ export class PipelineOrchestrator {
 
     if (pipelineInfo.stepIndex === -1) {
       logger.warn(`Step ${pipelineInfo.stepId} no longer exists, completing feature`);
-      const finalStatus = feature.skipTests ? 'waiting_approval' : 'verified';
+      const finalStatus = feature.skipTests || feature.jiraKey ? 'waiting_approval' : 'verified';
       await this.updateFeatureStatusFn(projectPath, featureId, finalStatus);
       const runningEntryForStep = this.concurrencyManager.getRunningFeature(featureId);
       if (runningEntryForStep?.isAutoMode) {
@@ -253,7 +256,9 @@ export class PipelineOrchestrator {
           featureName: feature.title,
           branchName: feature.branchName ?? null,
           executionMode: 'auto',
-          passes: true,
+          passes:
+            (await this.featureStateManager.loadFeature(projectPath, featureId))?.status !==
+            'failed',
           message: 'Pipeline step no longer exists',
           projectPath,
         });
@@ -279,6 +284,7 @@ export class PipelineOrchestrator {
     startFromStepIndex: number,
     pipelineConfig: PipelineConfig
   ): Promise<void> {
+    await assertWorkNotSnoozed(projectPath, feature.branchName);
     const featureId = feature.id;
     const allSortedSteps = [...pipelineConfig.steps].sort((a, b) => a.order - b.order);
     if (startFromStepIndex < 0 || startFromStepIndex >= allSortedSteps.length)
@@ -303,7 +309,9 @@ export class PipelineOrchestrator {
             featureName: feature.title,
             branchName: feature.branchName ?? null,
             executionMode: 'auto',
-            passes: true,
+            passes:
+              (await this.featureStateManager.loadFeature(projectPath, featureId))?.status !==
+              'failed',
             message: 'Pipeline completed (remaining steps excluded)',
             projectPath,
           });
@@ -320,7 +328,7 @@ export class PipelineOrchestrator {
       .slice(startFromStepIndex)
       .filter((step) => !excludedStepIds.has(step.id));
     if (stepsToExecute.length === 0) {
-      const finalStatus = feature.skipTests ? 'waiting_approval' : 'verified';
+      const finalStatus = feature.skipTests || feature.jiraKey ? 'waiting_approval' : 'verified';
       await this.updateFeatureStatusFn(projectPath, featureId, finalStatus);
       const runningEntryForAllExcluded = this.concurrencyManager.getRunningFeature(featureId);
       if (runningEntryForAllExcluded?.isAutoMode) {
@@ -329,7 +337,9 @@ export class PipelineOrchestrator {
           featureName: feature.title,
           branchName: feature.branchName ?? null,
           executionMode: 'auto',
-          passes: true,
+          passes:
+            (await this.featureStateManager.loadFeature(projectPath, featureId))?.status !==
+            'failed',
           message: 'Pipeline completed (all steps excluded)',
           projectPath,
         });
@@ -399,16 +409,20 @@ export class PipelineOrchestrator {
       };
 
       await this.executePipeline(context);
+      if (isShuttingDown()) return;
       pipelineCompleted = true;
 
       // Re-fetch feature to check if executePipeline set a terminal status (e.g., merge_conflict)
       const reloadedFeature = await this.featureStateManager.loadFeature(projectPath, featureId);
-      const finalStatus = feature.skipTests ? 'waiting_approval' : 'verified';
+      const finalStatus = feature.skipTests || feature.jiraKey ? 'waiting_approval' : 'verified';
 
       // Only update status if not already in a terminal state
       if (reloadedFeature && reloadedFeature.status !== 'merge_conflict') {
         await this.updateFeatureStatusFn(projectPath, featureId, finalStatus);
       }
+      await this.featureStateManager.updateFeatureFields(projectPath, featureId, {
+        herdrExecution: undefined,
+      });
       logger.info(`Pipeline resume completed for feature ${featureId}`);
       if (runningEntry.isAutoMode) {
         this.eventBus.emitAutoModeEvent('auto_mode_feature_complete', {
@@ -416,12 +430,15 @@ export class PipelineOrchestrator {
           featureName: feature.title,
           branchName: feature.branchName ?? null,
           executionMode: 'auto',
-          passes: true,
+          passes:
+            (await this.featureStateManager.loadFeature(projectPath, featureId))?.status !==
+            'failed',
           message: 'Pipeline resumed successfully',
           projectPath,
         });
       }
     } catch (error) {
+      if (isShuttingDown()) return;
       const errorInfo = classifyError(error);
       if (errorInfo.isAbort) {
         if (runningEntry.isAutoMode) {

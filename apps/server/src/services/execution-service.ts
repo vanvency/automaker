@@ -64,6 +64,7 @@ import type {
 } from './execution-types.js';
 
 import { DEVELOPMENT_COMPLETION_POLICY } from './continuation-prompt.js';
+import { assertWorkNotSnoozed, changingWorkSnoozes, WorkSnoozedError } from './work-snooze.js';
 
 const logger = createLogger('ExecutionService');
 
@@ -260,6 +261,7 @@ export class ExecutionService {
 **Feature ID:** ${feature.id}
 **Title:** ${title}
 **Description:** ${feature.description}
+${feature.jiraExecutionInstructions ? `\n### Jira execution instructions\n${feature.jiraExecutionInstructions}\n` : ''}
 `;
 
     if (feature.spec) {
@@ -342,11 +344,15 @@ requires:
     useWorktrees = false,
     isAutoMode = false,
     providedWorktreePath?: string,
-    options?: { continuationPrompt?: string; _calledInternally?: boolean }
+    options?: { continuationPrompt?: string; _calledInternally?: boolean; reattachHerdr?: boolean }
   ): Promise<void> {
     if (activeDeliveryProjects.has(projectPath))
       throw new Error('Complete is running for this project; wait before starting an Agent');
-    const executionStartedAt = Date.now();
+    if (changingWorkSnoozes.has(path.resolve(projectPath)))
+      throw new WorkSnoozedError(
+        'Work snooze is being updated. Try again after the update completes.'
+      );
+    let executionStartedAt = Date.now();
     const tempRunningFeature = this.acquireRunningFeature({
       featureId,
       projectPath,
@@ -369,11 +375,22 @@ requires:
       validateWorkingDirectory(projectPath);
       feature = await this.loadFeatureFn(projectPath, featureId);
       if (!feature) throw new Error(`Feature ${featureId} not found`);
+      const checkpoint = options?.reattachHerdr ? feature.herdrExecution : undefined;
+      if (checkpoint && checkpoint.executionRunId !== feature.executionRunId)
+        throw new Error(
+          'Saved Herdr execution belongs to another run; inspect the conversation before retrying.'
+        );
+      if (checkpoint) executionStartedAt = Date.parse(checkpoint.startedAt);
+      if (feature.herdrExecution && !options?.reattachHerdr)
+        throw new Error(
+          'This task has a saved Herdr execution. Reattach it before sending new work.'
+        );
+      await assertWorkNotSnoozed(projectPath, feature.branchName);
       if (feature.archive || feature.supersededBy || feature.consolidationPlanId) {
         logger.info(`Task ${featureId} is covered or locked for consolidation; execution skipped`);
         return;
       }
-      if (feature.jiraIssueId && this.featureStateManager) {
+      if (!checkpoint && feature.jiraIssueId && this.featureStateManager) {
         feature.executionRunId = feature.jiraDispatchRunId || randomUUID();
         await this.featureStateManager.updateFeatureFields(projectPath, featureId, {
           executionRunId: feature.executionRunId,
@@ -403,7 +420,7 @@ requires:
         await this.updateFeatureStatusFn(projectPath, featureId, 'in_progress');
       }
 
-      if (!options?.continuationPrompt) {
+      if (!checkpoint && !options?.continuationPrompt) {
         if (feature.planSpec?.status === 'approved') {
           const prompts = await getPromptCustomization(this.settingsService, '[ExecutionService]');
           let continuationPrompt = prompts.taskExecution.continuationAfterApprovalTemplate;
@@ -424,7 +441,7 @@ requires:
         }
       }
 
-      let worktreePath: string | null = providedWorktreePath ?? null;
+      let worktreePath: string | null = checkpoint?.workDir ?? providedWorktreePath ?? null;
       const branchName = feature.branchName;
       // A card whose checkout was released (Done longer than the retention
       // window) is rebuilt from its branch here: the work belongs on that
@@ -495,7 +512,9 @@ requires:
       // round and follow-up lands in the same session instead of a clean one.
       const providerSessionId = (feature as { providerSessionId?: string }).providerSessionId;
 
-      if (options?.continuationPrompt) {
+      if (checkpoint) {
+        prompt = checkpoint.prompt;
+      } else if (options?.continuationPrompt) {
         prompt = options.continuationPrompt;
       } else {
         const planningPrefix = await this.getPlanningPromptPrefixFn(feature);
@@ -534,6 +553,7 @@ requires:
 Delivery issue: ${feature.jiraDelivery.issueKey}. Jira subtasks: ${feature.jiraDelivery.subtaskKeys.join(', ') || 'none'}.
 Deliver the parent and its Jira subtasks in this task's worktree; do not create duplicate Automaker child cards or independent subtask worktrees.
 ${feature.jiraDelivery.requiresDecision ? 'Jira has not split this Epic/Story. Unless this turn explicitly approves an Automaker split, ask for a human decision before implementation and report needs_input. Absence of Jira subtasks is not authorization to split.' : ''}
+${feature.jiraDelivery.storyExecutionApproved ? 'The user explicitly approved this existing Story as one delivery card in its Epic worktree. Implement only this Story; do not create new cards, sub-tasks or another worktree. This approval supersedes older manual-decomposition instructions for this Story only.' : ''}
 ${feature.jiraDelivery.conflictingCards?.length ? `Independent child cards already exist: ${feature.jiraDelivery.conflictingCards.join(', ')}. Confirm their delivery scope before implementing overlapping work.` : ''}`;
       }
       const model = resolveModelString(feature.model, DEFAULT_MODELS.claude);
@@ -553,35 +573,48 @@ ${feature.jiraDelivery.conflictingCards?.length ? `Independent child cards alrea
         abortController,
       });
 
-      await this.runAgentFn(
-        workDir,
-        featureId,
-        prompt,
-        abortController,
-        projectPath,
-        imagePaths,
-        model,
-        {
+      if (!checkpoint?.outputApplied)
+        await this.runAgentFn(
+          workDir,
+          featureId,
+          prompt,
+          abortController,
           projectPath,
-          planningMode: feature.planningMode,
-          requirePlanApproval: feature.requirePlanApproval,
-          systemPrompt: combinedSystemPrompt || undefined,
-          autoLoadClaudeMd,
-          useClaudeCodeSystemPrompt,
-          thinkingLevel: feature.thinkingLevel,
-          reasoningEffort: feature.reasoningEffort,
-          providerId: feature.providerId,
-          branchName: feature.branchName ?? null,
-          sdkSessionId: providerSessionId,
-        }
-      );
+          imagePaths,
+          model,
+          {
+            projectPath,
+            planningMode: checkpoint ? checkpoint.planningMode : feature.planningMode,
+            requirePlanApproval: checkpoint
+              ? checkpoint.requirePlanApproval
+              : feature.requirePlanApproval,
+            previousContent: checkpoint?.previousContent,
+            reattachHerdr: !!checkpoint,
+            status: checkpoint?.status,
+            systemPrompt: combinedSystemPrompt || undefined,
+            autoLoadClaudeMd,
+            useClaudeCodeSystemPrompt,
+            thinkingLevel: feature.thinkingLevel,
+            reasoningEffort: feature.reasoningEffort,
+            providerId: feature.providerId,
+            branchName: feature.branchName ?? null,
+            sdkSessionId: providerSessionId,
+          }
+        );
+
+      // No new task/pipeline submissions after the API starts shutting down.
+      if (isShuttingDown()) return;
 
       // Check for incomplete tasks after agent execution.
       // The agent may have finished early (hit max turns, decided it was done, etc.)
       // while tasks are still pending. If so, re-run the agent to complete remaining tasks.
       const MAX_TASK_RETRY_ATTEMPTS = 3;
       let taskRetryAttempts = 0;
-      while (!abortController.signal.aborted && taskRetryAttempts < MAX_TASK_RETRY_ATTEMPTS) {
+      while (
+        !checkpoint?.status.startsWith('pipeline_') &&
+        !abortController.signal.aborted &&
+        taskRetryAttempts < MAX_TASK_RETRY_ATTEMPTS
+      ) {
         const currentFeature = await this.loadFeatureFn(projectPath, featureId);
         if (!currentFeature?.planSpec?.tasks) break;
 
@@ -660,9 +693,17 @@ Please continue from where you left off and complete all remaining tasks. Use th
 
       const pipelineConfig = await pipelineService.getPipelineConfig(projectPath);
       const excludedStepIds = new Set(feature.excludedPipelineSteps || []);
-      const sortedSteps = [...(pipelineConfig?.steps || [])]
+      let sortedSteps = [...(pipelineConfig?.steps || [])]
         .sort((a, b) => a.order - b.order)
         .filter((step) => !excludedStepIds.has(step.id));
+      if (checkpoint?.status.startsWith('pipeline_')) {
+        const stepId = checkpoint.status.slice('pipeline_'.length);
+        const index = sortedSteps.findIndex((step) => step.id === stepId);
+        if (index < 0)
+          throw new Error('The recovered pipeline step no longer exists; review the saved result.');
+        // The detached step was collected above. Only execute subsequent steps.
+        sortedSteps = sortedSteps.slice(index + 1);
+      }
       if (sortedSteps.length > 0) {
         await this.executePipelineFn({
           projectPath,
@@ -689,7 +730,8 @@ Please continue from where you left off and complete all remaining tasks. Use th
       // A shutdown can end the provider stream without an abort error. Keep the
       // feature interrupted so the next start resumes it instead of marking it done.
       if (isShuttingDown()) {
-        await this.updateFeatureStatusFn(projectPath, featureId, 'interrupted');
+        if (!(await this.loadFeatureFn(projectPath, featureId))?.herdrExecution)
+          await this.updateFeatureStatusFn(projectPath, featureId, 'interrupted');
         logger.info(
           `[executeFeature] Feature ${featureId} interrupted by server shutdown; resume on next start`
         );
@@ -759,9 +801,9 @@ Please continue from where you left off and complete all remaining tasks. Use th
       const isOutputTooShort = agentOutput.trim().length < MIN_MEANINGFUL_OUTPUT_LENGTH;
       const agentDidWork = hasToolUsage && !isOutputTooShort;
 
-      let finalStatus: 'verified' | 'waiting_approval' | 'backlog';
+      let finalStatus: 'verified' | 'waiting_approval' | 'backlog' | 'failed';
       let executionError: string | undefined;
-      if (feature.skipTests) {
+      if (feature.skipTests || feature.jiraKey) {
         finalStatus = 'waiting_approval';
       } else if (receiptRequiresReview || receiptHasBlockers) {
         // Preserve the delivered work and require a human to review the receipt.
@@ -803,6 +845,7 @@ Please continue from where you left off and complete all remaining tasks. Use th
 
       // A visual verification result is evidence for a human, never approval.
       // Ignore artifacts left by a previous run.
+      let evidenceImportError: string | undefined;
       if (this.featureStateManager) {
         try {
           const evidence = await collectAcceptanceEvidence(
@@ -819,8 +862,15 @@ Please continue from where you left off and complete all remaining tasks. Use th
           }
         } catch (error) {
           finalStatus = 'waiting_approval';
+          evidenceImportError = `Acceptance evidence could not be imported: ${(error as Error).message}`;
           await this.featureStateManager.updateFeatureFields(projectPath, featureId, {
-            error: `Acceptance evidence could not be imported: ${(error as Error).message}`,
+            error: evidenceImportError,
+            executionNotice: {
+              kind: 'error',
+              source: 'delivery',
+              message: evidenceImportError,
+              occurredAt: new Date().toISOString(),
+            },
           });
         }
       }
@@ -830,7 +880,7 @@ Please continue from where you left off and complete all remaining tasks. Use th
           (receiptRequiresReview && typeof executionReceipt?.summary === 'string'
             ? executionReceipt.summary
             : '');
-        if (reviewMessage) {
+        if (reviewMessage && !evidenceImportError) {
           await this.featureStateManager.updateFeatureFields(projectPath, featureId, {
             error: receiptNeedsAttention ? reviewMessage : undefined,
             executionNotice: {
@@ -843,6 +893,18 @@ Please continue from where you left off and complete all remaining tasks. Use th
         }
       }
       await this.updateFeatureStatusFn(projectPath, featureId, finalStatus);
+      await this.featureStateManager?.updateFeatureFields(projectPath, featureId, {
+        herdrExecution: undefined,
+      });
+      // The shared persistence gate may reject the requested review transition.
+      const gatedFeature = await this.loadFeatureFn(projectPath, featureId);
+      if (
+        gatedFeature?.status === 'failed' &&
+        gatedFeature.executionNotice?.source === 'delivery'
+      ) {
+        finalStatus = 'failed';
+        executionError = gatedFeature.error;
+      }
       if (
         this.featureStateManager &&
         (receiptChangedProjects.length > 0 || receiptMergeRequests.length > 0)
@@ -889,7 +951,7 @@ Please continue from where you left off and complete all remaining tasks. Use th
         if (this.trackFailureFn(failureInfo)) {
           this.signalPauseFn(failureInfo);
         }
-      } else {
+      } else if (finalStatus !== 'failed') {
         this.recordSuccessFn();
       }
 
@@ -934,14 +996,20 @@ Please continue from where you left off and complete all remaining tasks. Use th
           featureName: feature.title,
           branchName: feature.branchName ?? null,
           executionMode: 'auto',
-          passes: finalStatus !== 'backlog',
-          message: finalStatus === 'backlog' ? executionError : completionMessage,
+          passes: finalStatus !== 'backlog' && finalStatus !== 'failed',
+          message:
+            finalStatus === 'backlog' || finalStatus === 'failed'
+              ? executionError
+              : completionMessage,
           projectPath,
           model: tempRunningFeature.model,
           provider: tempRunningFeature.provider,
         });
       }
     } catch (error) {
+      if (isShuttingDown() && (await this.loadFeatureFn(projectPath, featureId))?.herdrExecution)
+        return;
+      if (error instanceof WorkSnoozedError) throw error;
       const errorInfo = classifyError(error);
       if (errorInfo.isAbort) {
         await this.updateFeatureStatusFn(projectPath, featureId, 'interrupted');
@@ -1120,7 +1188,8 @@ Please continue from where you left off and complete all remaining tasks. Use th
       stopped = true;
       clearInterval(timer);
       await sync();
-      await sink.finishFeatureConversation(featureId, error ? { error } : undefined);
+      if (!isShuttingDown())
+        await sink.finishFeatureConversation(featureId, error ? { error } : undefined);
     };
   }
 

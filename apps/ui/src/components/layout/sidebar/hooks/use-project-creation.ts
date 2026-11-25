@@ -10,9 +10,13 @@ import type { Project } from '@/lib/electron';
 
 interface UseProjectCreationProps {
   upsertAndSetCurrentProject: (path: string, name: string) => Project;
+  onProjectCreated?: () => void;
 }
 
-export function useProjectCreation({ upsertAndSetCurrentProject }: UseProjectCreationProps) {
+export function useProjectCreation({
+  upsertAndSetCurrentProject,
+  onProjectCreated,
+}: UseProjectCreationProps) {
   // Modal state
   const [showNewProjectModal, setShowNewProjectModal] = useState(false);
   const [isCreatingProject, setIsCreatingProject] = useState(false);
@@ -60,6 +64,7 @@ export function useProjectCreation({ upsertAndSetCurrentProject }: UseProjectCre
 
         // Let the store handle theme (trashed project recovery or undefined for global)
         upsertAndSetCurrentProject(projectPath, projectName);
+        onProjectCreated?.();
 
         setShowNewProjectModal(false);
 
@@ -77,7 +82,7 @@ export function useProjectCreation({ upsertAndSetCurrentProject }: UseProjectCre
         throw error;
       }
     },
-    [upsertAndSetCurrentProject]
+    [onProjectCreated, upsertAndSetCurrentProject]
   );
 
   /**
@@ -156,6 +161,7 @@ export function useProjectCreation({ upsertAndSetCurrentProject }: UseProjectCre
 
         // Let the store handle theme (trashed project recovery or undefined for global)
         upsertAndSetCurrentProject(projectPath, projectName);
+        onProjectCreated?.();
         setShowNewProjectModal(false);
         setNewProjectName(projectName);
         setNewProjectPath(projectPath);
@@ -173,7 +179,7 @@ export function useProjectCreation({ upsertAndSetCurrentProject }: UseProjectCre
         setIsCreatingProject(false);
       }
     },
-    [upsertAndSetCurrentProject]
+    [onProjectCreated, upsertAndSetCurrentProject]
   );
 
   /**
@@ -225,6 +231,7 @@ export function useProjectCreation({ upsertAndSetCurrentProject }: UseProjectCre
 
         // Let the store handle theme (trashed project recovery or undefined for global)
         upsertAndSetCurrentProject(projectPath, projectName);
+        onProjectCreated?.();
         setShowNewProjectModal(false);
         setNewProjectName(projectName);
         setNewProjectPath(projectPath);
@@ -242,7 +249,7 @@ export function useProjectCreation({ upsertAndSetCurrentProject }: UseProjectCre
         setIsCreatingProject(false);
       }
     },
-    [upsertAndSetCurrentProject]
+    [onProjectCreated, upsertAndSetCurrentProject]
   );
 
   return {

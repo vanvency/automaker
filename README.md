@@ -81,7 +81,7 @@ Jira status and Automaker execution status are independent. Normal sync does not
 
 **Jira 导入：** 先在服务端安装并登录 Jira CLI，再进入 **Project Settings → Jira Sync** 配置站点、项目、JQL、标签、Agent / 模型、目标分支和派发容量。按「测试连接 → 预览匹配与变更 → 保存 → 立即同步」执行；确认导入结果后再启用定时同步与自动执行。关闭自动执行仍可导入任务。
 
-普通同步将匹配的父任务及其已有子任务作为一张卡的交付范围。未拆分的 Epic / Story 会等待 Jira 拆分或明确的人工决定，不会自动扩大需求范围。规则、迁移和运行记录见 [Jira 同步说明](docs/jira-sync-settings.md)。
+普通同步将匹配的父任务及其已有子任务作为一张卡的交付范围；命中同步条件的 Epic 所关联的 Story 也会独立入板，即使 Story 自身没有派发标签。未拆分的 Epic / Story 会等待 Jira 拆分或明确的人工决定，不会自动派发。规则、迁移和运行记录见 [Jira 同步说明](docs/jira-sync-settings.md)。
 
 ### 4. 启动开发并跟进执行
 
@@ -101,17 +101,19 @@ Jira status and Automaker execution status are independent. Normal sync does not
 
 审阅任务差异、测试结果及关联仓库的 Draft PR / MR，确认改动符合验收标准；Agent 的完成回复不能替代实际验收。
 
-需要运行页面时，按 [Worktree 预览指南](docs/worktree-previews.md) 配置项目 `.automaker/preview.json`，在看板部署并打开预览。预览包含当前 Worktree 的未提交改动，修改代码后需重新部署；就绪地址通过 `AUTOMAKER_PREVIEW_URL` 注入 Worktree 测试。
+需要运行页面时，按 [Worktree 预览指南](docs/worktree-previews.md) 配置项目 `.automaker/preview.json`。Agent 执行完成进入待验收时，已配置预览的任务 Worktree 会自动重新部署；手动修改代码后仍可在看板点击重新部署。任务卡显示最近开发完成时间，预览栏显示最近部署开始时间；就绪地址通过 `AUTOMAKER_PREVIEW_URL` 注入 Worktree 测试。
 
-需要图文验收时，让 Agent 按 [验收材料规范](docs/task-acceptance-evidence.md) 产出 `.automaker/acceptance/<featureId>/manifest.json`、原型图、真实运行截图和检查结果，再在任务卡查看「验收结果」。无法验证的项目应明确标记，不能用原型图代替真实运行截图。
+需要图文验收时，让 Agent 按 [验收材料规范](docs/task-acceptance-evidence.md) 产出 `.automaker/acceptance/<featureId>/manifest.json`、原型图、真实运行截图和检查结果，再在任务卡查看「验收结果」。Agent 正常结束后自动导入本次证据；部署后不会自动重拍截图，须核对截图拍摄时间。无法验证的项目应明确标记，不能用原型图代替真实运行截图。
 
 ### 6. 人工验收并完成交付
 
 验收不通过时，通过 Reply 或 **Request Changes** 提出修改；验收通过后使用 **Verify / Mark as Verified**，任务进入 Done。
 
-在 Done 卡片点击 **Complete**，先检查预览中的 MR、目标分支、被审阅版本、Jira 终态和阻塞项，再确认执行。有关联交付时，流程依次记录 **MR 合并 → Jira 关闭 → 预览资源释放**；这与普通 Jira 同步是不同操作。完成后保留交付回执，归档需单独操作。
+在 Done 卡片点击 **Complete**，检查最新 MR 冲突和 review 反馈，可选 **Fix MR** 交给任务 Agent 修复；或选 **Approve MR** 接受当前反馈并移除 Draft。新提交或新反馈需要重新检查和审批。Approve MR 不代替 GitLab 的正式审批规则。
 
-某一步失败时，卡片保留在 Done，并显示已完成步骤和失败原因。可以请求 Agent 修复前置问题，刷新后重试 Complete；如果修复改了代码，需要重新验收。详见 [交付进度说明](docs/task-delivery-progress.md)。
+审批后卡片按钮变为 **Confirm**。点击后核对操作预告、CI 条件、Jira 终态和必填字段，再明确确认执行 **预览资源释放 → MR 合并 → Jira 关闭**。这三步会修改外部系统，全部成功后任务才归档；交付回执、会话、验收材料和代码保留。
+
+某一步失败时，卡片保留在 Done，并显示已完成步骤和失败原因。可以请求 Agent 修复前置问题，刷新后重试 Confirm；如果修复改了代码，需要重新验收和审批 MR。详见 [交付进度说明](docs/task-delivery-progress.md)。
 
 不再推进的任务使用 **Archive Task**，填写原因和说明；重复任务还需选择被重复的任务。归档保留代码、会话和材料，可从 Archived Tasks 恢复，不会自动关闭 Jira 或 MR。运行中的任务先停止；外部重复需求清理由 **Similar Works** 单独预览和确认。
 
@@ -368,6 +370,10 @@ Automaker uses file-based state and does not require an application database:
 Back up the project `.automaker/` directory, server `DATA_DIR`, and provider session directories together. Do not commit credentials, screenshots, or local configuration to a public repository.
 
 ## Documentation
+
+Work Board automatically collects works that have been Done for seven days in
+**Archived Works** (upper right), retaining their Done status and task history.
+See [Work archives](docs/work-archive.md) for eligibility and checkout retention.
 
 | Guide                                                            | Covers                                                                           |
 | ---------------------------------------------------------------- | -------------------------------------------------------------------------------- |

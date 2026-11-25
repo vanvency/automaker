@@ -1,3 +1,10 @@
+vi.mock('../../../src/services/work-snooze.js', () => ({
+  readWorkSnoozes: vi.fn().mockResolvedValue({}),
+  workSnoozeFor: vi.fn(),
+  assertWorkNotSnoozed: vi.fn().mockResolvedValue(undefined),
+  changingWorkSnoozes: new Set(),
+  WorkSnoozedError: class extends Error {},
+}));
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import type { Feature, PipelineStep, PipelineConfig } from '@automaker/types';
 import {
@@ -142,6 +149,7 @@ describe('PipelineOrchestrator', () => {
     } as unknown as TypedEventBus;
 
     mockFeatureStateManager = {
+      updateFeatureFields: vi.fn().mockResolvedValue(undefined),
       updateFeatureStatus: vi.fn().mockResolvedValue(undefined),
       loadFeature: vi.fn().mockResolvedValue(testFeature),
     } as unknown as FeatureStateManager;

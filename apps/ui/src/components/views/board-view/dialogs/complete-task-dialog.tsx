@@ -3,6 +3,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { Loader2 } from 'lucide-react';
 import { apiFetch } from '@/lib/api-fetch';
 import { Button } from '@/components/ui/button';
+import { Markdown } from '@/components/ui/markdown';
 import {
   Dialog,
   DialogContent,
@@ -11,11 +12,18 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog';
 import type { Feature, ConsolidationPlan } from '@automaker/types';
-import { MrConflictNotice } from '../components/kanban-card/mr-conflict-notice';
 
 type Plan = {
   fingerprint: string;
-  mergeRequests: Array<{ name: string; url: string; state: string }>;
+  approved: boolean;
+  mergeRequests: Array<{
+    name: string;
+    url: string;
+    state: string;
+    draft: boolean;
+    pipelineStatus?: string;
+    feedback: Array<{ id: number; body: string; author: string; updatedAt: string; url: string }>;
+  }>;
   /** Delivery MRs GitLab reports as conflicting; an agent can fix these */
   conflicts: Array<{ name: string; mrUrl: string; iid: number }>;
   jira?: ConsolidationPlan['jira'];
@@ -25,6 +33,22 @@ type Plan = {
 type JiraTransitionField = NonNullable<
   NonNullable<Plan['jira']>['transitions'][number]['fields']
 >[number];
+
+const withDefaults = (fields: JiraTransitionField[]) =>
+  Object.fromEntries(
+    fields.map((field) => {
+      const planned = Array.isArray(field.value) ? field.value : [];
+      if (planned.length > 0 || field.multiple) return [field.key, planned];
+      const allowed = field.allowedValues ?? [];
+      const preferred =
+        field.key === 'resolution'
+          ? (allowed.find((option) => /^fixed$/i.test(option.name)) ?? allowed[0])
+          : allowed.length === 1
+            ? allowed[0]
+            : undefined;
+      return [field.key, preferred ? [preferred.id] : []];
+    })
+  );
 
 export function CompleteTaskDialog({
   feature,
@@ -41,31 +65,11 @@ export function CompleteTaskDialog({
   const [transitionId, setTransitionId] = useState('');
   const [jiraFields, setJiraFields] = useState<Record<string, string[]>>({});
   const [error, setError] = useState('');
-  /**
-   * Jira transitions demand fields the operator rarely wants to touch
-   * (`resolution`, `fixVersions`). Fill the obvious default so Complete works
-   * as a single click; the values stay visible and editable below.
-   */
-  const withDefaults = (fields: JiraTransitionField[]) =>
-    Object.fromEntries(
-      fields.map((field) => {
-        const planned = Array.isArray(field.value) ? field.value : [];
-        if (planned.length > 0 || field.multiple) return [field.key, planned];
-        const allowed = field.allowedValues ?? [];
-        const preferred =
-          field.key === 'resolution'
-            ? (allowed.find((option) => /^fixed$/i.test(option.name)) ?? allowed[0])
-            : allowed.length === 1
-              ? allowed[0]
-              : undefined;
-        return [field.key, preferred ? [preferred.id] : []];
-      })
-    );
-  const selectTransition = (id: string, currentPlan: Plan | null = plan) => {
+  const selectTransition = useCallback((id: string, currentPlan: Plan | null) => {
     setTransitionId(id);
     const fields = currentPlan?.jira?.transitions.find((t) => t.id === id)?.fields ?? [];
     setJiraFields(withDefaults(fields));
-  };
+  }, []);
   const requiredFields = plan?.jira?.transitions.find((t) => t.id === transitionId)?.fields ?? [];
   const missingFields = requiredFields.some(
     (field) => !field.supported || !jiraFields[field.key]?.length
@@ -93,11 +97,11 @@ export function CompleteTaskDialog({
     } finally {
       setLoading(false);
     }
-  }, [projectPath, feature.id]);
+  }, [projectPath, feature.id, selectTransition]);
   useEffect(() => {
     void load();
   }, [load]);
-  const apply = async () => {
+  const apply = async (action: 'approve' | 'fix' | 'confirm') => {
     if (!plan || applying) return;
     setApplying(true);
     setError('');
@@ -107,16 +111,26 @@ export function CompleteTaskDialog({
           projectPath,
           featureId: feature.id,
           preview: false,
+          action,
           fingerprint: plan.fingerprint,
           transitionId,
           jiraFields,
         },
       });
-      onClose();
-      toast.info('Complete 已提交，可在任务卡查看三步进度');
+      if (action === 'confirm') {
+        onClose();
+        toast.info('Confirm 已提交：预览释放 → MR 合并 → Jira 关闭');
+      }
       const response = await pending;
       const data = await response.json();
       if (!response.ok || !data.success) throw new Error(data.error || 'Completion failed');
+      toast.success(
+        action === 'approve'
+          ? '已移除 Draft，请点击 Confirm 确认交付'
+          : action === 'fix'
+            ? '已请求 Agent 修复最新 MR 冲突与 review 反馈'
+            : '交付完成，任务已归档'
+      );
       onCompleted();
       onClose();
     } catch (error) {
@@ -141,16 +155,19 @@ export function CompleteTaskDialog({
         onKeyDown={(event) => event.stopPropagation()}
       >
         <DialogHeader>
-          <DialogTitle>Complete · {feature.jiraKey || feature.title}</DialogTitle>
+          <DialogTitle>
+            {plan?.approved ? 'Confirm' : 'Complete'} · {feature.jiraKey || feature.title}
+          </DialogTitle>
           <DialogDescription>
-            依次 squash 合并 MR → 关闭 Jira →
-            释放托管预览资源。每步进度和失败原因展示在卡片上。失败会保留在 Done，可处理后重试。
+            {plan?.approved
+              ? '确认后将修改外部系统：① 释放托管预览资源 → ② squash 合并 MR → ③ 关闭 Jira。全部成功后归档任务；失败留在 Done，可核对后重试。'
+              : '检查最新 MR 冲突和 review 反馈。可选择 Fix MR 交给 Agent 修复，或 Approve MR 移除 Draft；此操作不会合并或关闭 Jira。'}
           </DialogDescription>
         </DialogHeader>
         {loading && (
           <p className="flex items-center gap-2 text-sm">
             <Loader2 className="h-4 w-4 animate-spin" />
-            正在读取 MR 和 Jira…
+            正在读取最新 MR、review 反馈和交付状态…
           </p>
         )}
         {error && (
@@ -172,6 +189,26 @@ export function CompleteTaskDialog({
                     {mr.name}
                   </a>{' '}
                   · {mr.state}
+                  {mr.draft ? ' · Draft' : ''}
+                  {mr.pipelineStatus ? ` · CI: ${mr.pipelineStatus}` : ''}
+                  <ul className="mt-1 max-h-48 space-y-2 overflow-auto">
+                    {(mr.feedback ?? []).map((note) => (
+                      <li key={note.id} className="rounded border p-2">
+                        <a
+                          href={note.url}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="text-brand-500 hover:underline"
+                        >
+                          {note.author || 'Reviewer'}
+                          {note.updatedAt ? ` · ${new Date(note.updatedAt).toLocaleString()}` : ''}
+                        </a>
+                        <Markdown className="break-words [&_p]:whitespace-pre-wrap">
+                          {note.body}
+                        </Markdown>
+                      </li>
+                    ))}
+                  </ul>
                 </li>
               ))}
             </ol>
@@ -182,7 +219,7 @@ export function CompleteTaskDialog({
                 </p>
                 {plan.jira.done && (
                   <p className="text-muted-foreground">
-                    Jira 已完成，确认后仅核对 MR 并补齐 Automaker 状态，不会再次关闭 Jira。
+                    Jira 已完成，确认后会释放预览、核对 MR 并归档，不会再次关闭 Jira。
                   </p>
                 )}
                 {!plan.jira.done && plan.jira.transitions.length > 0 && (
@@ -191,7 +228,7 @@ export function CompleteTaskDialog({
                     className="w-full rounded border bg-background p-2"
                     value={transitionId}
                     disabled={applying}
-                    onChange={(e) => selectTransition(e.target.value)}
+                    onChange={(e) => selectTransition(e.target.value, plan)}
                   >
                     <option value="">选择 Jira 完成状态</option>
                     {plan.jira.transitions.map((t) => (
@@ -290,14 +327,16 @@ export function CompleteTaskDialog({
                 )}
               </div>
             )}
-            {/* A conflict is not a dead end: the owning task's agent can merge the
-                target branch and push the resolution itself. */}
-            {(plan.conflicts ?? []).length > 0 && (
-              <MrConflictNotice
-                projectPath={projectPath}
-                featureId={feature.id}
-                onDispatched={onClose}
-              />
+            {(plan.conflicts ?? []).map((conflict) => (
+              <p key={conflict.mrUrl} role="alert" className="text-sm text-destructive">
+                {conflict.name} !{conflict.iid} 存在冲突，请选择 Fix MR 修复后再 Confirm。
+              </p>
+            ))}
+            {!plan.approved && (
+              <p className="text-sm text-muted-foreground">
+                Approve MR 表示接受当前 review 反馈并移除 Draft；GitLab
+                要求的正式审批与讨论解决仍需满足。
+              </p>
             )}
             {plan.blockers.map((text) => (
               <p className="break-words text-sm text-destructive" key={text}>
@@ -310,19 +349,31 @@ export function CompleteTaskDialog({
           <Button variant="outline" disabled={loading || applying} onClick={() => void load()}>
             刷新
           </Button>
+          {plan &&
+            ((plan.conflicts ?? []).length > 0 ||
+              plan.mergeRequests.some((mr) => mr.feedback?.length)) && (
+              <Button
+                variant="outline"
+                disabled={loading || applying}
+                onClick={() => void apply('fix')}
+              >
+                Fix MR
+              </Button>
+            )}
           <Button
             disabled={
               loading ||
               applying ||
               !plan ||
-              !!plan.blockers.length ||
-              (plan.conflicts ?? []).length > 0 ||
-              missingFields ||
-              (!!plan.jira && !plan.jira.done && !transitionId)
+              (plan.approved &&
+                (!!plan.blockers.length ||
+                  (plan.conflicts ?? []).length > 0 ||
+                  missingFields ||
+                  (!!plan.jira && !plan.jira.done && !transitionId)))
             }
-            onClick={() => void apply()}
+            onClick={() => void apply(plan?.approved ? 'confirm' : 'approve')}
           >
-            {applying ? '正在完成…' : '确认 Complete'}
+            {applying ? '正在提交…' : plan?.approved ? '确认执行并归档' : 'Approve MR'}
           </Button>
         </div>
       </DialogContent>

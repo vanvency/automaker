@@ -2070,9 +2070,12 @@ export class HttpApiClient implements ElectronAPI {
       workDir?: string;
       entries?: Array<{
         id: string;
-        kind: 'session' | 'one-shot' | 'lifecycle' | 'jira';
+        kind: 'session' | 'one-shot' | 'lifecycle' | 'jira' | 'reply';
+        imagePaths?: string[];
         at: string;
         endedAt?: string | null;
+        developmentAt?: string;
+        verificationAt?: string;
         title: string;
         detail?: string;
         model?: string;
@@ -2309,6 +2312,10 @@ export class HttpApiClient implements ElectronAPI {
       this.post('/api/worktree/preview-start', { projectPath, worktreePath }),
     previewStop: (projectPath, worktreePath) =>
       this.post('/api/worktree/preview-stop', { projectPath, worktreePath }),
+    previewConfigRead: (projectPath) =>
+      this.post('/api/worktree/preview-config-read', { projectPath }),
+    previewConfigSave: (projectPath, content, revision) =>
+      this.post('/api/worktree/preview-config-save', { projectPath, content, revision }),
     mergeFeature: (
       projectPath: string,
       branchName: string,

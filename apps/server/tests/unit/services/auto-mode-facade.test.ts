@@ -4,6 +4,22 @@ import type { Feature } from '@automaker/types';
 
 describe('AutoModeServiceFacade', () => {
   describe('isFeatureEligibleForAutoMode', () => {
+    it('does not dispatch a snoozed work regardless of its task stage', () => {
+      for (const status of ['backlog', 'ready', 'interrupted', 'pipeline_testing']) {
+        expect(
+          AutoModeServiceFacade.isFeatureEligibleForAutoMode(
+            {
+              id: 'paused',
+              status,
+              branchName: 'task/a',
+              worktreeSnooze: { snoozedAt: '2026-09-21T00:00:00Z' },
+            } as Feature,
+            'task/a',
+            'main'
+          )
+        ).toBe(false);
+      }
+    });
     it('should include features with pipeline_* status', () => {
       const features: Partial<Feature>[] = [
         { id: '1', status: 'ready', branchName: 'main' },

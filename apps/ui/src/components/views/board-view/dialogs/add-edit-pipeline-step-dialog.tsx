@@ -52,10 +52,13 @@ export function AddEditPipelineStepDialog({
   const [instructions, setInstructions] = useState('');
   const [colorClass, setColorClass] = useState(COLOR_OPTIONS[0].value);
   const [selectedTemplate, setSelectedTemplate] = useState<string | null>(null);
+  const draftStepRef = useRef<string | null>(null);
+  const stepKey = existingStep?.id ?? 'new';
 
-  // Reset form when dialog opens/closes or existingStep changes
+  // Restore unfinished edits only for the same step.
   useEffect(() => {
-    if (open) {
+    if (open && draftStepRef.current !== stepKey) {
+      draftStepRef.current = stepKey;
       if (existingStep) {
         setName(existingStep.name);
         setInstructions(existingStep.instructions);
@@ -68,7 +71,7 @@ export function AddEditPipelineStepDialog({
         setSelectedTemplate(null);
       }
     }
-  }, [open, existingStep, defaultOrder]);
+  }, [open, existingStep, defaultOrder, stepKey]);
 
   const handleTemplateClick = (templateId: string) => {
     const template = STEP_TEMPLATES.find((t) => t.id === templateId);
@@ -122,6 +125,7 @@ export function AddEditPipelineStepDialog({
       order: existingStep?.order ?? defaultOrder,
     });
 
+    draftStepRef.current = null;
     onClose();
   };
 

@@ -1,6 +1,7 @@
-import { createFileRoute } from '@tanstack/react-router';
-import { RunningAgentsView } from '@/components/views/running-agents-view';
+import { createFileRoute, redirect } from '@tanstack/react-router';
 
 export const Route = createFileRoute('/running-agents')({
-  component: RunningAgentsView,
+  beforeLoad: () => {
+    throw redirect({ to: '/agent' });
+  },
 });

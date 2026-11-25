@@ -1,3 +1,10 @@
+vi.mock('../../../src/services/work-snooze.js', () => ({
+  readWorkSnoozes: vi.fn().mockResolvedValue({}),
+  workSnoozeFor: vi.fn(),
+  assertWorkNotSnoozed: vi.fn().mockResolvedValue(undefined),
+  changingWorkSnoozes: new Set(),
+  WorkSnoozedError: class extends Error {},
+}));
 /**
  * Unit tests for RecoveryService
  *
@@ -309,6 +316,33 @@ describe('recovery-service.ts', () => {
   });
 
   describe('resumeFeature', () => {
+    it('reattaches a saved turn without building a continuation prompt or resuming a pipeline twice', async () => {
+      const checkpoint = {
+        paneId: 'p1',
+        workspaceId: 'w1',
+        tabId: 't1',
+        workDir: '/project/wt',
+        startCursor: 4,
+        prompt: 'Original task',
+        startedAt: new Date().toISOString(),
+        status: 'pipeline_review',
+      };
+      mockLoadFeature.mockResolvedValue({
+        id: 'feature-1',
+        status: 'pipeline_review',
+        herdrExecution: checkpoint,
+      });
+      await service.resumeFeature('/test/project', 'feature-1');
+      expect(mockExecuteFeature).toHaveBeenCalledWith(
+        '/test/project',
+        'feature-1',
+        true,
+        false,
+        '/project/wt',
+        { _calledInternally: true, reattachHerdr: true }
+      );
+      expect(mockDetectPipelineStatus).not.toHaveBeenCalled();
+    });
     const mockFeature: Feature = {
       id: 'feature-1',
       title: 'Test Feature',

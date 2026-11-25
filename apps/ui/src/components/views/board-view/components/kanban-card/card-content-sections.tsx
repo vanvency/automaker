@@ -1,5 +1,6 @@
 // @ts-nocheck - content section prop typing with feature data extraction
 import { memo } from 'react';
+import { Link } from '@tanstack/react-router';
 import { Feature } from '@/store/app-store';
 import { ArchiveRestore, GitPullRequest, ExternalLink } from 'lucide-react';
 import { TaskNotice } from '../task-notice';
@@ -18,13 +19,33 @@ export const CardContentSections = memo(function CardContentSections({
 }: CardContentSectionsProps) {
   const goals = Array.isArray(feature.goals) ? (feature.goals as GoalProgress[]) : null;
   const changedProjects = getChangedProjects(feature);
+  const completedAt =
+    feature.lastExecutionCompletedAt ??
+    (feature.status === 'waiting_approval' ? feature.justFinishedAt : undefined);
 
   return (
     <>
+      {completedAt && (
+        <p className="mb-2 text-[11px] text-muted-foreground">
+          最近开发完成：
+          <time dateTime={completedAt}>{new Date(completedAt).toLocaleString()}</time>
+        </p>
+      )}
       {/* Visible status message. `error` carries the question a task is waiting
           on (needs_input), so it must be readable on the card itself rather than
           hidden behind the badge tooltip. */}
       <TaskNotice feature={feature} />
+      {feature.worktreeSnooze && (
+        <div className="mb-2 rounded border p-2 text-xs" data-testid={`work-snoozed-${feature.id}`}>
+          <p>This work is snoozed. Automatic dispatch is paused.</p>
+          {feature.worktreeSnooze.reason && (
+            <p className="mt-1 text-muted-foreground">{feature.worktreeSnooze.reason}</p>
+          )}
+          <Link to="/worktrees" className="mt-1 inline-block underline">
+            Manage in Work Board
+          </Link>
+        </div>
+      )}
       {/* A released checkout is not a problem: the branch and the conversation
           history stay in place, and the next agent run rebuilds the checkout. */}
       {feature.worktreeRelease && (

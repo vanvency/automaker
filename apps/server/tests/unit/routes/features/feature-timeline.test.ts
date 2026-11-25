@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Request, Response } from 'express';
 
 const feature = {
@@ -18,14 +18,23 @@ const feature = {
     },
   ],
 };
+const mocks = vi.hoisted(() => ({
+  files: vi.fn(),
+  read: vi.fn(),
+  stamp: vi.fn(),
+  replies: vi.fn(),
+}));
+vi.mock('../../../../src/services/feature-reply-history.js', () => ({
+  readFeatureReplies: mocks.replies,
+}));
 
 vi.mock('../../../../src/routes/features/routes/opencode-session.js', () => ({
   resolveFeatureWorkDir: async () => ({ feature, workDir: '/tmp/does-not-exist-wt' }),
 }));
 vi.mock('../../../../src/services/pi-session-store.js', () => ({
-  listPiSessionFiles: () => [],
-  readPiSessionFile: () => null,
-  readSessionFeatureId: () => null,
+  listPiSessionFiles: mocks.files,
+  readPiSessionFile: mocks.read,
+  readSessionFeatureId: mocks.stamp,
 }));
 
 const { createFeatureTimelineHandler } =
@@ -44,6 +53,112 @@ function fakeResponse() {
 }
 
 describe('feature timeline route', () => {
+  beforeEach(() => {
+    mocks.files.mockReturnValue([]);
+    mocks.replies.mockResolvedValue([]);
+  });
+  it('includes every reply, preserves identical repeated messages, and recovers only this task’s conversation', async () => {
+    mocks.replies.mockResolvedValue([
+      {
+        id: 'new-1',
+        at: '2026-09-04T00:00:00Z',
+        text: 'Please verify again',
+        imagePaths: ['/task/shot.png'],
+      },
+      { id: 'new-2', at: '2026-09-05T00:00:00Z', text: 'Please verify again' },
+    ]);
+    mocks.files.mockReturnValue(['own', 'sibling', 'oneshot']);
+    mocks.stamp.mockImplementation((file) =>
+      file === 'own' ? feature.id : file === 'sibling' ? 'another-task' : undefined
+    );
+    mocks.read.mockImplementation((file) => ({
+      id: file,
+      messages: [
+        {
+          role: 'user',
+          text: `## Feature Task\n**Feature ID:** ${file}\n**Description:** Build the original requirement`,
+          timestamp: Date.parse('2026-09-01T00:00:00Z'),
+        },
+        {
+          role: 'assistant',
+          text: 'Working on the task',
+          timestamp: Date.parse('2026-09-01T00:01:00Z'),
+        },
+        {
+          role: 'assistant',
+          text: '',
+          timestamp: Date.parse('2026-09-01T00:02:00Z'),
+          toolCalls: [{ name: 'bash', arguments: { command: 'npm run test:server' } }],
+        },
+        {
+          role: 'user',
+          text: '## Follow-up Instructions\nOld full reply\nwith another line\n\n## Task\nAddress the follow-up instructions above.',
+          timestamp: Date.parse('2026-09-02T00:00:00Z'),
+        },
+        {
+          role: 'assistant',
+          text: 'Continuing',
+          timestamp: Date.parse('2026-09-02T00:01:00Z'),
+        },
+        {
+          role: 'user',
+          text: 'Direct terminal reply',
+          timestamp: Date.parse('2026-09-03T00:00:00Z'),
+        },
+        {
+          role: 'user',
+          text: '## Follow-up Instructions\nPlease verify again\n\n## Task\nContinue\nAutomaker reply ID: new-1',
+          timestamp: Date.parse('2026-09-04T00:00:01Z'),
+        },
+      ],
+    }));
+    const { res, body } = fakeResponse();
+    await createFeatureTimelineHandler({} as never)(
+      { body: { projectPath: '/p', featureId: feature.id } } as Request,
+      res
+    );
+    const replies = (body.value?.entries as Array<Record<string, unknown>>).filter(
+      (entry) => entry.kind === 'reply'
+    );
+    expect(replies.map((entry) => entry.detail)).toEqual([
+      'Please verify again',
+      'Please verify again',
+      'Direct terminal reply',
+      'Old full reply\nwith another line',
+    ]);
+    expect(replies[1].imagePaths).toEqual(['/task/shot.png']);
+    expect(replies.some((reply) => String(reply.id).includes('sibling'))).toBe(false);
+    expect(
+      (body.value?.entries as Array<Record<string, unknown>>).some(
+        (entry) => entry.id === 'session:sibling'
+      )
+    ).toBe(false);
+    expect(
+      replies.find((reply) => reply.detail === 'Old full reply\nwith another line')
+    ).toMatchObject({
+      developmentAt: '2026-09-02T00:01:00.000Z',
+    });
+    const resident = (body.value?.entries as Array<Record<string, unknown>>).find(
+      (entry) => entry.id === 'session:own'
+    );
+    expect(resident).toMatchObject({
+      detail: expect.stringContaining('**Description:** Build the original requirement'),
+      developmentAt: '2026-09-01T00:01:00.000Z',
+      verificationAt: '2026-09-01T00:02:00.000Z',
+    });
+    expect(
+      (body.value?.entries as Array<Record<string, unknown>>).find(
+        (entry) => entry.id === 'session:oneshot'
+      )
+    ).toMatchObject({
+      kind: 'one-shot',
+      detail: expect.stringContaining('**Description:** Build the original requirement'),
+    });
+    expect(replies.find((reply) => reply.id === 'reply:new-1')).not.toHaveProperty(
+      'verificationAt'
+    );
+  });
+
   it('adds Jira requirement edits to the card timeline', async () => {
     const { res, body } = fakeResponse();
     await createFeatureTimelineHandler({} as never)(

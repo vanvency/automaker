@@ -108,10 +108,10 @@ export function DeliveryProgress({
           <CheckCircle2 className="h-3 w-3 text-green-600" />
         )}
         {progress.status === 'running'
-          ? 'Complete 进行中'
+          ? 'Confirm 进行中'
           : progress.status === 'failed'
-            ? 'Complete 需要处理'
-            : 'Complete 已完成'}
+            ? 'Confirm 需要处理'
+            : 'Confirm 已完成'}
       </div>
       <div className="grid grid-cols-3 gap-1" aria-label="交付三步进度">
         {progress.steps.map((item) => (
@@ -161,7 +161,7 @@ export function DeliveryProgress({
       )}
       {progress.status === 'failed' && onRetry && (
         <Button size="sm" variant="outline" className="h-7 w-full text-xs" onClick={onRetry}>
-          核对并重试 Complete
+          核对并重试 Confirm
         </Button>
       )}
       <Dialog
@@ -196,7 +196,7 @@ export function DeliveryProgress({
               />
               <p className="text-xs text-muted-foreground">
                 Agent 会收到失败步骤和原因，修复后由你验收并重试
-                Complete；不会自动重做已完成的合并或关闭。
+                Confirm；不会自动重做已完成的合并或关闭。
               </p>
               <Button
                 disabled={sending || sent || progress.status === 'running'}

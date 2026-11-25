@@ -42,6 +42,10 @@ export interface JiraDeliveryScope {
   requiresDecision: boolean;
   rule: 'parent-with-jira-subtasks';
   conflictingCards?: string[];
+  /** Explicit human approval to execute this imported Story as its own card. */
+  storyExecutionApproved?: boolean;
+  /** Jira issue keys that must complete before this card. */
+  blockedBy?: string[];
 }
 
 export interface JiraSyncRun {

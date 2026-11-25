@@ -98,6 +98,71 @@ describe('buildFeatureMergePlan', () => {
 describe('GitLabMergeService', () => {
   const service = (fetchImpl: FetchLike) => new GitLabMergeService('token', fetchImpl);
 
+  it('reads all current review pages again on every check and excludes resolved/system/old diff notes', async () => {
+    const fetchImpl = vi
+      .fn()
+      .mockResolvedValueOnce(
+        jsonResponse(
+          Array.from({ length: 100 }, (_, id) => ({
+            notes: [{ id, body: 'system', system: true }],
+          }))
+        )
+      )
+      .mockResolvedValueOnce(
+        jsonResponse([
+          { notes: [{ id: 101, body: 'resolved', resolved: true }] },
+          { notes: [{ id: 102, body: 'outdated', position: { head_sha: 'old' } }] },
+          {
+            notes: [
+              {
+                id: 103,
+                body: 'fix this',
+                position: { head_sha: 'new' },
+                author: { username: 'reviewer' },
+                updated_at: 'now',
+              },
+            ],
+          },
+        ])
+      )
+      .mockResolvedValueOnce(
+        jsonResponse([
+          { notes: [{ id: 103, body: 'edited suggestion', position: { head_sha: 'new' } }] },
+        ])
+      );
+    const client = service(fetchImpl);
+    expect(await client.getReviewFeedback(ROOT_MR, 'new')).toEqual([
+      {
+        id: 103,
+        body: 'fix this',
+        author: 'reviewer',
+        updatedAt: 'now',
+        url: `${ROOT_MR}#note_103`,
+      },
+    ]);
+    expect(fetchImpl.mock.calls[1][0]).toContain('page=2');
+    expect((await client.getReviewFeedback(ROOT_MR, 'new'))[0].body).toBe('edited suggestion');
+    expect(fetchImpl.mock.calls[2][0]).toContain('page=1');
+  });
+
+  it('fails closed when review feedback cannot be read', async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(jsonResponse({ message: 'Denied' }, 403));
+    await expect(service(fetchImpl).getReviewFeedback(ROOT_MR)).rejects.toThrow('review feedback');
+  });
+
+  it('checks required pipelines on older GitLab without detailed merge status', async () => {
+    const fetchImpl = vi.fn(async () =>
+      jsonResponse({
+        only_allow_merge_if_pipeline_succeeds: true,
+      })
+    );
+    const state = { state: 'opened', draft: false, pipelineStatus: 'running' } as any;
+    expect((await service(fetchImpl).getMergeBlockers(ROOT_MR, state))[0]).toContain('CI 尚未成功');
+    expect(
+      await service(fetchImpl).getMergeBlockers(ROOT_MR, { ...state, pipelineStatus: 'success' })
+    ).toEqual([]);
+  });
+
   it('reads draft and conflict state from the MR', async () => {
     const fetchImpl = vi.fn().mockResolvedValue(
       jsonResponse({

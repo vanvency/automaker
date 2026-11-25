@@ -29,11 +29,50 @@ describe('recent worktree navigation', () => {
     await useRecentWorktreesStore.persist.rehydrate();
     expect(useRecentWorktreesStore.getState().pathsByProject['/project']).toEqual(['/project/w1']);
   });
+  it('keeps visits from another tab when recording the next visit', () => {
+    const { visit } = useRecentWorktreesStore.getState();
+    visit('/project', '/project/a');
+    localStorage.setItem(
+      'automaker-recent-worktrees',
+      JSON.stringify({
+        state: {
+          pathsByProject: { '/project': ['/project/b', '/project/a'], '/other': ['/other/c'] },
+        },
+        version: 0,
+      })
+    );
+    visit('/project', '/project/c');
+    expect(useRecentWorktreesStore.getState().pathsByProject).toEqual({
+      '/project': ['/project/c', '/project/b', '/project/a'],
+      '/other': ['/other/c'],
+    });
+  });
+  it('reclaims only disposable feature snapshots and saves history when quota is full', async () => {
+    localStorage.setItem('automaker:features-cache:/project', 'large response');
+    localStorage.setItem('automaker-settings-cache', 'preserve settings');
+    const original = vi.mocked(localStorage.setItem).getMockImplementation()!;
+    vi.spyOn(localStorage, 'setItem').mockImplementation(function (key, value) {
+      if (
+        key === 'automaker-recent-worktrees' &&
+        localStorage.getItem('automaker:features-cache:/project')
+      ) {
+        throw new globalThis.DOMException('Storage full', 'QuotaExceededError');
+      }
+      original.call(this, key, value);
+    });
+    useRecentWorktreesStore.getState().visit('/project', '/project/latest');
+    expect(localStorage.getItem('automaker:features-cache:/project')).toBeNull();
+    expect(localStorage.getItem('automaker-settings-cache')).toBe('preserve settings');
+    await useRecentWorktreesStore.persist.rehydrate();
+    expect(useRecentWorktreesStore.getState().pathsByProject['/project'][0]).toBe(
+      '/project/latest'
+    );
+  });
   it('switches worktrees and keeps recent visits in memory when storage is full', () => {
-    const original = Storage.prototype.setItem;
-    const writes = vi.spyOn(Storage.prototype, 'setItem').mockImplementation(function (key, value) {
+    const original = vi.mocked(localStorage.setItem).getMockImplementation()!;
+    const writes = vi.spyOn(localStorage, 'setItem').mockImplementation(function (key, value) {
       if (key === 'automaker-recent-worktrees')
-        throw new DOMException('Storage full', 'QuotaExceededError');
+        throw new globalThis.DOMException('Storage full', 'QuotaExceededError');
       original.call(this, key, value);
     });
     const select = useAppStore.getState().setCurrentWorktree;
@@ -57,7 +96,7 @@ describe('recent worktree navigation', () => {
     const original = useRecentWorktreesStore.getState().visit;
     useRecentWorktreesStore.setState({
       visit: () => {
-        throw new DOMException('Storage full', 'QuotaExceededError');
+        throw new globalThis.DOMException('Storage full', 'QuotaExceededError');
       },
     });
     try {
@@ -72,11 +111,11 @@ describe('recent worktree navigation', () => {
     }
   });
   it('tolerates browser storage being inaccessible during hydration and cleanup', async () => {
-    vi.spyOn(Storage.prototype, 'getItem').mockImplementation(() => {
-      throw new DOMException('Denied', 'SecurityError');
+    vi.spyOn(localStorage, 'getItem').mockImplementation(() => {
+      throw new globalThis.DOMException('Denied', 'SecurityError');
     });
-    vi.spyOn(Storage.prototype, 'removeItem').mockImplementation(() => {
-      throw new DOMException('Denied', 'SecurityError');
+    vi.spyOn(localStorage, 'removeItem').mockImplementation(() => {
+      throw new globalThis.DOMException('Denied', 'SecurityError');
     });
     await expect(
       Promise.resolve(useRecentWorktreesStore.persist.rehydrate())

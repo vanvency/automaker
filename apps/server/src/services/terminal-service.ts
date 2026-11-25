@@ -185,6 +185,7 @@ export interface TerminalSession {
   cwd: string;
   createdAt: Date;
   shell: string;
+  isCommandSession: boolean;
   /**
    * Stable caller-supplied key used to reuse a session instead of spawning a
    * second process (for example one herdr attach per worktree session).
@@ -672,6 +673,7 @@ export class TerminalService extends EventEmitter {
       cwd,
       createdAt: new Date(),
       shell,
+      isCommandSession,
       key: options.key ?? null,
       scrollbackBuffer: '',
       outputBuffer: '',
@@ -767,6 +769,9 @@ export class TerminalService extends EventEmitter {
       logger.warn(`Session ${sessionId} not found for resize`);
       return false;
     }
+    // Direct TUI clients redraw their entire screen on resize. Dropping those
+    // frames leaves stale text and clickable regions at the wrong coordinates.
+    suppressOutput = suppressOutput && !session.isCommandSession;
     try {
       // Only suppress output on subsequent resizes, not the initial one
       // This prevents the shell's first prompt from being dropped

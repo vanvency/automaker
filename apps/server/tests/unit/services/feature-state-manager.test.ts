@@ -125,6 +125,26 @@ describe('FeatureStateManager', () => {
   });
 
   describe('updateFeatureStatus', () => {
+    it('persists a rejected Jira review as failed and emits the actual status', async () => {
+      (readJsonWithRecovery as Mock).mockResolvedValue({
+        data: { ...mockFeature, jiraKey: 'AIP-1', status: 'in_progress' },
+        recovered: false,
+      });
+      await manager.updateFeatureStatus('/project', 'feature-123', 'waiting_approval');
+      expect((atomicWriteJson as Mock).mock.calls[0][1]).toMatchObject({
+        status: 'failed',
+        error: expect.stringContaining('Task branch is missing'),
+      });
+      expect(mockEvents.emit).toHaveBeenCalledWith(
+        'auto-mode:event',
+        expect.objectContaining({ status: 'failed' })
+      );
+      expect(mockEvents.emit).not.toHaveBeenCalledWith(
+        'auto-mode:event',
+        expect.objectContaining({ status: 'waiting_approval' })
+      );
+    });
+
     it('should update feature status and persist to disk', async () => {
       (readJsonWithRecovery as Mock).mockResolvedValue({
         data: { ...mockFeature },
@@ -151,6 +171,25 @@ describe('FeatureStateManager', () => {
 
       const savedFeature = (atomicWriteJson as Mock).mock.calls[0][1] as Feature;
       expect(savedFeature.justFinishedAt).toBeDefined();
+    });
+
+    it('records Agent completion without replacing it on manual verification', async () => {
+      (readJsonWithRecovery as Mock).mockResolvedValueOnce({
+        data: { ...mockFeature, status: 'in_progress' },
+        recovered: false,
+      });
+      await manager.updateFeatureStatus('/project', 'feature-123', 'waiting_approval');
+      const completed = (atomicWriteJson as Mock).mock.calls[0][1] as Feature;
+      expect(completed.lastExecutionCompletedAt).toBeDefined();
+
+      (readJsonWithRecovery as Mock).mockResolvedValueOnce({
+        data: { ...completed },
+        recovered: false,
+      });
+      await manager.updateFeatureStatus('/project', 'feature-123', 'verified');
+      expect((atomicWriteJson as Mock).mock.calls[1][1].lastExecutionCompletedAt).toBe(
+        completed.lastExecutionCompletedAt
+      );
     });
 
     it('should clear justFinishedAt when status is not waiting_approval', async () => {
@@ -560,6 +599,26 @@ describe('FeatureStateManager', () => {
   });
 
   describe('resetStuckFeatures', () => {
+    it('preserves stages and in-progress plan tasks owned by a detached Herdr execution', async () => {
+      (secureFs.readdir as Mock).mockResolvedValue([
+        { name: 'feature-123', isDirectory: () => true },
+      ]);
+      const feature = {
+        ...mockFeature,
+        status: 'in_progress',
+        herdrExecution: { paneId: 'p1' },
+        planSpec: {
+          status: 'generating',
+          currentTaskId: 'T1',
+          tasks: [{ id: 'T1', status: 'in_progress' }],
+        },
+      };
+      (readJsonWithRecovery as Mock).mockResolvedValue({ data: feature });
+      await manager.resetStuckFeatures('/project');
+      expect(atomicWriteJson).not.toHaveBeenCalled();
+      expect(feature.status).toBe('in_progress');
+      expect(feature.planSpec.tasks[0].status).toBe('in_progress');
+    });
     it('should reset in_progress features to ready if has approved plan', async () => {
       const stuckFeature: Feature = {
         ...mockFeature,

@@ -48,7 +48,7 @@ describe('completed runs awaiting attention remain visible', () => {
   it('keeps the successful three-step receipt on Done until explicitly archived', () => {
     const completed = {
       ...feature,
-      status: 'completed',
+      status: 'verified',
       error: undefined,
       deliveryCompletion: { status: 'succeeded', updatedAt: 'now', steps: [] },
     } as Feature;

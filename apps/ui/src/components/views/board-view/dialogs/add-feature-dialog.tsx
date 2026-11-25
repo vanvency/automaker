@@ -221,13 +221,22 @@ export function AddFeatureDialog({
 
   // Track previous open state to detect when dialog opens
   const wasOpenRef = useRef(false);
+  const draftContextRef = useRef<string | null>(null);
+  const draftContext = JSON.stringify([
+    projectPath,
+    parentFeature?.id,
+    prefilledTitle,
+    prefilledDescription,
+    prefilledCategory,
+  ]);
 
   // Sync defaults only when dialog opens (transitions from closed to open)
   useEffect(() => {
     const justOpened = open && !wasOpenRef.current;
     wasOpenRef.current = open;
 
-    if (justOpened) {
+    if (justOpened && draftContextRef.current !== draftContext) {
+      draftContextRef.current = draftContext;
       // Initialize with prefilled values if provided, otherwise use defaults
       setTitle(prefilledTitle ?? '');
       setDescription(prefilledDescription ?? '');
@@ -295,6 +304,7 @@ export function AddFeatureDialog({
     prefilledTitle,
     prefilledDescription,
     prefilledCategory,
+    draftContext,
   ]);
 
   // Clear requirePlanApproval when planning mode is skip (lite supports approval)
@@ -421,6 +431,7 @@ export function AddFeatureDialog({
     setParentDependencies([]);
     setChildDependencies([]);
     setExcludedPipelineSteps([]);
+    draftContextRef.current = null;
     onOpenChange(false);
   };
 

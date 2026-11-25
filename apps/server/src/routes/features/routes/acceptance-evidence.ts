@@ -2,9 +2,13 @@ import type { Request, Response } from 'express';
 import type { FeatureLoader } from '../../../services/feature-loader.js';
 import { collectAcceptanceEvidence } from '../../../services/acceptance-evidence-service.js';
 import { WorktreeResolver } from '../../../services/worktree-resolver.js';
+import type { EventEmitter } from '../../../lib/events.js';
 
 /** Import artifacts from the task's own worktree; the browser cannot choose source files. */
-export function createAcceptanceEvidenceHandler(featureLoader: FeatureLoader) {
+export function createAcceptanceEvidenceHandler(
+  featureLoader: FeatureLoader,
+  events?: EventEmitter
+) {
   return async (req: Request, res: Response): Promise<void> => {
     try {
       const { projectPath, featureId } = req.body ?? {};
@@ -37,6 +41,24 @@ export function createAcceptanceEvidenceHandler(featureLoader: FeatureLoader) {
       }
       const updated = await featureLoader.update(projectPath, featureId, {
         acceptanceEvidence: evidence,
+        ...(feature.error?.startsWith('Acceptance evidence could not be imported:')
+          ? { error: undefined }
+          : {}),
+        ...(feature.executionNotice?.message.startsWith(
+          'Acceptance evidence could not be imported:'
+        )
+          ? { executionNotice: undefined }
+          : {}),
+      });
+      // Other open boards must refresh too; importing through one dialog or API
+      // should not leave a previous import error cached in another browser.
+      events?.emit('auto-mode:event', {
+        type: 'features_reconciled',
+        projectPath,
+        featureId,
+        reconciledCount: 1,
+        reconciledFeatureIds: [featureId],
+        reason: 'acceptance_evidence_imported',
       });
       res.json({ success: true, feature: updated });
     } catch (error) {

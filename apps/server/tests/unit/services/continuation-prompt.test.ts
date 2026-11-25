@@ -4,6 +4,7 @@ import {
   featurePromptBlock,
   hasProviderSession,
   previousContextBlock,
+  DEVELOPMENT_COMPLETION_POLICY,
 } from '../../../src/services/continuation-prompt.js';
 
 const feature = {
@@ -14,6 +15,22 @@ const feature = {
 } as Feature;
 
 describe('continuation-prompt', () => {
+  it('overrides legacy root-gitlink delivery instructions for vibe-llmops only', () => {
+    expect(DEVELOPMENT_COMPLETION_POLICY).toContain(
+      'do not stage or commit submodule gitlink changes'
+    );
+    expect(DEVELOPMENT_COMPLETION_POLICY).toContain(
+      'do not create a root MR solely because submodule checkouts changed'
+    );
+    expect(DEVELOPMENT_COMPLETION_POLICY).toContain(
+      'only when the user explicitly requests an integration/release version-lock update'
+    );
+    expect(DEVELOPMENT_COMPLETION_POLICY).toContain(
+      'For other projects, follow their explicit repository policy'
+    );
+    expect(DEVELOPMENT_COMPLETION_POLICY).not.toContain('including root gitlinks');
+  });
+
   it('detects whether a conversation can be continued', () => {
     expect(hasProviderSession(feature)).toBe(false);
     expect(hasProviderSession({ ...feature, providerSessionId: 'ses_1' } as Feature)).toBe(true);
@@ -25,6 +42,16 @@ describe('continuation-prompt', () => {
     const block = featurePromptBlock(feature);
     expect(block).toContain('LONG-DESCRIPTION-BODY');
     expect(block).toContain(feature.id);
+  });
+  it('injects separated Jira instructions only on the first turn', () => {
+    const imported = {
+      ...feature,
+      jiraExecutionInstructions: 'Create verified Draft MRs. Preserve the worktree.',
+    };
+    expect(featurePromptBlock(imported)).toContain(imported.jiraExecutionInstructions);
+    expect(featurePromptBlock(imported, { continuing: true })).not.toContain(
+      imported.jiraExecutionInstructions
+    );
   });
 
   it('keeps only an anchor when continuing an existing conversation', () => {

@@ -4,7 +4,11 @@
  */
 
 import path from 'path';
-import type { Feature, DescriptionHistoryEntry } from '@automaker/types';
+import {
+  hasFeatureAttentionError,
+  type Feature,
+  type DescriptionHistoryEntry,
+} from '@automaker/types';
 import {
   createLogger,
   atomicWriteJson,
@@ -21,6 +25,8 @@ import {
   ensureAutomakerDir,
 } from '@automaker/platform';
 import { addImplementedFeature, type ImplementedFeature } from '../lib/xml-extractor.js';
+import { gateDraftMrReview } from './draft-mr-review-gate.js';
+import { readWorkSnoozes, workSnoozeFor } from './work-snooze.js';
 
 const logger = createLogger('FeatureLoader');
 
@@ -238,6 +244,10 @@ export class FeatureLoader {
 
       const results = await Promise.all(featurePromises);
       const features = results.filter((f): f is Feature => f !== null);
+      const snoozes = await readWorkSnoozes(projectPath);
+      for (const feature of features) {
+        feature.worktreeSnooze = workSnoozeFor(snoozes, feature.branchName);
+      }
 
       // Sort by creation order (feature IDs contain timestamp)
       features.sort((a, b) => {
@@ -338,6 +348,12 @@ export class FeatureLoader {
       delete feature.titleGenerating;
     }
 
+    if (feature) {
+      feature.worktreeSnooze = workSnoozeFor(
+        await readWorkSnoozes(projectPath),
+        feature.branchName
+      );
+    }
     return feature;
   }
 
@@ -389,6 +405,7 @@ export class FeatureLoader {
     // if the app restarts before generation completes.
     const featureToWrite = { ...feature };
     delete featureToWrite.titleGenerating;
+    delete featureToWrite.worktreeSnooze;
 
     // Write feature.json atomically with backup support
     await atomicWriteJson(featureJsonPath, featureToWrite, { backupCount: DEFAULT_BACKUP_COUNT });
@@ -417,6 +434,28 @@ export class FeatureLoader {
     const feature = await this.get(projectPath, featureId);
     if (!feature) {
       throw new Error(`Feature ${featureId} not found`);
+    }
+    const attentionOverride = updates.attentionOverride;
+    if (
+      attentionOverride &&
+      (feature.archive ||
+        feature.status === 'in_progress' ||
+        feature.status?.startsWith('pipeline_') ||
+        !(
+          ['failed', 'error', 'cancelled', 'canceled', 'merge_conflict', 'interrupted'].includes(
+            feature.status ?? ''
+          ) || hasFeatureAttentionError(feature)
+        ) ||
+        !['waiting_approval', 'verified'].includes(updates.status ?? '') ||
+        attentionOverride.fromStatus !== feature.status ||
+        attentionOverride.targetStatus !== updates.status ||
+        attentionOverride.executionRunId !== feature.executionRunId ||
+        attentionOverride.previousError !== (feature.error || feature.executionNotice?.message) ||
+        !Number.isFinite(Date.parse(attentionOverride.acceptedAt)))
+    ) {
+      throw new Error(
+        'Task changed or is not eligible for a manual attention override; reload and retry'
+      );
     }
 
     // Handle image path changes
@@ -474,18 +513,39 @@ export class FeatureLoader {
       ...(updatedImagePaths !== undefined ? { imagePaths: updatedImagePaths } : {}),
       descriptionHistory: updatedHistory,
     };
+    if (attentionOverride) {
+      updatedFeature.attentionOverride = {
+        fromStatus: feature.status!,
+        targetStatus: attentionOverride.targetStatus,
+        acceptedAt: new Date().toISOString(),
+        executionRunId: feature.executionRunId,
+        previousError: feature.error || feature.executionNotice?.message,
+      };
+      updatedFeature.error = undefined;
+      updatedFeature.executionNotice = undefined;
+      updatedFeature.deliveryApproval = undefined;
+      if (updates.status === 'verified') updatedFeature.completionSource = 'human';
+    }
+    if (updates.status !== undefined && updates.status !== feature.status && !attentionOverride) {
+      if (!['verified', 'completed'].includes(updates.status)) {
+        updatedFeature.deliveryApproval = undefined;
+      }
+      Object.assign(updatedFeature, await gateDraftMrReview(projectPath, updatedFeature));
+    }
 
     // Done bookkeeping. `verifiedAt` records when the card entered Done and is
     // what the worktree retention job counts from; a card that is completed
     // (delivered) keeps the stamp of the Done entry that led to it.
     if (updates.status !== undefined && updates.status !== feature.status) {
-      if (updates.status === 'verified') updatedFeature.verifiedAt = new Date().toISOString();
-      else if (updates.status !== 'completed') updatedFeature.verifiedAt = undefined;
+      if (updatedFeature.status === 'verified')
+        updatedFeature.verifiedAt = new Date().toISOString();
+      else if (updatedFeature.status !== 'completed') updatedFeature.verifiedAt = undefined;
     }
 
     // Remove transient runtime fields before persisting (same as create)
     const featureToWrite = { ...updatedFeature };
     delete featureToWrite.titleGenerating;
+    delete featureToWrite.worktreeSnooze;
 
     // Write back to file atomically with backup support
     const featureJsonPath = this.getFeatureJsonPath(projectPath, featureId);

@@ -102,6 +102,13 @@ describe('WorktreeRetentionService.plan', () => {
     expect(result.kept[0].reason).toContain('1 张卡还未完成');
   });
 
+  it('keeps the checkout while its work is snoozed', async () => {
+    const { service } = setup({ cards: [card('paused', { worktreeSnooze: { snoozedAt: OLD } })] });
+    const result = await service.plan(PROJECT, { now: NOW });
+    expect(result.released).toEqual([]);
+    expect(result.kept[0].reason).toContain('snoozed');
+  });
+
   it('keeps the checkout while a card is inside the retention window', async () => {
     const { service } = setup({
       cards: [card('fresh', { verifiedAt: '2026-09-20T00:00:00.000Z' })],

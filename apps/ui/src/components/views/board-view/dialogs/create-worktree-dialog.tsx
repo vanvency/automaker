@@ -151,6 +151,7 @@ export function CreateWorktreeDialog({
 
   // AbortController ref so in-flight branch fetches can be cancelled when the dialog closes
   const branchFetchAbortRef = useRef<AbortController | null>(null);
+  const draftProjectRef = useRef(projectPath);
 
   // Fetch available branches and remotes when the base branch section is expanded
   const fetchBranches = useCallback(
@@ -249,25 +250,28 @@ export function CreateWorktreeDialog({
     };
   }, [open, showBaseBranch, fetchBranches]);
 
-  // Reset state when dialog closes
+  // Keep unsubmitted choices when dismissed; discard them when changing projects.
   useEffect(() => {
+    if (draftProjectRef.current !== projectPath) {
+      draftProjectRef.current = projectPath;
+      setBranchName('');
+      setBaseBranch('');
+      setShowBaseBranch(false);
+      setSelectedRemote('local');
+    }
     if (!open) {
       // Abort any in-flight branch fetch to prevent stale writes
       branchFetchAbortRef.current?.abort();
       branchFetchAbortRef.current = null;
 
-      setBranchName('');
-      setBaseBranch('');
-      setShowBaseBranch(false);
       setError(null);
       setAvailableBranches([]);
       setBranchFetchError(null);
       setIsLoadingBranches(false);
-      setSelectedRemote('local');
       setAvailableRemotes([]);
       setRemoteBranches(new Map());
     }
-  }, [open]);
+  }, [open, projectPath]);
 
   // Build branch name list for the autocomplete, filtered by selected remote
   const branchNames = useMemo(() => {
@@ -389,6 +393,8 @@ export function CreateWorktreeDialog({
         onOpenChange(false);
         setBranchName('');
         setBaseBranch('');
+        setShowBaseBranch(false);
+        setSelectedRemote('local');
       } else {
         setError(parseWorktreeError(result.error || 'Failed to create worktree'));
       }

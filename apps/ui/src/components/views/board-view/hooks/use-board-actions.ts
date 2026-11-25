@@ -955,54 +955,25 @@ export function useBoardActions({
 
   const handleUnarchiveFeature = useCallback(
     async (feature: Feature) => {
-      if (feature.archive && currentProject) {
-        try {
-          const response = await apiFetch('/api/features/restore-archive', 'POST', {
-            body: { projectPath: currentProject.path, featureId: feature.id },
-          });
-          const result = await response.json();
-          if (!response.ok || !result.success) throw new Error(result.error || 'Restore failed');
-          updateFeature(feature.id, result.feature);
-          await loadFeatures();
+      if (!currentProject) return;
+      try {
+        const response = await apiFetch('/api/features/restore-archive', 'POST', {
+          body: { projectPath: currentProject.path, featureId: feature.id },
+        });
+        const result = await response.json();
+        if (!response.ok || !result.success) throw new Error(result.error || 'Restore failed');
+        updateFeature(feature.id, result.feature);
+        await loadFeatures();
+        if (result.feature.status === 'failed') {
+          toast.error('恢复需要处理', { description: result.feature.error });
+        } else {
           toast.success('Task restored; archive history preserved');
-        } catch (error) {
-          toast.error((error as Error).message);
         }
-        return;
-      }
-      // Determine the branch to restore to:
-      // - If the feature had a branch assigned, keep it (preserves worktree context)
-      // - If no branch was assigned, it will show on the primary worktree
-      const featureBranch = feature.branchName;
-      const branchLabel = featureBranch ?? 'primary worktree';
-
-      // Check if the feature will be visible on the current worktree view
-      const willBeVisibleOnCurrentView = !featureBranch
-        ? !currentWorktreeBranch ||
-          (projectPath ? isPrimaryWorktreeBranch(projectPath, currentWorktreeBranch) : true)
-        : featureBranch === currentWorktreeBranch;
-
-      persistFeatureUpdate(feature.id, { status: 'verified' as const });
-
-      if (willBeVisibleOnCurrentView) {
-        toast.success('Feature restored', {
-          description: `Moved back to verified: ${truncateDescription(feature.description)}`,
-        });
-      } else {
-        toast.success('Feature restored', {
-          description: `Moved back to verified on branch "${branchLabel}": ${truncateDescription(feature.description)}`,
-        });
+      } catch (error) {
+        toast.error((error as Error).message);
       }
     },
-    [
-      persistFeatureUpdate,
-      currentWorktreeBranch,
-      projectPath,
-      isPrimaryWorktreeBranch,
-      currentProject,
-      updateFeature,
-      loadFeatures,
-    ]
+    [currentProject, updateFeature, loadFeatures]
   );
 
   const handleViewOutput = useCallback(

@@ -15,6 +15,12 @@ export function TaskNotice({ feature }: { feature: Feature }) {
   const notice = feature.executionNotice;
   const message = feature.error?.trim() || notice?.message;
   if (!message) return null;
+  const agentFeedback =
+    feature.status === 'failed' &&
+    notice?.source === 'delivery' &&
+    message.startsWith('Draft MR delivery required before review:')
+      ? feature.summary?.trim()
+      : undefined;
   // A legacy writer may update error without updating its metadata.
   const matches = notice?.message.trim() === message;
   const source = matches
@@ -39,7 +45,9 @@ export function TaskNotice({ feature }: { feature: Feature }) {
       >
         <span className="flex items-start gap-1.5">
           <AlertCircle className="mt-[1px] h-3 w-3 shrink-0" />
-          <span className="line-clamp-3 break-words text-[10px] leading-relaxed">{message}</span>
+          <span className="line-clamp-3 break-words text-[10px] leading-relaxed">
+            {agentFeedback || message}
+          </span>
         </span>
         <span className="mt-1 block text-[10px] underline">查看详情</span>
       </button>
@@ -53,6 +61,12 @@ export function TaskNotice({ feature }: { feature: Feature }) {
             </DialogDescription>
           </DialogHeader>
           <p className="whitespace-pre-wrap break-words text-sm">{message}</p>
+          {agentFeedback && (
+            <div className="space-y-1 border-t pt-3">
+              <p className="text-sm font-medium">Agent 反馈（请核对是否属于本轮执行）</p>
+              <p className="whitespace-pre-wrap break-words text-sm">{agentFeedback}</p>
+            </div>
+          )}
           <p className="text-xs text-muted-foreground">
             此处是任务状态说明；Agent 对话记录请查看 Conversation。可通过 Reply 补充信息或继续处理。
           </p>

@@ -649,9 +649,12 @@ export interface FeaturesAPI {
     workDir?: string;
     entries?: Array<{
       id: string;
-      kind: 'session' | 'one-shot' | 'lifecycle' | 'jira';
+      kind: 'session' | 'one-shot' | 'lifecycle' | 'jira' | 'reply';
+      imagePaths?: string[];
       at: string;
       endedAt?: string | null;
+      developmentAt?: string;
+      verificationAt?: string;
       title: string;
       detail?: string;
       model?: string;
@@ -2383,6 +2386,14 @@ function createMockWorktreeAPI(): WorktreeAPI {
     previewStatus: async () => ({ success: true, configured: false, preview: null }),
     previewStart: async () => ({ success: false, error: 'Preview deployment requires the server' }),
     previewStop: async () => ({ success: false, error: 'Preview deployment requires the server' }),
+    previewConfigRead: async () => ({
+      success: false,
+      error: 'Preview configuration requires the server',
+    }),
+    previewConfigSave: async () => ({
+      success: false,
+      error: 'Preview configuration requires the server',
+    }),
     mergeFeature: async (
       projectPath: string,
       branchName: string,

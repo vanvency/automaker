@@ -113,6 +113,7 @@ export function Sidebar() {
     handleCreateFromCustomUrl,
   } = useProjectCreation({
     upsertAndSetCurrentProject,
+    onProjectCreated: () => navigate({ to: '/worktrees' }),
   });
 
   // Setup dialog state and handlers
@@ -240,7 +241,7 @@ export function Sidebar() {
           });
         }
 
-        navigate({ to: '/board' });
+        navigate({ to: '/worktrees' });
       } catch (error) {
         logger.error('Failed to open project:', error);
         toast.error('Failed to open project', {
@@ -291,7 +292,7 @@ export function Sidebar() {
       // Batch project switch + navigation to prevent multi-render cascades.
       startTransition(() => {
         setCurrentProject(targetProject);
-        navigate({ to: '/board' });
+        navigate({ to: '/worktrees' });
       });
     },
     [setCurrentProject, navigate]

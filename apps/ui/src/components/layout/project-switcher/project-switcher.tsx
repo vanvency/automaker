@@ -82,6 +82,7 @@ export function ProjectSwitcher() {
     handleCreateFromCustomUrl,
   } = useProjectCreation({
     upsertAndSetCurrentProject,
+    onProjectCreated: () => navigate({ to: '/worktrees' }),
   });
 
   const handleContextMenu = (project: Project, event: React.MouseEvent) => {
@@ -103,7 +104,7 @@ export function ProjectSwitcher() {
   const handleProjectClick = useCallback(
     async (project: Project) => {
       if (project.id === currentProject?.id) {
-        navigate({ to: '/board' });
+        navigate({ to: '/worktrees' });
         return;
       }
       try {
@@ -122,8 +123,8 @@ export function ProjectSwitcher() {
       // can trigger React error #185 (maximum update depth exceeded).
       startTransition(() => {
         setCurrentProject(project);
-        // Navigate to board view when switching projects
-        navigate({ to: '/board' });
+        // Show the selected project's work first.
+        navigate({ to: '/worktrees' });
       });
     },
     [currentProject?.id, setCurrentProject, navigate]
@@ -136,7 +137,7 @@ export function ProjectSwitcher() {
 
   const handleOnboardingSkip = () => {
     setShowOnboardingDialog(false);
-    navigate({ to: '/board' });
+    navigate({ to: '/worktrees' });
   };
 
   const handleBugReportClick = useCallback(() => {
@@ -198,8 +199,8 @@ export function ProjectSwitcher() {
           });
         }
 
-        // Navigate to board view
-        navigate({ to: '/board' });
+        // Navigate to this project's Work Board.
+        navigate({ to: '/worktrees' });
       } catch (error) {
         console.error('Failed to open project:', error);
         toast.error('Failed to open project', {

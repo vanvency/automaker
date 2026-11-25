@@ -1,5 +1,5 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
-import { describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   AcceptanceEvidence,
   AcceptanceEvidenceDialog,
@@ -8,6 +8,10 @@ import type { AcceptanceEvidence as Evidence } from '@automaker/types';
 
 vi.mock('@/lib/api-fetch', () => ({
   getAuthenticatedImageUrl: (path: string) => `/api/fs/image?path=${encodeURIComponent(path)}`,
+}));
+const worktree = vi.hoisted(() => ({ listAll: vi.fn(), previewStatus: vi.fn() }));
+vi.mock('@/lib/electron', () => ({
+  getElectronAPI: () => ({ worktree }),
 }));
 const evidence: Evidence = {
   status: 'passed',
@@ -36,8 +40,56 @@ const evidence: Evidence = {
   ],
 };
 
+const worktrees = {
+  success: true,
+  worktrees: [
+    { path: '/project', branch: 'main', isMain: true },
+    { path: '/project/.worktrees/task', branch: 'feature/task', isMain: false },
+  ],
+};
+beforeEach(() => {
+  // Tests unrelated to the preview do not resolve an asynchronous background request.
+  worktree.listAll.mockImplementation(() => new Promise(() => {}));
+  worktree.previewStatus.mockResolvedValue({
+    success: true,
+    preview: { status: 'ready', url: evidence.previewUrl },
+  });
+});
+
 describe('acceptance evidence on task cards', () => {
-  it('shows distinct reference and actual screenshots without claiming human approval', () => {
+  it('stamps the recorded capture time directly on screenshot previews', () => {
+    render(<AcceptanceEvidence evidence={evidence} projectPath="/project" />);
+    const image = screen.getByAltText('真实截图：Audit on k3s');
+    expect(image.closest('figure')?.querySelector('time')).toHaveAttribute(
+      'dateTime',
+      '2026-09-19T07:00:00Z'
+    );
+  });
+
+  it('labels missing legacy timestamps honestly in the card and Verify dialog', () => {
+    const legacy = {
+      ...evidence,
+      verifiedAt: undefined,
+      screenshots: evidence.screenshots.map((shot) => ({ ...shot, capturedAt: undefined })),
+    };
+    const { unmount } = render(<AcceptanceEvidence evidence={legacy} projectPath="/project" />);
+    fireEvent.click(screen.getByRole('button', { name: '查看验收材料' }));
+    expect(screen.getAllByText('截图时间未记录')).toHaveLength(4);
+    expect(screen.queryByText(/Invalid Date/)).not.toBeInTheDocument();
+    unmount();
+    render(
+      <AcceptanceEvidenceDialog
+        evidence={legacy}
+        projectPath="/project"
+        open
+        onOpenChange={vi.fn()}
+      />
+    );
+    expect(screen.getByText('验证时间：未记录')).toBeInTheDocument();
+    expect(screen.getAllByText('截图时间未记录')).toHaveLength(2);
+  });
+  it('shows distinct reference and actual screenshots without claiming human approval', async () => {
+    worktree.listAll.mockResolvedValue(worktrees);
     render(<AcceptanceEvidence evidence={evidence} projectPath="/project" />);
     expect(screen.getByText('验证通过 · 待人工验收')).toBeInTheDocument();
     expect(screen.getByAltText('原型图：Audit design')).toHaveAttribute(
@@ -48,10 +100,107 @@ describe('acceptance evidence on task cards', () => {
       'src',
       expect.stringContaining('actual.png')
     );
-    expect(screen.getByRole('link', { name: '打开验证环境' })).toHaveAttribute(
+    expect(await screen.findByRole('link', { name: '打开当前 Worktree 预览' })).toHaveAttribute(
       'href',
       evidence.previewUrl
     );
+  });
+
+  it('uses the task branch live preview after redeploy, keeping the recorded verification URL historical', async () => {
+    worktree.listAll.mockResolvedValue(worktrees);
+    worktree.previewStatus.mockResolvedValue({
+      success: true,
+      preview: { status: 'ready', url: 'http://172.16.251.159:32422/' },
+    });
+    const oldEvidence = { ...evidence, previewUrl: 'http://172.16.251.159:44313/' };
+    const { unmount } = render(
+      <AcceptanceEvidence evidence={oldEvidence} projectPath="/project" branchName="feature/task" />
+    );
+    expect(await screen.findByRole('link', { name: '打开当前 Worktree 预览' })).toHaveAttribute(
+      'href',
+      'http://172.16.251.159:32422/'
+    );
+    expect(worktree.previewStatus).toHaveBeenCalledWith('/project', '/project/.worktrees/task');
+    unmount();
+    render(
+      <AcceptanceEvidenceDialog
+        evidence={oldEvidence}
+        projectPath="/project"
+        branchName="feature/task"
+        open
+        onOpenChange={vi.fn()}
+      />
+    );
+    expect(
+      await screen.findByRole('link', { name: /打开当前预览 · 172\.16\.251\.159:32422/ })
+    ).toHaveAttribute('href', 'http://172.16.251.159:32422/');
+    expect(screen.getByText(/验收时记录的地址：.*44313/)).toBeInTheDocument();
+    expect(screen.getByText(/当前预览已重新部署/)).toBeInTheDocument();
+    expect(screen.queryByRole('link', { name: /44313/ })).not.toBeInTheDocument();
+  });
+
+  it('does not offer an expired link when the worktree preview is stopped or missing', async () => {
+    worktree.listAll.mockResolvedValue(worktrees);
+    worktree.previewStatus.mockResolvedValue({
+      success: true,
+      preview: { status: 'stopped', url: 'http://172.16.251.159:44313/' },
+    });
+    render(
+      <AcceptanceEvidenceDialog
+        evidence={evidence}
+        projectPath="/project"
+        branchName="feature/task"
+        open
+        onOpenChange={vi.fn()}
+      />
+    );
+    expect(await screen.findByText(/当前 Worktree 预览不可用/)).toBeInTheDocument();
+    expect(screen.queryByRole('link', { name: /打开当前预览/ })).not.toBeInTheDocument();
+  });
+
+  it('rechecks the live address each time Verify opens after a redeploy', async () => {
+    worktree.listAll.mockResolvedValue(worktrees);
+    worktree.previewStatus
+      .mockResolvedValueOnce({
+        success: true,
+        preview: { status: 'ready', url: 'http://preview.test:31000' },
+      })
+      .mockResolvedValueOnce({
+        success: true,
+        preview: { status: 'ready', url: 'http://preview.test:31001' },
+      });
+    const props = {
+      evidence,
+      projectPath: '/project',
+      branchName: 'feature/task',
+      onOpenChange: vi.fn(),
+    };
+    const { rerender } = render(<AcceptanceEvidenceDialog {...props} open />);
+    expect(
+      await screen.findByRole('link', { name: /打开当前预览 · preview\.test:31000/ })
+    ).toHaveAttribute('href', 'http://preview.test:31000');
+    rerender(<AcceptanceEvidenceDialog {...props} open={false} />);
+    rerender(<AcceptanceEvidenceDialog {...props} open />);
+    expect(
+      await screen.findByRole('link', { name: /打开当前预览 · preview\.test:31001/ })
+    ).toHaveAttribute('href', 'http://preview.test:31001');
+    expect(worktree.previewStatus).toHaveBeenCalledTimes(2);
+  });
+
+  it('does not link another branch preview when the task worktree is missing', async () => {
+    worktree.listAll.mockResolvedValue(worktrees);
+    render(
+      <AcceptanceEvidenceDialog
+        evidence={evidence}
+        projectPath="/project"
+        branchName="feature/deleted"
+        open
+        onOpenChange={vi.fn()}
+      />
+    );
+    expect(await screen.findByText(/当前 Worktree 预览不可用/)).toBeInTheDocument();
+    expect(worktree.previewStatus).not.toHaveBeenCalled();
+    expect(screen.queryByRole('link', { name: /打开当前预览/ })).not.toBeInTheDocument();
   });
 
   it('opens comparison and lists skipped checks explicitly without editing the card', () => {

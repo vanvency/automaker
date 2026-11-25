@@ -16,14 +16,14 @@ export function renderHerdrWebView(): string {
     <title>Herdr</title>
     <style>
       :root {
-        color-scheme: dark;
-        --bg: #0f1115;
-        --panel: #171a21;
-        --border: #262b35;
-        --text: #e6e8ec;
-        --muted: #9aa3b2;
-        --accent: #7c9ef5;
-        --error: #ffa39c;
+        color-scheme: light;
+        --bg: #eff1f5;
+        --panel: #ffffff;
+        --border: #ccd0da;
+        --text: #4c4f69;
+        --muted: #6c6f85;
+        --accent: #1e66f5;
+        --error: #d20f39;
       }
       * { box-sizing: border-box; }
       html, body { height: 100%; }
@@ -82,7 +82,7 @@ export function renderHerdrWebView(): string {
         display: none;
         align-items: center;
         justify-content: center;
-        background: rgba(15, 17, 21, 0.92);
+        background: rgba(239, 241, 245, 0.92);
         z-index: 10;
       }
       #login.open { display: flex; }
@@ -98,8 +98,8 @@ export function renderHerdrWebView(): string {
       }
       #login h2 { margin: 0; font-size: 14px; }
       #login input {
-        background: #10131a;
-        border: 1px solid #2c333f;
+        background: var(--bg);
+        border: 1px solid var(--border);
         color: var(--text);
         border-radius: 8px;
         padding: 8px 10px;
@@ -107,7 +107,7 @@ export function renderHerdrWebView(): string {
       }
       #login button {
         background: var(--accent);
-        color: #0b1220;
+        color: #ffffff;
         border: none;
         border-radius: 8px;
         padding: 8px 12px;
@@ -260,6 +260,21 @@ export function renderHerdrWebView(): string {
         let connectionGeneration = 0;
         let needsAttachment = !terminalSessionId;
 
+        // #region mouse-reporting
+        // A reused PTY only replays its last 50 KB, often after Herdr's initial
+        // mouse-enable sequences. Restore SGR mouse reporting for every browser
+        // attachment so space/tab clicks still reach the running Herdr client.
+        const mouseReporting = '\\x1b[?1003h\\x1b[?1006h';
+        function writeTerminalMessage(message) {
+          if (!terminal) return;
+          if (message.type === 'connected') {
+            terminal.write(mouseReporting);
+          } else if (typeof message.data === 'string') {
+            terminal.write(message.data + (message.type === 'scrollback' ? mouseReporting : ''));
+          }
+        }
+        // #endregion mouse-reporting
+
         // #region reattach
         async function renewAttachment() {
           if (!workDir) throw new Error('Missing worktree path; reopen Conversation from the board');
@@ -333,13 +348,17 @@ export function renderHerdrWebView(): string {
             try { message = JSON.parse(event.data); } catch (error) { return; }
             if (!message || typeof message.type !== 'string') return;
             if (message.type === 'data' || message.type === 'scrollback') {
-              if (terminal && typeof message.data === 'string') terminal.write(message.data);
+              writeTerminalMessage(message);
             } else if (message.type === 'connected') {
+              writeTerminalMessage(message);
               setStatus('Connected');
               if (fitAddon && terminal) {
                 try {
                   fitAddon.fit();
                   ws.send(JSON.stringify({ type: 'resize', cols: terminal.cols, rows: terminal.rows }));
+                  // Herdr repaints on focus, even when the PTY size is unchanged.
+                  // This replaces incomplete scrollback with a current full frame.
+                  ws.send(JSON.stringify({ type: 'input', data: '\\x1b[I' }));
                 } catch (error) { /* ignore */ }
               }
               terminal && terminal.focus();
@@ -461,10 +480,10 @@ export function renderHerdrWebView(): string {
             fontFamily: 'ui-monospace, SFMono-Regular, Menlo, "DejaVu Sans Mono", monospace',
             scrollback: 10000,
             theme: {
-              background: '#0f1115',
-              foreground: '#e6e8ec',
-              cursor: '#e6e8ec',
-              selectionBackground: '#334155',
+              background: '#eff1f5',
+              foreground: '#4c4f69',
+              cursor: '#1e66f5',
+              selectionBackground: '#bcc0cc',
             },
           });
           fitAddon = fitAddonCtor ? new fitAddonCtor() : null;

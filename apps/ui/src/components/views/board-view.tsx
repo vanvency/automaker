@@ -1,4 +1,5 @@
 import { AcceptanceEvidenceDialog } from './board-view/components/acceptance-evidence';
+import { AttentionMoveDialog } from './board-view/dialogs/attention-move-dialog';
 import { useWorktreeUrlSync } from './board-view/hooks/use-worktree-url-sync';
 import { CompleteTaskDialog } from './board-view/dialogs/complete-task-dialog';
 import { ArchiveTaskDialog } from './board-view/dialogs/archive-task-dialog';
@@ -1678,6 +1679,10 @@ export function BoardView({
     handleDragEnd,
     pendingDependencyLink,
     clearPendingDependencyLink,
+    pendingAttentionMove,
+    confirmingAttentionMove,
+    confirmAttentionMove,
+    cancelAttentionMove,
   } = useBoardDragDrop({
     features: hookFeatures,
     currentProject,
@@ -2032,6 +2037,14 @@ export function BoardView({
           {/* Worktree Panel - conditionally rendered based on visibility setting */}
           {(worktreePanelVisibleByProject[currentProject.path] ?? true) && (
             <WorktreePanel
+              trailingControls={
+                <BoardWorktreePreview
+                  inline
+                  projectPath={currentProject.path}
+                  worktreePath={currentWorktreePath ?? currentProject.path}
+                  branch={selectedWorktreeBranch}
+                />
+              }
               refreshTrigger={worktreeRefreshKey}
               projectPath={currentProject.path}
               onCreateWorktree={() => setShowCreateWorktreeDialog(true)}
@@ -2082,11 +2095,13 @@ export function BoardView({
 
           {/* Main Content Area */}
           <div className="flex-1 flex flex-col overflow-hidden">
-            <BoardWorktreePreview
-              projectPath={currentProject.path}
-              worktreePath={currentWorktreePath ?? currentProject.path}
-              branch={selectedWorktreeBranch}
-            />
+            {!(worktreePanelVisibleByProject[currentProject.path] ?? true) && (
+              <BoardWorktreePreview
+                projectPath={currentProject.path}
+                worktreePath={currentWorktreePath ?? currentProject.path}
+                branch={selectedWorktreeBranch}
+              />
+            )}
             {/* Level-2 scope: which task this board shows, plus the way back up */}
             {taskScope && (
               <TaskScopeBar
@@ -2253,10 +2268,7 @@ export function BoardView({
         onOpenChange={setShowCompletedModal}
         completedFeatures={completedFeatures}
         onUnarchive={handleUnarchiveFeature}
-        onDelete={(feature) => {
-          setShowCompletedModal(false);
-          void handleDeleteFeature(feature.id);
-        }}
+        branchName={currentWorktreeBranch}
       />
 
       {completionFeature &&
@@ -2265,6 +2277,7 @@ export function BoardView({
           <AcceptanceEvidenceDialog
             evidence={completionFeature.acceptanceEvidence}
             projectPath={currentProject.path}
+            branchName={completionFeature.branchName}
             open
             onOpenChange={(open) => {
               if (!open) setCompletionFeature(null);
@@ -2335,6 +2348,12 @@ export function BoardView({
       />
 
       {/* Dependency Link Dialog */}
+      <AttentionMoveDialog
+        move={pendingAttentionMove}
+        busy={confirmingAttentionMove}
+        onCancel={cancelAttentionMove}
+        onConfirm={confirmAttentionMove}
+      />
       <DependencyLinkDialog
         open={Boolean(pendingDependencyLink)}
         onOpenChange={(open) => !open && clearPendingDependencyLink()}

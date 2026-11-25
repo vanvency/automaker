@@ -15,39 +15,29 @@ import {
   listPiSessionFiles,
   readPiSessionFile,
   readSessionFeatureId,
+  type PiSessionMessage,
 } from '../../../services/pi-session-store.js';
 import { resolveFeatureWorkDir } from './opencode-session.js';
 import { getErrorMessage, logError } from '../common.js';
+import { readFeatureReplies } from '../../../services/feature-reply-history.js';
 
 const logger = createLogger('FeatureTimeline');
 
-/** Longest one-shot prompt head kept in the timeline title */
-const ONE_SHOT_TITLE_CHARS = 90;
-
 export interface FeatureTimelineEntry {
   id: string;
-  kind: 'session' | 'one-shot' | 'lifecycle' | 'jira';
+  kind: 'session' | 'one-shot' | 'lifecycle' | 'jira' | 'reply';
   /** ISO timestamp the entry started at */
   at: string;
   endedAt?: string | null;
+  developmentAt?: string;
+  verificationAt?: string;
   title: string;
   detail?: string;
   model?: string;
   turns?: number;
   status?: 'ok' | 'error';
   filePath?: string;
-}
-
-/** Removes the dispatch scaffolding so the first line is readable. */
-function promptHead(text: string | undefined): string {
-  const line = (text ?? '')
-    .replace(/\*\*Feature ID:\*\*[^\n]*/gi, '')
-    .replace(/https?:\/\/\S+/g, '')
-    .split('\n')
-    .map((part) => part.replace(/^[#>*\-\s]+/, '').trim())
-    .find((part) => part.length > 0);
-  if (!line) return '（无提示词）';
-  return line.length > ONE_SHOT_TITLE_CHARS ? `${line.slice(0, ONE_SHOT_TITLE_CHARS)}…` : line;
+  imagePaths?: string[];
 }
 
 function fileTimestamp(filePath: string): string | null {
@@ -64,6 +54,41 @@ function excerpt(value: string | undefined, max = 160): string | undefined {
   const text = (value ?? '').replace(/\s+/g, ' ').trim();
   if (!text) return undefined;
   return text.length > max ? `${text.slice(0, max)}…` : text;
+}
+
+function conversationTimes(messages: PiSessionMessage[], userIndex: number) {
+  let developmentAt: string | undefined;
+  let verificationAt: string | undefined;
+  for (let index = userIndex + 1; index < messages.length; index++) {
+    const message = messages[index];
+    if (message.role === 'user') break;
+    if (message.role !== 'assistant' || !Number.isFinite(message.timestamp)) continue;
+    const date = new Date(message.timestamp!);
+    if (!Number.isFinite(date.getTime())) continue;
+    const at = date.toISOString();
+    developmentAt ??= at;
+    // shortcut: recognizes common test commands; record explicit verification phases when available.
+    if (
+      !verificationAt &&
+      message.toolCalls?.some(
+        (call) =>
+          /^(bash|exec|exec_command|shell)$/i.test(call.name) &&
+          typeof call.arguments === 'object' &&
+          call.arguments !== null &&
+          Object.entries(call.arguments).some(
+            ([key, value]) =>
+              /^(command|cmd)$/.test(key) &&
+              typeof value === 'string' &&
+              /\b(?:npm\s+(?:run\s+test[\w:-]*|test)\b|npx\s+(?:vitest|playwright)\b|(?:pnpm|yarn|bun|go|cargo|mvn)\s+test\b|pytest\b|python3?\s+-m\s+unittest\b)/i.test(
+                value
+              )
+          )
+      )
+    ) {
+      verificationAt = at;
+    }
+  }
+  return { ...(developmentAt && { developmentAt }), ...(verificationAt && { verificationAt }) };
 }
 
 /**
@@ -97,7 +122,12 @@ export function createFeatureTimelineHandler(featureLoader: FeatureLoader) {
         projectPath?: string;
         featureId?: string;
       };
-      if (!projectPath || !featureId) {
+      if (
+        typeof projectPath !== 'string' ||
+        !projectPath ||
+        typeof featureId !== 'string' ||
+        !/^[\w-]+$/.test(featureId)
+      ) {
         res.status(400).json({ success: false, error: 'projectPath and featureId are required' });
         return;
       }
@@ -115,6 +145,22 @@ export function createFeatureTimelineHandler(featureLoader: FeatureLoader) {
       );
 
       const entries: FeatureTimelineEntry[] = [];
+      const replies = await readFeatureReplies(projectPath, featureId);
+      const replyIds = new Set(replies.map((reply) => reply.id));
+      const storedReplyEntries = new Map<string, FeatureTimelineEntry>();
+      entries.push(
+        ...replies.map((reply) => ({
+          id: `reply:${reply.id}`,
+          kind: 'reply' as const,
+          at: reply.at,
+          title: 'Reply',
+          detail: reply.text,
+          imagePaths: reply.imagePaths,
+        }))
+      );
+      for (const entry of entries) {
+        if (entry.kind === 'reply') storedReplyEntries.set(entry.id.slice('reply:'.length), entry);
+      }
 
       entries.push(...jiraChangeEntries(feature));
 
@@ -146,13 +192,48 @@ export function createFeatureTimelineHandler(featureLoader: FeatureLoader) {
       }
 
       for (const filePath of listPiSessionFiles(workDir)) {
+        const stamp = readSessionFeatureId(filePath)?.toLowerCase();
+        if (stamp && !featureKeys.has(stamp)) continue;
         const session = readPiSessionFile(filePath);
         if (!session) continue;
 
-        const stamp = readSessionFeatureId(filePath)?.toLowerCase();
         const isResident =
           (stamp !== undefined && featureKeys.has(stamp)) ||
           (!!feature.providerSessionId && session.id === feature.providerSessionId);
+        if (isResident) {
+          session.messages.forEach((message, index) => {
+            if (message.role !== 'user' || !message.text.trim()) return;
+            const replyId = /Automaker reply ID: ([\w-]+)/.exec(message.text)?.[1];
+            const times = conversationTimes(session.messages, index);
+            if (replyId && storedReplyEntries.has(replyId)) {
+              Object.assign(storedReplyEntries.get(replyId)!, times);
+            }
+            if (replyId && replyIds.has(replyId)) return;
+            const followUp = /## Follow-up Instructions\s*\n([\s\S]*?)\n## Task(?:\r?\n|$)/.exec(
+              message.text
+            )?.[1];
+            // Recover historical Reply prompts and direct conversation input,
+            // excluding the initial task and generated dispatch scaffolding.
+            if (
+              followUp === undefined &&
+              (index === 0 ||
+                /(?:\*\*Feature ID:\*\*|## (?:Feature|Continuing|Continue Implementation|Pipeline))/.test(
+                  message.text
+                ))
+            )
+              return;
+            const at = message.timestamp ? new Date(message.timestamp) : null;
+            if (!at || !Number.isFinite(at.getTime())) return;
+            entries.push({
+              id: `reply:session:${session.id}:${index}`,
+              kind: 'reply',
+              at: at.toISOString(),
+              title: 'Reply · conversation history',
+              detail: followUp?.trim() || message.text,
+              ...times,
+            });
+          });
+        }
         const failed = session.messages.some(
           (message) => message.role === 'assistant' && message.isError
         );
@@ -163,12 +244,12 @@ export function createFeatureTimelineHandler(featureLoader: FeatureLoader) {
           kind: isResident ? 'session' : 'one-shot',
           at: session.createdAt ?? fileTimestamp(filePath) ?? feature.createdAt ?? '',
           endedAt: session.updatedAt,
-          title: isResident
-            ? `常驻会话${model ? ` · ${model}` : ''}`
-            : `一次性调用：${promptHead(session.messages.find((m) => m.role === 'user')?.text)}`,
-          detail: isResident
-            ? promptHead(session.messages.find((m) => m.role === 'user')?.text)
-            : undefined,
+          ...conversationTimes(
+            session.messages,
+            session.messages.findIndex((m) => m.role === 'user')
+          ),
+          title: isResident ? `常驻会话${model ? ` · ${model}` : ''}` : '一次性调用',
+          detail: session.messages.find((m) => m.role === 'user')?.text,
           model: model || undefined,
           turns: session.userTurnCount,
           status: failed ? 'error' : 'ok',

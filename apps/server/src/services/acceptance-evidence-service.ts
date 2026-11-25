@@ -24,9 +24,14 @@ function text(value: unknown, field: string, limit = 4000): string {
   return value;
 }
 
-function timestamp(value: unknown, field: string): string {
-  const result = text(value, field, 64);
-  if (!Number.isFinite(Date.parse(result))) throw new Error(`Invalid acceptance ${field}`);
+function timestamp(value: unknown, field: string): string | undefined {
+  // JSON producers express an unknown optional time as omitted, null or blank.
+  // Keep it unknown; never substitute screenshot mtime or import time.
+  if (value == null || (typeof value === 'string' && !value.trim())) return undefined;
+  const result = text(value, `${field}; use an ISO 8601 timestamp or omit unknown time`, 64).trim();
+  if (!Number.isFinite(Date.parse(result))) {
+    throw new Error(`Invalid acceptance ${field}; use an ISO 8601 timestamp or omit unknown time`);
+  }
   return result;
 }
 
@@ -70,7 +75,7 @@ export function parseAcceptanceManifest(value: unknown): Omit<AcceptanceEvidence
       details: check.details === undefined ? undefined : text(check.details, 'check details', 8000),
     };
   });
-  const screenshots: AcceptanceEvidence['screenshots'] = m.screenshots.map((shot) => {
+  const screenshots: AcceptanceEvidence['screenshots'] = m.screenshots.map((shot, index) => {
     if (!shot || !['prototype', 'actual'].includes(shot.kind)) {
       throw new Error('Invalid acceptance screenshot kind');
     }
@@ -78,7 +83,7 @@ export function parseAcceptanceManifest(value: unknown): Omit<AcceptanceEvidence
       kind: shot.kind,
       path: text(shot.path, 'screenshot path', 4096),
       title: text(shot.title, 'screenshot title', 200),
-      capturedAt: timestamp(shot.capturedAt, 'screenshot timestamp'),
+      capturedAt: timestamp(shot.capturedAt, `screenshots[${index}].capturedAt`),
       sourceUrl: httpUrl(shot.sourceUrl),
     };
   });

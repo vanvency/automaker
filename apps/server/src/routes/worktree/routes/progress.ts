@@ -12,12 +12,15 @@
  */
 
 import type { Request, Response } from 'express';
+import path from 'node:path';
 import { createLogger } from '@automaker/utils';
 import { isGitRepo } from '@automaker/git-utils';
 import {
   getChildFeaturesForParent,
   hasChildFeatures,
   hasFeatureAttentionError,
+  DONE_WORKTREE_RETENTION_DAYS,
+  featureDoneAt,
 } from '@automaker/types';
 import type {
   Feature,
@@ -35,6 +38,7 @@ import { WorktreeResolver, type WorktreeInfo } from '../../../services/worktree-
 import type { FeatureLoader } from '../../../services/feature-loader.js';
 import { execGitCommand, getErrorMessage, logError } from '../common.js';
 import { detectConflictState } from './list.js';
+import { readWorkSnoozes, workSnoozeFor } from '../../../services/work-snooze.js';
 
 const logger = createLogger('WorktreeProgress');
 
@@ -73,6 +77,9 @@ export interface WorktreeProgressInput {
   branchStats: Map<string, WorktreeBranchStat>;
   changes: Map<string, WorktreeChangeState>;
   prs: Map<string, WorktreePRInfo>;
+  projectPath?: string;
+  now?: Date;
+  snoozes?: Awaited<ReturnType<typeof readWorkSnoozes>>;
 }
 
 /** Feature status → coarse lifecycle stage. */
@@ -204,6 +211,10 @@ export function toFeatureSummary(feature: Feature): WorktreeProgressFeature {
     category: feature.category,
     jiraKey: typeof feature.jiraKey === 'string' ? feature.jiraKey : undefined,
     jiraUrl: typeof feature.jiraUrl === 'string' ? feature.jiraUrl : undefined,
+    jiraAssignee: feature.jiraAssignee ?? undefined,
+    jiraAssigneeDisplayName: feature.jiraAssigneeDisplayName ?? undefined,
+    jiraReporter: feature.jiraReporter ?? undefined,
+    jiraReporterDisplayName: feature.jiraReporterDisplayName ?? undefined,
     updatedAt: feature.updatedAt,
   };
 }
@@ -324,12 +335,83 @@ export function buildWorktreeProgress(input: WorktreeProgressInput): WorktreePro
     }
   }
 
-  return input.worktrees.map((worktree) => {
+  const now = (input.now ?? new Date()).getTime();
+  const archiveTimes = new Map<string, { doneAt: string; archivedAt: string }>();
+  for (const [branch, cards] of featuresByBranch) {
+    if (cards.every((card) => card.archive)) {
+      archiveTimes.set(branch, {
+        doneAt: '',
+        archivedAt: cards
+          .map((card) => card.archive!.archivedAt)
+          .sort()
+          .at(-1)!,
+      });
+      continue;
+    }
+    if (
+      cards.some(
+        (card) =>
+          !['verified', 'completed'].includes(card.status ?? '') ||
+          (card.archive && card.archive.reason !== 'completed') ||
+          (card.deliveryCompletion && card.deliveryCompletion.status !== 'succeeded')
+      )
+    )
+      continue;
+    const stamps = cards.map((card) => {
+      // Delivery may finish later than Verify. Count from the later milestone.
+      const done = featureDoneAt(card);
+      const delivery = card.deliveryCompletion?.updatedAt;
+      return done ? Math.max(Date.parse(done), delivery ? Date.parse(delivery) : 0) : NaN;
+    });
+    if (stamps.some((stamp) => !Number.isFinite(stamp))) continue;
+    const done = Math.max(...stamps);
+    const archived = done + DONE_WORKTREE_RETENTION_DAYS * 86_400_000;
+    if (archived <= now)
+      archiveTimes.set(branch, {
+        doneAt: new Date(done).toISOString(),
+        archivedAt: new Date(archived).toISOString(),
+      });
+  }
+
+  // A released checkout is not a deleted work history. Rebuild its read-only
+  // progress row from task records, without recreating directories or branches.
+  const worktrees = input.worktrees.map((tree) => ({ ...tree, checkoutMissing: false }));
+  if (input.projectPath) {
+    const present = new Set(worktrees.map((tree) => tree.branch));
+    for (const branch of new Set([...archiveTimes.keys(), ...Object.keys(input.snoozes ?? {})])) {
+      if (present.has(branch)) continue;
+      const recorded = featuresByBranch.get(branch)?.find((card) => card.worktreeRelease)
+        ?.worktreeRelease?.path;
+      const fallback = path.join(
+        input.projectPath,
+        '.worktrees',
+        branch.replace(/[^a-zA-Z0-9_-]/g, '-')
+      );
+      worktrees.push({
+        path:
+          recorded && path.resolve(recorded).startsWith(path.resolve(input.projectPath) + path.sep)
+            ? recorded
+            : fallback,
+        branch,
+        isMain: false,
+        checkoutMissing: true,
+      });
+    }
+  }
+
+  return worktrees.map((worktree) => {
     const branch = worktree.branch ?? '(detached)';
     const candidateFeatures = worktree.branch ? (featuresByBranch.get(worktree.branch) ?? []) : [];
     const primaryFeature = pickPrimaryFeature(candidateFeatures);
     const stat = input.branchStats.get(branch) ?? null;
+    const snooze = workSnoozeFor(input.snoozes ?? {}, branch);
     const change = input.changes.get(worktree.path);
+    const manuallyArchived =
+      candidateFeatures.length > 0 && candidateFeatures.every((card) => card.archive);
+    const archive =
+      !worktree.isMain && (manuallyArchived || (!change?.hasConflicts && !change?.hasChanges))
+        ? archiveTimes.get(branch)
+        : undefined;
 
     const head: WorktreeProgressCommit | null = stat
       ? { sha: stat.sha, subject: stat.subject, author: stat.author, date: stat.date }
@@ -339,6 +421,10 @@ export function buildWorktreeProgress(input: WorktreeProgressInput): WorktreePro
       path: worktree.path,
       branch,
       isMain: worktree.isMain,
+      ...(archive ?? {}),
+      ...(manuallyArchived ? { manuallyArchived: true } : {}),
+      ...(worktree.checkoutMissing ? { checkoutMissing: true } : {}),
+      ...(snooze ? { snoozedAt: snooze.snoozedAt, snoozeReason: snooze.reason } : {}),
       stage: primaryFeature ? classifyStage(primaryFeature.status) : 'empty',
       feature: primaryFeature ? toFeatureSummary(primaryFeature) : null,
       featureCount: candidateFeatures.length,
@@ -550,11 +636,13 @@ export function createWorktreeProgressHandler(featureLoader?: FeatureLoader) {
         : new Map<string, WorktreeChangeState>();
 
       const items = buildWorktreeProgress({
+        projectPath,
         worktrees,
         features,
         branchStats,
         changes,
         prs: collectPRs(metadata),
+        snoozes: await readWorkSnoozes(projectPath),
       });
 
       res.json({

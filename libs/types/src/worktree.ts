@@ -126,6 +126,10 @@ export interface WorktreeProgressFeature {
   jiraKey?: string;
   jiraUrl?: string;
   updatedAt?: string;
+  jiraAssignee?: string;
+  jiraAssigneeDisplayName?: string;
+  jiraReporter?: string;
+  jiraReporterDisplayName?: string;
 }
 
 /** One card on the worktree's branch (parent or child) */
@@ -177,6 +181,17 @@ export interface WorktreeProgressItem {
   branch: string;
   /** Whether this is the main worktree of the repository */
   isMain: boolean;
+  /** Automatically archived seven days after every task was done; status stays complete. */
+  archivedAt?: string;
+  /** Every task was explicitly archived; distinct from automatic Done retention. */
+  manuallyArchived?: boolean;
+  /** Latest completion timestamp across this work's tasks. */
+  doneAt?: string;
+  /** History row retained after its local checkout has been released or removed. */
+  checkoutMissing?: boolean;
+  /** Worktree-level pause state; snoozed rows are hidden from active lanes. */
+  snoozedAt?: string;
+  snoozeReason?: string;
   /** Feature lifecycle stage */
   stage: WorktreeProgressStage;
   /** Feature that best represents this worktree (highest stage, then most recent) */

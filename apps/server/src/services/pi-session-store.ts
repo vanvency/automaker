@@ -246,7 +246,8 @@ export function readPiSessionFile(filePath: string): PiSessionInfo | null {
         if (role === 'user') {
           messages.push({
             role: 'user',
-            timestamp: message.timestamp,
+            timestamp:
+              message.timestamp ?? (entry.timestamp ? Date.parse(entry.timestamp) : undefined),
             text: blocksToText(message.content),
           });
         } else if (role === 'assistant') {

@@ -81,6 +81,8 @@ export class GlobalAutoModeService {
             !f.archive &&
             !f.supersededBy &&
             !f.consolidationPlanId &&
+            !f.worktreeSnooze &&
+            !f.herdrExecution &&
             (f.status === 'backlog' || f.status === 'ready') &&
             (branchName === null
               ? !f.branchName || (primaryBranch && f.branchName === primaryBranch)
@@ -213,17 +215,19 @@ export class GlobalAutoModeService {
   }
 
   /**
-   * Persist running features, mark them interrupted, then abort them.
+   * Persist running features and detach Herdr observers; interrupt local providers.
    *
    * This runs during graceful shutdown. The next server start reconciles the
-   * interrupted statuses and resumes the persisted running feature ids.
+   * saved Herdr turns are reattached without submitting another prompt.
    */
   async prepareForShutdown(reason?: string): Promise<void> {
     const allRunning = this.concurrencyManager.getAllRunning();
     const byProject = new Map<string, string[]>();
 
     for (const rf of allRunning) {
-      await this.featureStateManager.markFeatureInterrupted(rf.projectPath, rf.featureId, reason);
+      const feature = await this.featureStateManager.loadFeature(rf.projectPath, rf.featureId);
+      if (!feature?.herdrExecution)
+        await this.featureStateManager.markFeatureInterrupted(rf.projectPath, rf.featureId, reason);
       const ids = byProject.get(rf.projectPath) ?? [];
       ids.push(rf.featureId);
       byProject.set(rf.projectPath, ids);

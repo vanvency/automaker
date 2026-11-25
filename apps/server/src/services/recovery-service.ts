@@ -3,6 +3,7 @@
  */
 
 import path from 'path';
+import { assertWorkNotSnoozed } from './work-snooze.js';
 import type { Feature, FeatureStatusWithPipeline } from '@automaker/types';
 import { DEFAULT_MAX_CONCURRENCY } from '@automaker/types';
 import {
@@ -57,7 +58,7 @@ export type ExecuteFeatureFn = (
   useWorktrees: boolean,
   isAutoMode: boolean,
   providedWorktreePath?: string,
-  options?: { continuationPrompt?: string; _calledInternally?: boolean }
+  options?: { continuationPrompt?: string; _calledInternally?: boolean; reattachHerdr?: boolean }
 ) => Promise<void>;
 export type LoadFeatureFn = (projectPath: string, featureId: string) => Promise<Feature | null>;
 export type DetectPipelineStatusFn = (
@@ -218,6 +219,17 @@ export class RecoveryService {
     try {
       const feature = await this.loadFeatureFn(projectPath, featureId);
       if (!feature) throw new Error(`Feature ${featureId} not found`);
+      await assertWorkNotSnoozed(projectPath, feature.branchName);
+      if (feature.herdrExecution) {
+        return await this.executeFeatureFn(
+          projectPath,
+          featureId,
+          true,
+          false,
+          feature.herdrExecution.workDir,
+          { _calledInternally: true, reattachHerdr: true }
+        );
+      }
       const pipelineInfo = await this.detectPipelineStatusFn(
         projectPath,
         featureId,
@@ -293,7 +305,11 @@ export class RecoveryService {
             previouslyRunningIds.has(feature.id) &&
             (feature.status === 'ready' || feature.status === 'backlog');
 
-          if (isActiveState || wasReconciledFromRunning) {
+          if (
+            (feature.herdrExecution && !feature.archive && !feature.supersededBy) ||
+            isActiveState ||
+            wasReconciledFromRunning
+          ) {
             if (await this.contextExists(projectPath, feature.id)) {
               featuresWithContext.push(feature);
             } else {
@@ -324,8 +340,15 @@ export class RecoveryService {
       });
       for (const feature of allInterruptedFeatures) {
         try {
-          if (!this.isFeatureRunningFn(feature.id))
-            await this.resumeFeature(projectPath, feature.id, true);
+          if (!this.isFeatureRunningFn(feature.id)) {
+            const resume = this.resumeFeature(projectPath, feature.id, true);
+            // Attach independent observers without waiting for a long-running turn.
+            if (feature.herdrExecution)
+              void resume.catch((error) =>
+                logger.warn(`Could not reattach ${feature.id}: ${(error as Error).message}`)
+              );
+            else await resume;
+          }
         } catch {
           /* continue */
         }

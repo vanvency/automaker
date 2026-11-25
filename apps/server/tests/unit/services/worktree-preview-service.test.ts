@@ -1,7 +1,10 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { mkdtemp, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
+import { mkdtemp, mkdir, readFile, rm, symlink, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
+import { execFileSync } from 'node:child_process';
+import { createServer } from 'node:https';
+import { DevbridgePreview } from '../../../src/services/devbridge-preview.js';
 import {
   WorktreePreviewService,
   previewId,
@@ -9,6 +12,9 @@ import {
   validatePreviewConfig,
   type PreviewConfig,
   type PreviewRunner,
+  redactPreviewLog,
+  runPreviewCommand,
+  verifyPreviewUrl,
 } from '../../../src/services/worktree-preview-service.js';
 
 const config: PreviewConfig = {
@@ -28,6 +34,26 @@ describe('worktree previews', () => {
   let run: ReturnType<typeof vi.fn<PreviewRunner>>;
   let service: WorktreePreviewService;
   let currentImage: string;
+
+  it('captures actual subprocess stdout, stderr and exit code on failure', async () => {
+    let result: { stdout: string; stderr: string; exitCode: number | null } | undefined;
+    await expect(
+      runPreviewCommand(
+        [
+          process.execPath,
+          '-e',
+          'process.stdout.write("built");process.stderr.write("compile error");process.exit(7)',
+        ],
+        os.tmpdir(),
+        undefined,
+        5000,
+        (value) => {
+          result = value;
+        }
+      )
+    ).rejects.toThrow('exited with code 7');
+    expect(result).toEqual({ stdout: 'built', stderr: 'compile error', exitCode: 7 });
+  });
 
   beforeEach(async () => {
     project = await mkdtemp(path.join(os.tmpdir(), 'automaker-preview-'));
@@ -87,6 +113,34 @@ describe('worktree previews', () => {
     return (await service.status(project, worktree)).preview!;
   }
 
+  it('saves validated project configuration, rejects stale edits and unsafe paths', async () => {
+    const original = await service.readProjectConfig(project);
+    expect(JSON.parse(original.content)).toEqual(config);
+    const edited = JSON.stringify({ ...config, env: { AUTOCV_GATEWAY_URL: 'http://dev17:31922' } });
+    const saved = await service.saveProjectConfig(project, edited, original.revision);
+    expect(JSON.parse(saved.content).env.AUTOCV_GATEWAY_URL).toBe('http://dev17:31922');
+    await expect(service.saveProjectConfig(project, edited, original.revision)).rejects.toThrow(
+      'changed since it was opened'
+    );
+    await expect(service.saveProjectConfig(project, '{}', saved.revision)).rejects.toThrow(
+      'Invalid .automaker/preview.json'
+    );
+    expect(
+      JSON.parse(await readFile(path.join(project, '.automaker/preview.json'), 'utf8')).env
+    ).toEqual({ AUTOCV_GATEWAY_URL: 'http://dev17:31922' });
+  });
+
+  it('does not read or overwrite a symlinked project configuration', async () => {
+    const file = path.join(project, '.automaker', 'preview.json');
+    await writeFile(path.join(project, '.automaker', 'settings.json'), '{"secret":"private"}');
+    await rm(file);
+    await symlink('settings.json', file);
+    await expect(service.readProjectConfig(project)).rejects.toThrow('symlink');
+    await expect(service.saveProjectConfig(project, JSON.stringify(config), '')).rejects.toThrow(
+      'symlink'
+    );
+  });
+
   it('isolates names even when projects or sanitized branch names collide', () => {
     expect(previewId('/a', '/a/feature/x')).not.toBe(previewId('/a', '/a/feature-x'));
     expect(previewId('/a', '/shared/x')).not.toBe(previewId('/b', '/shared/x'));
@@ -106,11 +160,316 @@ describe('worktree previews', () => {
     expect(fetch).toHaveBeenCalledWith('http://127.0.0.1:31001/health');
     const restart = new WorktreePreviewService(run);
     expect((await restart.status(project, worktree)).preview?.status).toBe('ready');
+    expect(
+      ready.logs?.filter((entry) => entry.status === 'succeeded').map((entry) => entry.step)
+    ).toContain('Check preview HTTP readiness');
+    expect((await restart.status(project, worktree)).preview?.logs).toEqual(ready.logs);
+  });
+
+  it('publishes HTTPS with a mounted certificate and verifies its configured CA', async () => {
+    const tls = { secretName: 'preview-tls', caCertificate: '-----BEGIN CERTIFICATE-----\ntest' };
+    await writeFile(
+      path.join(project, '.automaker/preview.json'),
+      JSON.stringify({ ...config, tls })
+    );
+    const verify = vi.fn(async () => {});
+    service = new WorktreePreviewService(run, verify);
+    await service.start(project, worktree);
+    const ready = await settled();
+    expect(ready.url).toBe('https://127.0.0.1:31001');
+    expect(verify).toHaveBeenCalledWith('https://127.0.0.1:31001/health', tls.caCertificate);
+    const apply = run.mock.calls.find(([args]) => args.includes('apply'))!;
+    const pod = JSON.parse(apply[2]!).items[0].spec.template.spec;
+    expect(pod.volumes).toEqual([{ name: 'preview-tls', secret: { secretName: 'preview-tls' } }]);
+    expect(pod.containers[0].volumeMounts).toEqual([
+      { name: 'preview-tls', mountPath: '/etc/automaker/tls', readOnly: true },
+    ]);
+    expect(pod.containers[0].readinessProbe.httpGet.scheme).toBe('HTTPS');
+  });
+
+  it('checks HTTPS certificates against the supplied CA without disabling verification', async () => {
+    const certFile = path.join(project, 'test.crt');
+    const keyFile = path.join(project, 'test.key');
+    execFileSync(
+      'openssl',
+      [
+        'req',
+        '-x509',
+        '-newkey',
+        'rsa:2048',
+        '-nodes',
+        '-days',
+        '1',
+        '-subj',
+        '/CN=preview-test',
+        '-addext',
+        'subjectAltName=IP:127.0.0.1',
+        '-keyout',
+        keyFile,
+        '-out',
+        certFile,
+      ],
+      { stdio: 'ignore' }
+    );
+    const cert = await readFile(certFile, 'utf8');
+    const server = createServer({ cert, key: await readFile(keyFile) }, (_req, res) => {
+      res.end('ready');
+    });
+    await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+    try {
+      const address = server.address() as { port: number };
+      const url = `https://127.0.0.1:${address.port}/health`;
+      await expect(verifyPreviewUrl(url, cert)).resolves.toBeUndefined();
+      await expect(verifyPreviewUrl(url)).rejects.toThrow('self-signed certificate');
+    } finally {
+      server.closeAllConnections();
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    }
+  }, 20_000);
+
+  it('uses worktree bridge configuration without changing shared frontend defaults or other tasks', async () => {
+    await mkdir(path.join(worktree, '.automaker'));
+    const devbridge = {
+      command: ['/tools/devbridge'],
+      configFile: '.devbridge.yaml',
+      host: 'preview-host',
+      bindHost: '127.0.0.1',
+    };
+    await writeFile(
+      path.join(worktree, '.automaker/preview.json'),
+      JSON.stringify({
+        devbridge,
+        env: { AUTOMAKER_PREVIEW_BACKEND_URL: 'http://preview-host:45469' },
+      })
+    );
+    expect(await service.config(project, worktree)).toEqual({
+      ...config,
+      devbridge,
+      env: { ...config.env, AUTOMAKER_PREVIEW_BACKEND_URL: 'http://preview-host:45469' },
+    });
+    expect(await service.config(project)).toEqual(config);
+    await writeFile(
+      path.join(worktree, '.automaker/preview.json'),
+      JSON.stringify({ devbridge: { configFile: '../escape.yaml' } })
+    );
+    await expect(service.start(project, worktree)).rejects.toThrow('Invalid preview devbridge');
+    expect(run.mock.calls.some(([args]) => args[0] === 'builder')).toBe(false);
+  });
+
+  it('rejects worktree gateway overrides when the project locks those environment variables', async () => {
+    const projectConfig = {
+      ...config,
+      env: { AUTOCV_GATEWAY_URL: 'http://dev17:31922' },
+      lockedEnv: ['AUTOCV_GATEWAY_URL'],
+    };
+    await writeFile(
+      path.join(project, '.automaker', 'preview.json'),
+      JSON.stringify(projectConfig)
+    );
+    await mkdir(path.join(worktree, '.automaker'));
+    await writeFile(
+      path.join(worktree, '.automaker', 'preview.json'),
+      JSON.stringify({ env: { AUTOCV_GATEWAY_URL: 'http://other:80' }, lockedEnv: [] })
+    );
+    await expect(service.config(project, worktree)).rejects.toThrow('lockedEnv');
+    await expect(service.start(project, worktree)).rejects.toThrow('lockedEnv');
+
+    await writeFile(
+      path.join(worktree, '.automaker', 'preview.json'),
+      JSON.stringify({ env: { AUTOCV_GATEWAY_URL: 'http://dev17:31922' }, lockedEnv: [] })
+    );
+    expect((await service.config(project, worktree))?.env?.AUTOCV_GATEWAY_URL).toBe(
+      'http://dev17:31922'
+    );
+    expect((await service.config(project, worktree))?.lockedEnv).toEqual(['AUTOCV_GATEWAY_URL']);
+  });
+
+  it('does not call a frontend-only deployment ready after the worktree requires backend bridges', async () => {
+    await service.start(project, worktree);
+    expect((await settled()).status).toBe('ready');
+    await mkdir(path.join(worktree, '.automaker'));
+    await writeFile(
+      path.join(worktree, '.automaker/preview.json'),
+      JSON.stringify({
+        devbridge: {
+          command: ['/tools/devbridge'],
+          configFile: '.devbridge.yaml',
+          host: 'preview-host',
+          bindHost: '127.0.0.1',
+        },
+      })
+    );
+    const status = (await service.status(project, worktree)).preview;
+    expect(status?.status).toBe('unavailable');
+    expect(status?.error).toContain('without the required backend bridges');
+  });
+
+  it('persists the running build step before completion and keeps failure diagnostics', async () => {
+    const original = run.getMockImplementation()!;
+    let failBuild!: (error: Error) => void;
+    run.mockImplementation((...args) =>
+      args[0][0] === 'builder'
+        ? new Promise((_resolve, reject) => {
+            failBuild = reject;
+          })
+        : original(...args)
+    );
+    await service.start(project, worktree);
+    await vi.waitFor(() => expect(failBuild).toBeDefined());
+    const running = (await service.status(project, worktree)).preview!;
+    expect(running.status).toBe('deploying');
+    expect(running.logs?.at(-1)).toMatchObject({ step: 'Build preview image', status: 'running' });
+    failBuild(new Error('builder exited with code 1'));
+    const failed = await settled();
+    expect(failed.status).toBe('failed');
+    const entry = failed.logs?.find((entry) => entry.status === 'failed');
+    expect(entry?.step).toBe('Build preview image');
+    expect(entry?.message).toContain('builder exited with code 1');
+    expect(entry?.message).toContain('Dockerfile');
+    expect(failed.logs?.some((entry) => entry.step === 'Apply deployment and service')).toBe(false);
+  });
+
+  it('shows the exact build command, redacted output and exit code for a failed step', async () => {
+    const original = run.getMockImplementation()!;
+    run.mockImplementation(async (args, cwd, input, timeout, capture) => {
+      if (args[0] === 'builder') {
+        capture?.({
+          stdout: 'building',
+          stderr: 'Error: missing module\nAuthorization: Bearer example-secret',
+          exitCode: 1,
+        });
+        throw new Error('builder exited with code 1');
+      }
+      return original(args, cwd, input, timeout, capture);
+    });
+    await service.start(project, worktree);
+    const failed = await settled();
+    const entry = failed.logs?.find(
+      (log) => log.step === 'Build preview image' && log.status === 'failed'
+    );
+    expect(entry).toMatchObject({
+      command: `builder --tag ${failed.image} .`,
+      exitCode: 1,
+    });
+    expect(entry?.output).toContain('Error: missing module');
+    expect(entry?.output).not.toContain('example-secret');
+    expect(
+      redactPreviewLog('https://user:pass@example.test?token=abc\napi_key=private')
+    ).not.toContain('private');
   });
 
   it('rejects foreign worktrees before executing any build or kubectl command', async () => {
     await expect(service.start(project, '/some/other/worktree')).rejects.toThrow('does not belong');
     expect(run.mock.calls.every(([args]) => args[0] === 'git')).toBe(true);
+  });
+
+  it('publishes the devbridge entry only after backend validation and cleans it after config removal', async () => {
+    const bridge = new DevbridgePreview(run);
+    const bridgeLogs = [
+      {
+        at: '2026-09-23T01:00:00Z',
+        step: 'Devbridge · backend: upload runtime',
+        status: 'succeeded' as const,
+        message: 'Completed',
+      },
+    ];
+    vi.spyOn(bridge, 'logs').mockResolvedValue(bridgeLogs);
+    const start = vi.spyOn(bridge, 'start').mockResolvedValue('http://preview-host:41001');
+    const preflight = vi.spyOn(bridge, 'preflight').mockResolvedValue();
+    const check = vi.spyOn(bridge, 'check').mockResolvedValue();
+    const stop = vi.spyOn(bridge, 'stop').mockResolvedValue();
+    const devbridge = {
+      command: ['/tools/devbridge'],
+      configFile: '.devbridge.yaml',
+      host: 'preview-host',
+      bindHost: '0.0.0.0',
+    };
+    await writeFile(
+      path.join(project, '.automaker/preview.json'),
+      JSON.stringify({ ...config, devbridge })
+    );
+    service = new WorktreePreviewService(run, async () => {}, bridge);
+    await service.start(project, worktree);
+    const ready = await settled();
+    expect(ready.url).toBe('http://preview-host:41001');
+    expect(ready.devbridge).toBe(true);
+    expect(ready.logs).toEqual(expect.arrayContaining(bridgeLogs));
+    expect(start).toHaveBeenCalledWith(
+      project,
+      worktree,
+      ready.id,
+      devbridge,
+      'http://127.0.0.1:31001'
+    );
+    expect(preflight).toHaveBeenCalledOnce();
+    expect(check).toHaveBeenCalledWith(project, ready.id, ready.url);
+    check.mockRejectedValue(new Error('wrong backend session'));
+    const restarted = new WorktreePreviewService(run, async () => {}, bridge);
+    expect((await restarted.status(project, worktree)).preview?.status).toBe('unavailable');
+    await rm(path.join(project, '.automaker/preview.json'));
+    await restarted.stop(project, worktree);
+    expect(stop).toHaveBeenLastCalledWith(project, ready.id);
+  });
+
+  it('withholds the frontend URL when devbridge fails and blocks deletion if session cleanup fails', async () => {
+    const bridge = new DevbridgePreview(run);
+    vi.spyOn(bridge, 'preflight').mockResolvedValue();
+    vi.spyOn(bridge, 'start').mockRejectedValue(new Error('shared backend lacks route guard'));
+    const stop = vi.spyOn(bridge, 'stop').mockResolvedValue();
+    await writeFile(
+      path.join(project, '.automaker/preview.json'),
+      JSON.stringify({
+        ...config,
+        devbridge: {
+          command: ['/tools/devbridge'],
+          configFile: '.devbridge.yaml',
+          host: 'preview-host',
+          bindHost: '0.0.0.0',
+        },
+      })
+    );
+    service = new WorktreePreviewService(run, async () => {}, bridge);
+    await service.start(project, worktree);
+    const failed = await settled();
+    expect(failed.status).toBe('failed');
+    expect(failed.url).toBeUndefined();
+    expect(failed.error).toContain('route guard');
+    stop.mockRejectedValue(new Error('SSH unavailable'));
+    await expect(service.stop(project, worktree)).rejects.toThrow('SSH unavailable');
+    expect(run.mock.calls.some(([args]) => args.includes('deployment,service,ingress'))).toBe(
+      false
+    );
+    expect((await service.status(project, worktree)).preview?.status).toBe('failed');
+  });
+
+  it('refuses a failed route-guard preflight without replacing an existing preview', async () => {
+    const bridge = new DevbridgePreview(run);
+    const preflight = vi
+      .spyOn(bridge, 'preflight')
+      .mockRejectedValue(new Error('cvat-backend route guard unavailable'));
+    const start = vi.spyOn(bridge, 'start');
+    await writeFile(
+      path.join(project, '.automaker/preview.json'),
+      JSON.stringify({
+        ...config,
+        devbridge: {
+          command: ['/tools/devbridge'],
+          configFile: '.devbridge.yaml',
+          host: 'preview-host',
+          bindHost: '0.0.0.0',
+        },
+      })
+    );
+    service = new WorktreePreviewService(run, async () => {}, bridge);
+    await expect(service.start(project, worktree)).rejects.toThrow(
+      'cvat-backend route guard unavailable'
+    );
+    expect(preflight).toHaveBeenCalledOnce();
+    expect(start).not.toHaveBeenCalled();
+    expect(run.mock.calls.some(([args]) => args[0] === 'builder' || args.includes('apply'))).toBe(
+      false
+    );
+    expect((await service.status(project, worktree)).preview).toBeNull();
   });
 
   it('refuses namespaces without explicit preview opt-in', async () => {
@@ -264,6 +623,30 @@ describe('worktree previews', () => {
     { containerPort: 0 },
     { exposure: { type: 'nodePort', host: 'host/path' } },
     { exposure: { type: 'ingress', domain: 'preview.test' } },
+    { devbridge: {} },
+    { tls: { secretName: '../unsafe' } },
+    { tls: { secretName: 'preview-tls', caCertificate: false } },
+    {
+      tls: { secretName: 'preview-tls' },
+      exposure: { type: 'ingress', domain: 'preview.test', className: 'traefik' },
+    },
+    {
+      tls: { secretName: 'preview-tls' },
+      devbridge: {
+        command: ['devbridge'],
+        configFile: '.devbridge.yaml',
+        host: 'localhost',
+        bindHost: '127.0.0.1',
+      },
+    },
+    {
+      devbridge: {
+        command: ['devbridge'],
+        configFile: '../elsewhere.yaml',
+        host: 'localhost',
+        bindHost: '127.0.0.1',
+      },
+    },
   ])('rejects malformed config: %j', (override) => {
     expect(() => validatePreviewConfig({ ...config, ...override })).toThrow();
   });

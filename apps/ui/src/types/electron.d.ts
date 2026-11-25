@@ -949,6 +949,17 @@ export interface WorktreeAPI {
   previewStatus: (projectPath: string, worktreePath: string) => Promise<WorktreePreviewResponse>;
   previewStart: (projectPath: string, worktreePath: string) => Promise<WorktreePreviewResponse>;
   previewStop: (projectPath: string, worktreePath: string) => Promise<WorktreePreviewResponse>;
+  previewConfigRead: (projectPath: string) => Promise<{
+    success: boolean;
+    content?: string;
+    revision?: string;
+    error?: string;
+  }>;
+  previewConfigSave: (
+    projectPath: string,
+    content: string,
+    revision: string
+  ) => Promise<{ success: boolean; content?: string; revision?: string; error?: string }>;
 
   // List all worktrees with details (for worktree selector)
   listAll: (

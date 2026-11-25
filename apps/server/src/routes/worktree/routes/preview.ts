@@ -25,3 +25,26 @@ export function createPreviewHandler(action: 'status' | 'start' | 'stop') {
     }
   };
 }
+
+export function createPreviewConfigHandler(action: 'read' | 'save') {
+  return async (req: Request, res: Response): Promise<void> => {
+    const { projectPath, content, revision } = req.body ?? {};
+    if (typeof projectPath !== 'string' || !projectPath) {
+      res.status(400).json({ success: false, error: 'projectPath is required' });
+      return;
+    }
+    try {
+      const config =
+        action === 'read'
+          ? await worktreePreviewService.readProjectConfig(projectPath)
+          : await worktreePreviewService.saveProjectConfig(projectPath, content, revision);
+      res.json({ success: true, ...config });
+    } catch (error) {
+      const message = (error as Error).message;
+      res.status(message.includes('changed since it was opened') ? 409 : 400).json({
+        success: false,
+        error: message,
+      });
+    }
+  };
+}

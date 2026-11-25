@@ -132,6 +132,10 @@ describe('worktree/progress feature selection', () => {
           status: 'in_progress',
           jiraKey: 'AIP-1',
           jiraUrl: 'https://jira/AIP-1',
+          jiraAssignee: 'alice',
+          jiraAssigneeDisplayName: 'Alice',
+          jiraReporter: 'bob',
+          jiraReporterDisplayName: 'Bob',
           updatedAt: '2026-09-10T00:00:00.000Z',
         })
       )
@@ -142,12 +146,168 @@ describe('worktree/progress feature selection', () => {
       category: 'general',
       jiraKey: 'AIP-1',
       jiraUrl: 'https://jira/AIP-1',
+      jiraAssignee: 'alice',
+      jiraAssigneeDisplayName: 'Alice',
+      jiraReporter: 'bob',
+      jiraReporterDisplayName: 'Bob',
       updatedAt: '2026-09-10T00:00:00.000Z',
     });
   });
 });
 
 describe('buildWorktreeProgress', () => {
+  it('archives a whole work after its latest completion is seven days old, retaining released history', () => {
+    const now = new Date('2026-09-21T00:00:00Z');
+    const cards = [
+      feature({
+        id: 'old',
+        branchName: 'task/a',
+        status: 'verified',
+        verifiedAt: '2026-09-01T00:00:00Z',
+      }),
+      feature({
+        id: 'latest',
+        branchName: 'task/a',
+        status: 'completed',
+        verifiedAt: '2026-09-10T00:00:00Z',
+        deliveryCompletion: { status: 'succeeded', updatedAt: '2026-09-14T00:00:00Z', steps: [] },
+        worktreeRelease: {
+          path: '/repo/.worktrees/original-path',
+          branch: 'task/a',
+          releasedAt: now.toISOString(),
+        },
+      }),
+    ];
+    const input = {
+      projectPath: '/repo',
+      now,
+      features: cards,
+      worktrees: [
+        { path: '/repo', branch: 'main', isMain: true },
+        { path: '/repo/.worktrees/original-path', branch: 'task/a', isMain: false },
+      ],
+      branchStats: new Map(),
+      changes: new Map(),
+      prs: new Map(),
+    };
+    const archived = buildWorktreeProgress(input)[1];
+    expect(archived).toMatchObject({
+      stage: 'complete',
+      doneAt: '2026-09-14T00:00:00.000Z',
+      archivedAt: now.toISOString(),
+      counts: { total: 2, completed: 2 },
+    });
+    expect(cards.map((card) => card.status)).toEqual(['verified', 'completed']);
+    expect(
+      buildWorktreeProgress({ ...input, now: new Date(now.getTime() - 1) })[1].archivedAt
+    ).toBeUndefined();
+    const released = buildWorktreeProgress({ ...input, worktrees: input.worktrees.slice(0, 1) })[1];
+    expect(released).toMatchObject({
+      path: '/repo/.worktrees/original-path',
+      branch: 'task/a',
+      checkoutMissing: true,
+      stage: 'complete',
+      archivedAt: now.toISOString(),
+    });
+    expect(released.tasks?.map((task) => task.id)).toEqual(['old', 'latest']);
+    expect(
+      buildWorktreeProgress({
+        ...input,
+        features: [...cards, feature({ id: 'new', branchName: 'task/a', status: 'backlog' })],
+      })[1].archivedAt
+    ).toBeUndefined();
+  });
+
+  it('keeps incomplete, conflicted, dirty and undated work out of automatic Done archives', () => {
+    const tree = { path: '/repo/task', branch: 'task/a', isMain: false };
+    const old = feature({
+      id: 'old',
+      branchName: 'task/a',
+      status: 'verified',
+      verifiedAt: '2026-09-01T00:00:00Z',
+    });
+    const input = {
+      projectPath: '/repo',
+      now: new Date('2026-09-21T00:00:00Z'),
+      worktrees: [tree],
+      features: [old],
+      branchStats: new Map(),
+      changes: new Map(),
+      prs: new Map(),
+    };
+    for (const status of ['backlog', 'in_progress', 'waiting_approval', 'failed']) {
+      expect(
+        buildWorktreeProgress({ ...input, features: [{ ...old, status }] })[0].archivedAt
+      ).toBeUndefined();
+    }
+    for (const overrides of [
+      { verifiedAt: undefined },
+      { verifiedAt: 'invalid' },
+      {
+        deliveryCompletion: {
+          status: 'failed' as const,
+          updatedAt: '2026-09-01T00:00:00Z',
+          steps: [],
+        },
+      },
+    ]) {
+      expect(
+        buildWorktreeProgress({ ...input, features: [{ ...old, ...overrides }] })[0].archivedAt
+      ).toBeUndefined();
+    }
+    for (const flag of ['hasChanges', 'hasConflicts']) {
+      const changes = new Map([
+        [tree.path, { hasChanges: false, hasConflicts: false, changedFilesCount: 1, [flag]: true }],
+      ]);
+      expect(buildWorktreeProgress({ ...input, changes })[0].archivedAt).toBeUndefined();
+    }
+    expect(
+      buildWorktreeProgress({ ...input, worktrees: [{ ...tree, isMain: true }] })[0].archivedAt
+    ).toBeUndefined();
+  });
+
+  it('shows explicitly archived work immediately without labelling it Done or deleting dirty work', () => {
+    const task = feature({
+      id: 'a',
+      branchName: 'task/a',
+      status: 'completed',
+      archive: {
+        reason: 'deferred',
+        description: 'Later',
+        previousStatus: 'backlog',
+        archivedAt: '2026-09-21T00:00:00Z',
+      },
+    });
+    const input = {
+      projectPath: '/repo',
+      worktrees: [{ path: '/repo/a', branch: 'task/a', isMain: false }],
+      features: [task],
+      branchStats: new Map(),
+      prs: new Map(),
+      changes: new Map([
+        ['/repo/a', { hasChanges: true, hasConflicts: false, changedFilesCount: 1 }],
+      ]),
+    };
+    expect(buildWorktreeProgress(input)[0]).toMatchObject({
+      archivedAt: task.archive!.archivedAt,
+      manuallyArchived: true,
+      hasChanges: true,
+    });
+    expect(
+      buildWorktreeProgress({
+        ...input,
+        features: [
+          task,
+          feature({
+            id: 'new',
+            branchName: 'task/a',
+            status: 'backlog',
+          }),
+        ],
+      })[0].archivedAt
+    ).toBeUndefined();
+  });
+
   const worktrees = [
     { path: '/repo', branch: 'dev', isMain: true },
     { path: '/repo/.worktrees/aip-1', branch: 'jira/aip-1', isMain: false },
@@ -261,6 +421,27 @@ describe('buildWorktreeProgress', () => {
     expect(items[0].featureCount).toBe(2);
     expect(items[0].feature?.id).toBe('f2');
     expect(items[0].stage).toBe('in_progress');
+  });
+
+  it('retains snoozed work in progress data even after its checkout disappears', () => {
+    const snooze = { snoozedAt: '2026-09-21T00:00:00Z', reason: 'Later' };
+    const items = buildWorktreeProgress({
+      projectPath: '/project',
+      worktrees: [],
+      features: [feature({ id: 'a', branchName: 'task/a', status: 'backlog' })],
+      branchStats: new Map(),
+      changes: new Map(),
+      prs: new Map(),
+      snoozes: { 'task/a': snooze },
+    });
+    expect(items).toHaveLength(1);
+    expect(items[0]).toMatchObject({
+      branch: 'task/a',
+      stage: 'backlog',
+      snoozedAt: snooze.snoozedAt,
+      snoozeReason: 'Later',
+      checkoutMissing: true,
+    });
   });
 });
 

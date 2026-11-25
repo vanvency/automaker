@@ -577,17 +577,22 @@ export function CommitWorktreeDialog({
   // Keep a stable ref to generateCommitMessage so the open-dialog effect
   // doesn't re-fire (and erase user edits) when the model override changes.
   const generateCommitMessageRef = useRef(generateCommitMessage);
+  const draftWorktreeRef = useRef(worktree?.path);
+  const messageRef = useRef(message);
   useEffect(() => {
     generateCommitMessageRef.current = generateCommitMessage;
+    messageRef.current = message;
   });
 
   // Generate AI commit message when dialog opens (if enabled)
   useEffect(() => {
     if (open && worktree) {
-      // Reset state
-      setMessage('');
+      const sameWorktree = draftWorktreeRef.current === worktree.path;
+      draftWorktreeRef.current = worktree.path;
+      if (!sameWorktree) setMessage('');
       setError(null);
 
+      if (sameWorktree && messageRef.current.trim()) return;
       if (!enableAiCommitMessages) {
         return;
       }

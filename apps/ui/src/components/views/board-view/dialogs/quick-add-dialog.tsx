@@ -26,6 +26,8 @@ export function QuickAddDialog({ open, onOpenChange, onAdd, onAddAndStart }: Qui
   const [description, setDescription] = useState('');
   const [descriptionError, setDescriptionError] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const draftProjectRef = useRef<string | undefined>(undefined);
+  const hasDraftRef = useRef(false);
 
   // Get default feature model from store
   const defaultFeatureModel = useAppStore((s) => s.defaultFeatureModel);
@@ -38,14 +40,16 @@ export function QuickAddDialog({ open, onOpenChange, onAdd, onAddAndStart }: Qui
     effectiveDefaultFeatureModel || { model: 'claude-opus' }
   );
 
-  // Reset form when dialog opens (in useEffect to avoid state mutation during render)
+  // Start a fresh form only after submission or when switching projects.
   useEffect(() => {
-    if (open) {
+    if (open && (!hasDraftRef.current || draftProjectRef.current !== currentProject?.path)) {
+      draftProjectRef.current = currentProject?.path;
+      hasDraftRef.current = true;
       setDescription('');
       setDescriptionError(false);
       setModelEntry(effectiveDefaultFeatureModel || { model: 'claude-opus' });
     }
-  }, [open, effectiveDefaultFeatureModel]);
+  }, [open, currentProject?.path, effectiveDefaultFeatureModel]);
 
   const handleSubmit = (actionFn: (description: string, modelEntry: PhaseModelEntry) => void) => {
     if (!description.trim()) {
@@ -55,6 +59,7 @@ export function QuickAddDialog({ open, onOpenChange, onAdd, onAddAndStart }: Qui
     }
 
     actionFn(description.trim(), modelEntry);
+    hasDraftRef.current = false;
     setDescription('');
     setDescriptionError(false);
     onOpenChange(false);

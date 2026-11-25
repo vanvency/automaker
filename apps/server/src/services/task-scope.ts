@@ -30,6 +30,7 @@ export const TASK_SCOPE_MARKERS = {
 export type TaskScope =
   /** Nothing to split: run the Jira sub-tasks as the work units, in order */
   | { kind: 'jira-subtasks'; subtasks: JiraSubtask[] }
+  | { kind: 'approved-story'; story: JiraSubtask }
   /** The sub-tasks have their own cards; this card must not implement them */
   | { kind: 'separate-cards'; pending: string[] }
   /** Unsplit and not allowed to split: a human has to split it in Jira first */
@@ -52,6 +53,18 @@ export class TaskScopeError extends Error {
 export function resolveTaskScope(feature: Feature): TaskScope {
   const subtasks = feature.jiraSubtasks ?? [];
   const description = feature.description ?? '';
+  if (
+    feature.issueType === 'Story' &&
+    feature.jiraDelivery?.storyExecutionApproved &&
+    !feature.jiraDelivery.requiresDecision &&
+    feature.jiraDelivery.issueKey === feature.jiraKey &&
+    subtasks.length === 0
+  ) {
+    return {
+      kind: 'approved-story',
+      story: { key: feature.jiraKey, summary: feature.jiraSummary ?? feature.title },
+    };
+  }
 
   if (subtasks.length > 0) {
     if (description.includes(TASK_SCOPE_MARKERS.separateCards)) {
@@ -109,8 +122,9 @@ export function buildJiraSubtaskPrompt(
     'Run the relevant tests, then reply with a one-paragraph summary of what changed.',
     index === total - 1
       ? 'This is the last sub-task: after verifying, also write the card acceptance evidence at ' +
-        `.automaker/acceptance/${featureId}/manifest.json (status, checks, and a prototype plus ` +
-        'a real screenshot of the running result) so the card can show what was verified.'
+        `.automaker/acceptance/${featureId}/manifest.json (status, summary, verifiedAt, checks, and a prototype plus ` +
+        'a real screenshot of the running result with kind/path/title/capturedAt) so the card can show what was verified. ' +
+        'Record verifiedAt and capturedAt at verification/capture time as ISO 8601 with timezone; omit unknown times rather than inventing them.'
       : '',
   ]
     .filter((line) => line !== '')

@@ -5,6 +5,25 @@
 import { describe, expect, it, vi } from 'vitest';
 import { renderHerdrWebView } from '../../../src/routes/herdr/view.js';
 
+it('restores mouse reporting after truncated replay, without changing live terminal output', () => {
+  const region = renderHerdrWebView()
+    .split('// #region mouse-reporting')[1]
+    ?.split('// #endregion mouse-reporting')[0];
+  const write = vi.fn();
+  const receive = new Function('terminal', `${region}\nreturn writeTerminalMessage;`)({ write });
+  const enableMouse = '\x1b[?1003h\x1b[?1006h';
+
+  receive({ type: 'connected' });
+  expect(write).toHaveBeenLastCalledWith(enableMouse);
+  // A long-running PTY has lost its startup modes from its bounded replay.
+  const replay = 'x'.repeat(50000);
+  receive({ type: 'scrollback', data: replay });
+  expect(write).toHaveBeenLastCalledWith(replay + enableMouse);
+  // Preserve deliberate mode changes in live output.
+  receive({ type: 'data', data: '\x1b[?1003l' });
+  expect(write).toHaveBeenLastCalledWith('\x1b[?1003l');
+});
+
 /** Pull the page's clipboard bridge out of the rendered HTML and run it. */
 function loadApplyOsc52(): (payload: string, write: (text: string) => void) => boolean {
   const html = renderHerdrWebView();

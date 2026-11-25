@@ -57,7 +57,7 @@ export function resolveDependencies(features: Feature[]): DependencyResolutionRe
         // Check if dependency is incomplete (blocking)
         const depFeature = featureMap.get(depId)!;
         if (
-          depFeature.archive ||
+          (depFeature.archive && depFeature.archive.reason !== 'completed') ||
           (depFeature.status !== 'completed' && depFeature.status !== 'verified')
         ) {
           if (!blockedFeatures.has(feature.id)) {
@@ -203,7 +203,7 @@ export function areDependenciesSatisfied(
 
   return feature.dependencies.every((depId: string) => {
     const dep = allFeatures.find((f) => f.id === depId);
-    if (!dep || dep.archive) return false;
+    if (!dep || (dep.archive && dep.archive.reason !== 'completed')) return false;
 
     if (skipVerification) {
       // When skipping verification, only block if dependency is currently running
@@ -228,7 +228,11 @@ export function getBlockingDependencies(feature: Feature, allFeatures: Feature[]
 
   return feature.dependencies.filter((depId: string) => {
     const dep = allFeatures.find((f) => f.id === depId);
-    return dep && (!!dep.archive || (dep.status !== 'completed' && dep.status !== 'verified'));
+    return (
+      dep &&
+      ((dep.archive && dep.archive.reason !== 'completed') ||
+        (dep.status !== 'completed' && dep.status !== 'verified'))
+    );
   });
 }
 
@@ -267,7 +271,11 @@ export function getBlockingDependenciesFromMap(
   const blockingDependencies: string[] = [];
   for (const depId of dependencies) {
     const dep = featureMap.get(depId);
-    if (dep && (dep.archive || (dep.status !== 'completed' && dep.status !== 'verified'))) {
+    if (
+      dep &&
+      ((dep.archive && dep.archive.reason !== 'completed') ||
+        (dep.status !== 'completed' && dep.status !== 'verified'))
+    ) {
       blockingDependencies.push(depId);
     }
   }

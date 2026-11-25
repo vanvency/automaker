@@ -21,6 +21,7 @@ import { getElectronAPI } from '@/lib/electron';
 import { cn } from '@/lib/utils';
 import { useFileBrowser } from '@/contexts/file-browser-context';
 import { getDefaultWorkspaceDirectory, saveLastProjectDirectory } from '@/lib/workspace-config';
+import { useAppStore } from '@/store/app-store';
 
 const logger = createLogger('NewProjectModal');
 
@@ -61,6 +62,7 @@ export function NewProjectModal({
   const [customUrl, setCustomUrl] = useState('');
   const [errors, setErrors] = useState<ValidationErrors>({});
   const { openFileBrowser } = useFileBrowser();
+  const currentProjectPath = useAppStore((state) => state.currentProject?.path);
 
   // Fetch workspace directory when modal opens
   useEffect(() => {
@@ -69,7 +71,7 @@ export function NewProjectModal({
       getDefaultWorkspaceDirectory()
         .then((defaultDir) => {
           if (defaultDir) {
-            setWorkspaceDir(defaultDir);
+            setWorkspaceDir((current) => current || defaultDir);
           }
         })
         .catch((error) => {
@@ -81,16 +83,17 @@ export function NewProjectModal({
     }
   }, [open]);
 
-  // Reset form when modal closes
+  // A changed project signals successful creation or a different editing context.
   useEffect(() => {
-    if (!open) {
-      setProjectName('');
-      setSelectedTemplate(null);
-      setUseCustomUrl(false);
-      setCustomUrl('');
-      setActiveTab('blank');
-      setErrors({});
-    }
+    setProjectName('');
+    setSelectedTemplate(null);
+    setUseCustomUrl(false);
+    setCustomUrl('');
+    setActiveTab('blank');
+  }, [currentProjectPath]);
+
+  useEffect(() => {
+    if (!open) setErrors({});
   }, [open]);
 
   // Clear specific errors when user fixes them

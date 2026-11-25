@@ -371,6 +371,56 @@ export class JiraSyncService {
       throw error;
     }
   }
+  async resetWork(
+    project: string,
+    featureId: string,
+    snapshot?: string
+  ): Promise<{ reset: Record<string, unknown>; message: string }> {
+    if (!/^[a-zA-Z0-9_-]{1,150}$/.test(featureId)) throw new Error('Invalid work ID');
+    if (snapshot !== undefined && !/^[a-f0-9]{64}$/.test(snapshot))
+      throw new Error('Invalid reset preview token');
+    if (this.stopping) throw new Error('Server is shutting down');
+    const id = this.id(project);
+    if (this.busy.has(id)) throw new Error('A Jira sync is already running');
+    this.busy.add(id);
+    try {
+      const runtime = await this.runtime(project);
+      const saved = (await this.settings.getProjectSettings(project)).jiraSync;
+      const config = validateJiraSyncConfig(saved);
+      if ((await this.legacy(project)) && !runtime.migrated)
+        throw new Error('Migrate legacy monitoring before resetting a work');
+      if (runtime.migrated) {
+        const timer = await exec(
+          'systemctl',
+          ['show', 'automaker-jira-monitor.timer', '-p', 'ActiveState', '--value'],
+          { timeout: 10000 }
+        );
+        if (timer.stdout.trim() === 'active')
+          throw new Error('Legacy Jira timer is active; pause it before resetting a work');
+      }
+      const result = await this.worker({
+        config: {
+          ...runtime.worker,
+          ...config,
+          jiraCommand:
+            runtime.worker?.jiraCommand || process.env.JIRA_CLI_PATH || '/usr/local/bin/jira',
+          projectPath: project,
+          jiraLabels: { autoStart: config.autoLabels, manualStart: config.manualLabels },
+          automakerUrl: `http://127.0.0.1:${process.env.PORT || 3008}`,
+          apiKeyFile: path.join(this.dataDir, '.api-key'),
+        },
+        mode: snapshot ? 'reset' : 'reset-preview',
+        featureId,
+        snapshot,
+        runId: randomUUID(),
+        statePath: path.join(this.dir(project), 'state.json'),
+        lockPath: path.join(runtime.legacyDir ?? this.dir(project), 'monitor.lock'),
+      });
+      return { reset: result.reset ?? {}, message: result.message };
+    } finally {
+      this.busy.delete(id);
+    }
+  }
   private async execute(project: string, c: JiraSyncConfig, runtime: Runtime, run: JiraSyncRun) {
     try {
       if (runtime.migrated) {
@@ -422,7 +472,11 @@ export class JiraSyncService {
       this.busy.delete(this.id(project));
     }
   }
-  private worker(input: object): Promise<{ changes: JiraSyncRun['changes']; message: string }> {
+  private worker(input: object): Promise<{
+    changes: JiraSyncRun['changes'];
+    message: string;
+    reset?: Record<string, unknown>;
+  }> {
     return new Promise((resolve, reject) => {
       const child = spawn('python3', [path.join(repoRoot, 'scripts/jira-sync-worker.py')], {
         cwd: repoRoot,

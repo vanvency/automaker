@@ -156,9 +156,21 @@ def issue_assignee(fields):
     assignee = fields.get('assignee') or {}
     if not isinstance(assignee, dict):
         return None, ''
-    login = str(assignee.get('name') or assignee.get('key') or '').strip()
+    login = str(assignee.get('name') or assignee.get('key') or assignee.get('accountId') or '').strip()
     display = str(assignee.get('displayName') or login or '').strip()
     return (login or None), display
+
+
+def issue_people(fields):
+    """Keep stable account IDs for filtering and display names for cards."""
+    assignee, assignee_display = issue_assignee(fields)
+    reporter, reporter_display = issue_assignee({'assignee': fields.get('reporter')})
+    return {
+        'jiraAssignee': assignee,
+        'jiraAssigneeDisplayName': assignee_display or None,
+        'jiraReporter': reporter,
+        'jiraReporterDisplayName': reporter_display or None,
+    }
 
 
 # Branch prefixes follow the Jira issue type so a branch says what kind of work it
@@ -522,33 +534,49 @@ D1. Implement every acceptance criterion and run meaningful relevant tests/build
     regression coverage for bugs where appropriate. Record exact commands and actual
     results in .automaker/jira-tests.log in the root worktree; never claim unrun tests
     passed and never deploy to shared/production infrastructure without approval.
-D2. Commit and push each affected subproject branch. Development completion does not
-    require an MR. Do not create/update MRs, assign reviewers, resolve MR conflicts,
-    or merge branches as part of this task; review and merge are handled separately.
+D2. Commit and push each affected subproject branch. Create or reuse one open Draft MR
+    per changed repository targeting the project's configured target branch.
+    Include {key}, the Jira URL, concrete changes and actual checks in the MR.
+    GitLab 15 requires the title prefix 'Draft: '; do not rely on merge_request.draft
+    push options or draft=true. Read each MR back and confirm draft == true, the
+    task's source branch, target branch and current pushed revision before reporting it.
+    Never mark ready, enable auto-merge, merge branches or transition Jira;
+    review and merge are handled separately by the human-confirmed delivery flow.
 D3. This worktree and branch may be shared by several issues of the same hierarchy, so
     EVERY commit MUST start with this issue's key, e.g. "[{key}] feat: ..."; never
-    commit without that prefix. Update root gitlinks for changed submodules and commit
-    them on {branch}.
+    commit without that prefix. Respect the project's submodule delivery policy.
+    For vibe-llmops, deliver submodule code in each submodule's own MR and commit only
+    root-owned files on {branch} in a root MR. Do not stage or commit submodule gitlink
+    changes in routine tasks, and do not create a root MR solely because submodule
+    checkouts changed. Update gitlinks only when the user explicitly requests an
+    integration/release version-lock update. This overrides historical instructions
+    requiring root gitlink commits after submodule changes. Other projects follow
+    their explicit repository policy. Cross-link dependent MRs and reuse existing
+    MRs instead of creating duplicates.
 D4. If a human product decision is required, do not guess and do not stop as a generic
     failure: write outcome "needs_input" with a "questions" array (question, context,
     options) to the receipt, then stop. The monitor notifies the Jira reporter and
     resumes you with the answer.
 D5. Write {worktree}/.automaker/jira/{feature_id}/jira-result.json (keep automation
     artifacts out of commits) containing JSON with issueKey, outcome
-    ('development_complete', 'needs_input' or 'blocked'), summary, tests (array of
+    ('mr_created', 'needs_input' or 'blocked'), summary, tests (array of
     command/exitCode objects), testLog (absolute log path), blockers (array of strings),
     and for needs_input a questions array (question, context, options). Include
-    changedProjects with exactly one entry per changed repository or root project
-    (name, optional mrUrl). Existing task-owned MR URLs may be recorded in
-    mergeRequests; an empty array is valid. Never invent URLs or claim another task's
+    changedProjects with exactly one entry per changed repository with task-owned commits
+    (include the root project only when it has its own committed changes)
+    (name, required mrUrl). Record the same task-owned MR URLs in
+    mergeRequests; an empty array is not a completed delivery. Never invent URLs or claim another task's
     MRs as your delivery. Use relatedMergeRequests for references to other tasks.
-    Report development_complete once implementation and relevant checks are complete;
-    pending MR creation/review/merge is not a blocker. For unfinished development or
-    failed checks, preserve work and report blocked instead of claiming done.
+    Report mr_created only once implementation, checks and Draft MR preparation are
+    complete. Missing or non-draft MRs block entry to Waiting Review. For unfinished
+    development, failed checks or unavailable MR credentials, preserve work and report blocked.
 D6. Write the acceptance evidence next to the receipt: {worktree}/.automaker/acceptance/{feature_id}/manifest.json
-    with status ('passed', 'failed' or 'blocked'), summary, checks (name/status/details)
+    with status ('passed', 'failed' or 'blocked'), summary, verifiedAt (actual verification
+    time in ISO 8601 with timezone), checks (name/status/details)
     and screenshots (kind 'prototype' or 'actual', path relative to that directory,
-    title). 'passed' needs at least one passing check, no failed check, and BOTH a
+    title, capturedAt as the actual capture time in ISO 8601 with timezone). Record these
+    times when verifying/capturing; if genuinely unknown, omit them rather than inventing
+    a time or substituting file-copy/import time. 'passed' needs at least one passing check, no failed check, and BOTH a
     prototype image and a real screenshot of this task's result in a running
     environment; never pass off a prototype as an actual screenshot. Copy the PNG/JPEG/
     WebP files there (max 20, 10 MiB each), keep secrets out of images, URLs and text,
@@ -556,9 +584,8 @@ D6. Write the acceptance evidence next to the receipt: {worktree}/.automaker/acc
     your run, so the card shows what was actually verified; without it the card is
     flagged as missing acceptance evidence.
 D7. Keep the card's `goals` list to DEVELOPMENT goals only (what has to be built and
-    verified). MR review and the merge into dev happen in the Verified lane after a
-    human presses Complete, so never add an MR/merge/merge-request goal to `goals`; the
-    monitor tracks the MR state itself.'''
+    verified). Draft MRs must exist before Waiting Review; only the human-confirmed
+    Complete flow may merge them after verification.'''
 
 
 def subtask_scope_directive(key, subtasks, branch, subtask_cards=False):
@@ -1062,7 +1089,7 @@ def import_tree_plan(config, root_key, existing_features=None, label=None):
             'jiraType': jira_work_type(issue_type(fields), config),
             'jiraLabels': issue_labels(fields),
             # Assignee drives the MR reviewer and is diffed on re-import.
-            'jiraAssignee': issue_assignee(fields)[0] or None,
+            **issue_people(fields),
             # Story units carry their Jira subtask checklist on the card so the
             # board shows the scope without task-level cards.
             'jiraSubtasks': (issue_subtasks(fields) if task is None else []),
@@ -1217,7 +1244,7 @@ def apply_import_tree(config, plan, api):
             updates = {key: feature[key] for key in
                        ('description', 'dependencies', 'jiraContext', 'issueType',
                         'parentJiraKey', 'epicJiraKey', 'jiraImported', 'jiraSubtasks',
-                        'jiraAssignee')
+                        'jiraAssignee', 'jiraAssigneeDisplayName', 'jiraReporter', 'jiraReporterDisplayName')
                        if key in feature}
             if merged:
                 # Unresolved changes stay on the card until a human acknowledges
@@ -1275,7 +1302,7 @@ def validate_receipt(receipt, key, worktree, host):
     if not log.is_relative_to(Path(worktree).resolve()) or not log.is_file() or not log.stat().st_size:
         return False
     urls = receipt.get('mergeRequests', [])
-    return (receipt.get('outcome') == 'development_complete' or bool(urls)) and all(
+    return bool(urls) and all(
         urllib.parse.urlsplit(u).scheme in ('http', 'https')
         and urllib.parse.urlsplit(u).hostname == host
         and re.search(r'/merge_requests/\d+$', urllib.parse.urlsplit(u).path)
@@ -1493,6 +1520,7 @@ def dispatch(issue, config, state, state_path, api, auto_start=True, label='kaka
             issue_type(detail_fields) or issue_type(issue.get('fields', {})), config)
         feature['jiraType'] = work_type
         feature['jiraLabels'] = issue_labels(detail_fields) or issue_labels(issue.get('fields', {}))
+        feature.update(issue_people(detail_fields))
         api.call('features/create', {'projectPath': config['projectPath'], 'feature': feature})
         if auto_start:
             job['status'] = 'dispatching'

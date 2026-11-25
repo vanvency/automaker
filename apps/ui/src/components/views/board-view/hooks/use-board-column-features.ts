@@ -320,9 +320,10 @@ export function useBoardColumnFeatures({
 
       // Use the feature's status (fallback to backlog for unknown statuses)
       const status = f.status || 'backlog';
-      // Keep the three-stage completion receipt on Done until explicitly archived.
-      if (status === 'completed' && f.deliveryCompletion && !f.archive && matchesWorktree) {
-        pushDone(f);
+      // Completed includes legacy archives without an explicit archive record.
+      // Scope them before runtime flags so stale running state cannot resurrect them.
+      if (status === 'completed' || f.archive) {
+        if (matchesWorktree) map.completed.push(f);
         return;
       }
 
@@ -521,10 +522,8 @@ export function useBoardColumnFeatures({
     [columnFeaturesMap]
   );
 
-  // Memoize completed features for the archive modal
-  const completedFeatures = useMemo(() => {
-    return features.filter((f) => f.status === 'completed');
-  }, [features]);
+  // Reuse the worktree-filtered archive lane; delivered cards already belong in Done.
+  const completedFeatures = columnFeaturesMap.completed;
 
   return {
     columnFeaturesMap,
